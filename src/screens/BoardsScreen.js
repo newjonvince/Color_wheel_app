@@ -1,0 +1,793 @@
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, FlatList, Dimensions, Alert, Modal, TextInput, RefreshControl } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
+import ApiService from '../services/api';
+
+const { width: screenWidth } = Dimensions.get('window');
+const boardWidth = (screenWidth - 45) / 2; // 2 columns with margins
+
+const MAIN_FOLDERS = [
+  { id: 'private', name: 'Private', icon: '🔒', description: 'Only visible to you' },
+  { id: 'public', name: 'Public', icon: '🌍', description: 'Visible to everyone' },
+];
+
+const SCHEME_FOLDERS = [
+  { id: 'complementary', name: 'Complementary', icon: '🎨', description: 'Opposite colors on the wheel' },
+  { id: 'analogous', name: 'Analogous', icon: '🌈', description: 'Adjacent colors that blend well' },
+  { id: 'triadic', name: 'Triadic', icon: '🔺', description: 'Three evenly spaced colors' },
+  { id: 'tetradic', name: 'Tetradic', icon: '⬜', description: 'Four colors in rectangle' },
+  { id: 'monochromatic', name: 'Monochromatic', icon: '🎯', description: 'Same hue, different shades' },
+];
+
+export default function BoardsScreen({ savedColorMatches, onSaveColorMatch, currentUser }) {
+  const [selectedMainFolder, setSelectedMainFolder] = useState(null);
+  const [selectedSchemeFolder, setSelectedSchemeFolder] = useState(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadTitle, setUploadTitle] = useState('');
+  const [uploadScheme, setUploadScheme] = useState('complementary');
+  const [uploadPrivacy, setUploadPrivacy] = useState('private');
+  const [boards, setBoards] = useState([]);
+  const [colorMatches, setColorMatches] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Load boards and color matches from database
+  useEffect(() => {
+    loadBoardsAndMatches();
+  }, []);
+
+  const loadBoardsAndMatches = async () => {
+    if (!currentUser) return;
+    
+    setLoading(true);
+    try {
+      // Load user's boards
+      const boardsResponse = await ApiService.getBoards();
+      if (boardsResponse.success) {
+        setBoards(boardsResponse.boards);
+      }
+      
+      // Load user's color matches
+      const matchesResponse = await ApiService.getColorMatches();
+      if (matchesResponse.success) {
+        setColorMatches(matchesResponse.colorMatches);
+      }
+    } catch (error) {
+      console.error('Error loading boards and matches:', error);
+      // Fallback to local data
+      setColorMatches(savedColorMatches || []);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadBoardsAndMatches();
+    setRefreshing(false);
+  };
+
+  const getBoardColorMatches = (schemeId, privacy = null) => {
+    return colorMatches.filter(match => {
+      const schemeMatch = match.scheme === schemeId;
+      if (privacy === null) return schemeMatch;
+      return schemeMatch && (match.isPublic ? 'public' : 'private') === privacy;
+    });
+  };
+
+  const getMainFolderColorMatches = (privacy) => {
+    return colorMatches.filter(match => {
+      const matchPrivacy = match.isPublic ? 'public' : 'private';
+      return matchPrivacy === privacy;
+    });
+  };
+
+  const handleUploadImage = async () => {
+    if (!currentUser) {
+      Alert.alert('Login Required', 'Please log in to upload color matches');
+      return;
+    }
+
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    
+    if (permissionResult.granted === false) {
+      Alert.alert('Permission Required', 'Permission to access camera roll is required!');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 1,
+    });
+
+    if (!result.canceled) {
+      try {
+        // Simulate color extraction from uploaded image
+        const fashionColors = [
+          '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+          '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
+        ];
+        
+        const randomColor = fashionColors[Math.floor(Math.random() * fashionColors.length)];
+        const colorMatch = {
+          baseColor: randomColor,
+          scheme: uploadScheme,
+          isPublic: uploadPrivacy === 'public',
+          colors: getColorScheme(randomColor, uploadScheme),
+          title: uploadTitle || 'Uploaded Color Match',
+          metadata: {
+            extractionMethod: 'upload',
+            originalImage: result.assets[0].uri,
+            uploadTitle: uploadTitle
+          }
+        };
+        
+        // Save to database
+        const response = await ApiService.createColorMatch(colorMatch);
+        
+        if (response.success) {
+          // Update local state
+          setColorMatches(prev => [response.colorMatch, ...prev]);
+          
+          // Also call parent callback for compatibility
+          if (onSaveColorMatch) {
+            onSaveColorMatch({
+              ...colorMatch,
+              id: response.colorMatch.id,
+              timestamp: response.colorMatch.created_at,
+              privacy: uploadPrivacy,
+              image: result.assets[0].uri
+            }, uploadScheme);
+          }
+          
+          setShowUploadModal(false);
+          setUploadTitle('');
+          Alert.alert('Success!', `Color match saved to your ${uploadScheme} board!`);
+        } else {
+          throw new Error(response.message || 'Failed to save color match');
+        }
+      } catch (error) {
+        console.error('Error uploading color match:', error);
+        Alert.alert('Upload Failed', error.message || 'Failed to save color match. Please try again.');
+      }
+    }
+  };
+
+  const getColorScheme = (baseColor, scheme) => {
+    // Simple color scheme generation (same logic as ColorWheelScreen)
+    const fashionColors = [
+      '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+      '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
+    ];
+    
+    let colors = [baseColor];
+    
+    switch (scheme) {
+      case 'complementary':
+        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
+        break;
+      case 'analogous':
+        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
+        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
+        break;
+      case 'triadic':
+        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
+        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
+        break;
+      case 'tetradic':
+        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
+        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
+        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
+        break;
+      case 'monochromatic':
+        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
+        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
+        break;
+    }
+    
+    return colors;
+  };
+
+  const renderBoardGrid = () => {
+    // Show specific scheme folder content
+    if (selectedSchemeFolder && selectedMainFolder) {
+      const boardMatches = getBoardColorMatches(selectedSchemeFolder.id, selectedMainFolder.id);
+      
+      return (
+        <View style={styles.container}>
+          <View style={styles.boardHeader}>
+            <TouchableOpacity 
+              style={styles.backButton}
+              onPress={() => setSelectedSchemeFolder(null)}
+            >
+              <Text style={styles.backButtonText}>← Back</Text>
+            </TouchableOpacity>
+            <Text style={styles.boardTitle}>
+              {selectedMainFolder.icon} {selectedSchemeFolder.icon} {selectedSchemeFolder.name}
+            </Text>
+            <TouchableOpacity 
+              style={styles.addButton}
+              onPress={() => {
+                setUploadScheme(selectedSchemeFolder.id);
+                setUploadPrivacy(selectedMainFolder.id);
+                setShowUploadModal(true);
+              }}
+            >
+              <Text style={styles.addButtonText}>+</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <Text style={styles.boardDescription}>
+            {selectedMainFolder.name} • {selectedSchemeFolder.description}
+          </Text>
+          
+          <FlatList
+            data={boardMatches}
+            numColumns={2}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.colorMatchGrid}
+            renderItem={({ item }) => (
+              <View style={styles.colorMatchCard}>
+                <View style={styles.colorMatchHeader}>
+                  <Text style={styles.colorMatchTitle}>{item.title || 'Color Match'}</Text>
+                  <Text style={styles.colorMatchDate}>
+                    {new Date(item.timestamp).toLocaleDateString()}
+                  </Text>
+                </View>
+                <View style={styles.colorMatchColors}>
+                  {item.colors.map((color, index) => (
+                    <View 
+                      key={index} 
+                      style={[styles.colorMatchSwatch, { backgroundColor: color }]} 
+                    />
+                  ))}
+                </View>
+                <Text style={styles.colorMatchBaseColor}>Base: {item.baseColor}</Text>
+                <View style={styles.privacyIndicator}>
+                  <Text style={styles.privacyText}>
+                    {item.privacy === 'private' ? '🔒 Private' : '🌍 Public'}
+                  </Text>
+                </View>
+              </View>
+            )}
+            ListEmptyComponent={() => (
+              <View style={styles.emptyBoard}>
+                <Text style={styles.emptyBoardIcon}>🎨</Text>
+                <Text style={styles.emptyBoardText}>No color matches yet</Text>
+                <Text style={styles.emptyBoardSubtext}>
+                  Save color combinations from the Color Wheel or upload images
+                </Text>
+              </View>
+            )}
+          />
+        </View>
+      );
+    }
+
+    // Show scheme folders within a main folder
+    if (selectedMainFolder) {
+      return (
+        <View style={styles.container}>
+          <View style={styles.boardHeader}>
+            <TouchableOpacity 
+              style={styles.backButton}
+              onPress={() => setSelectedMainFolder(null)}
+            >
+              <Text style={styles.backButtonText}>← Back</Text>
+            </TouchableOpacity>
+            <Text style={styles.boardTitle}>{selectedMainFolder.icon} {selectedMainFolder.name}</Text>
+            <TouchableOpacity 
+              style={styles.addButton}
+              onPress={() => {
+                setUploadPrivacy(selectedMainFolder.id);
+                setShowUploadModal(true);
+              }}
+            >
+              <Text style={styles.addButtonText}>+</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <Text style={styles.boardDescription}>{selectedMainFolder.description}</Text>
+          
+          <FlatList
+            data={SCHEME_FOLDERS}
+            numColumns={2}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.boardGrid}
+            renderItem={({ item }) => {
+              const matchCount = getBoardColorMatches(item.id, selectedMainFolder.id).length;
+              return (
+                <TouchableOpacity 
+                  style={styles.boardCard}
+                  onPress={() => setSelectedSchemeFolder(item)}
+                >
+                  <View style={styles.boardIcon}>
+                    <Text style={styles.boardIconText}>{item.icon}</Text>
+                  </View>
+                  <Text style={styles.boardName}>{item.name}</Text>
+                  <Text style={styles.boardCount}>
+                    {matchCount} {matchCount === 1 ? 'match' : 'matches'}
+                  </Text>
+                  
+                  {/* Preview colors if available */}
+                  {matchCount > 0 && (
+                    <View style={styles.boardPreview}>
+                      {getBoardColorMatches(item.id, selectedMainFolder.id).slice(0, 3).map((match, index) => (
+                        <View 
+                          key={index}
+                          style={[
+                            styles.previewSwatch, 
+                            { backgroundColor: match.baseColor, marginLeft: index * -5 }
+                          ]} 
+                        />
+                      ))}
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            }}
+          />
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>My Boards</Text>
+          <Text style={styles.subtitle}>Organize your color combinations</Text>
+        </View>
+
+        <FlatList
+          data={MAIN_FOLDERS}
+          numColumns={2}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.boardGrid}
+          renderItem={({ item }) => {
+            const matchCount = getMainFolderColorMatches(item.id).length;
+            return (
+              <TouchableOpacity 
+                style={styles.boardCard}
+                onPress={() => setSelectedMainFolder(item)}
+              >
+                <View style={styles.boardIcon}>
+                  <Text style={styles.boardIconText}>{item.icon}</Text>
+                </View>
+                <Text style={styles.boardName}>{item.name}</Text>
+                <Text style={styles.boardCount}>
+                  {matchCount} {matchCount === 1 ? 'match' : 'matches'}
+                </Text>
+                
+                {/* Preview colors if available */}
+                {matchCount > 0 && (
+                  <View style={styles.boardPreview}>
+                    {getMainFolderColorMatches(item.id).slice(0, 3).map((match, index) => (
+                      <View 
+                        key={index}
+                        style={[
+                          styles.previewSwatch, 
+                          { backgroundColor: match.baseColor, marginLeft: index * -5 }
+                        ]} 
+                      />
+                    ))}
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          }}
+        />
+
+        <TouchableOpacity 
+          style={styles.uploadFab}
+          onPress={() => setShowUploadModal(true)}
+        >
+          <Text style={styles.uploadFabText}>+</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  return (
+    <>
+      {renderBoardGrid()}
+      
+      {/* Upload Modal */}
+      <Modal visible={showUploadModal} transparent={true} animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Upload Color Match</Text>
+            
+            <TextInput
+              style={styles.titleInput}
+              value={uploadTitle}
+              onChangeText={setUploadTitle}
+              placeholder="Enter title (optional)"
+              placeholderTextColor="#999"
+            />
+            
+            <Text style={styles.schemeLabel}>Privacy:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.schemeSelector}>
+              {MAIN_FOLDERS.map((folder) => (
+                <TouchableOpacity
+                  key={folder.id}
+                  style={[
+                    styles.schemeSelectorButton,
+                    uploadPrivacy === folder.id && styles.selectedSchemeSelector
+                  ]}
+                  onPress={() => setUploadPrivacy(folder.id)}
+                >
+                  <Text style={styles.schemeSelectorIcon}>{folder.icon}</Text>
+                  <Text style={[
+                    styles.schemeSelectorText,
+                    uploadPrivacy === folder.id && styles.selectedSchemeSelectorText
+                  ]}>
+                    {folder.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            
+            <Text style={styles.schemeLabel}>Color Scheme:</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.schemeSelector}>
+              {SCHEME_FOLDERS.map((scheme) => (
+                <TouchableOpacity
+                  key={scheme.id}
+                  style={[
+                    styles.schemeSelectorButton,
+                    uploadScheme === scheme.id && styles.selectedSchemeSelector
+                  ]}
+                  onPress={() => setUploadScheme(scheme.id)}
+                >
+                  <Text style={styles.schemeSelectorIcon}>{scheme.icon}</Text>
+                  <Text style={[
+                    styles.schemeSelectorText,
+                    uploadScheme === scheme.id && styles.selectedSchemeSelectorText
+                  ]}>
+                    {scheme.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            
+            <View style={styles.modalButtons}>
+              <TouchableOpacity 
+                style={styles.cancelButton}
+                onPress={() => {
+                  setShowUploadModal(false);
+                  setUploadTitle('');
+                  setUploadPrivacy('private');
+                  setUploadScheme('complementary');
+                }}
+              >
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.uploadButton}
+                onPress={handleUploadImage}
+              >
+                <Text style={styles.uploadButtonText}>📷 Upload Image</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+  },
+  header: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    paddingTop: 60,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 5,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: '#7f8c8d',
+  },
+  boardGrid: {
+    padding: 15,
+  },
+  boardCard: {
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 20,
+    margin: 7.5,
+    width: boardWidth,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  boardIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#f8f9fa',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  boardIconText: {
+    fontSize: 30,
+  },
+  boardName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 5,
+    textAlign: 'center',
+  },
+  boardCount: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginBottom: 10,
+  },
+  boardPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 5,
+  },
+  previewSwatch: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: 'white',
+  },
+  uploadFab: {
+    position: 'absolute',
+    bottom: 30,
+    right: 30,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#e74c3c',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 8,
+  },
+  uploadFabText: {
+    fontSize: 30,
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  // Board detail view
+  boardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    paddingTop: 60,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  backButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#3498db',
+    fontWeight: '600',
+  },
+  boardTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+  },
+  addButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#3498db',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  addButtonText: {
+    fontSize: 20,
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  boardDescription: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    textAlign: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    backgroundColor: 'white',
+  },
+  colorMatchGrid: {
+    padding: 15,
+  },
+  colorMatchCard: {
+    backgroundColor: 'white',
+    borderRadius: 15,
+    padding: 15,
+    margin: 7.5,
+    width: boardWidth,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  colorMatchHeader: {
+    marginBottom: 10,
+  },
+  colorMatchTitle: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 2,
+  },
+  colorMatchDate: {
+    fontSize: 12,
+    color: '#7f8c8d',
+  },
+  colorMatchColors: {
+    flexDirection: 'row',
+    marginBottom: 10,
+  },
+  colorMatchSwatch: {
+    width: 25,
+    height: 25,
+    borderRadius: 12.5,
+    marginRight: 5,
+    borderWidth: 2,
+    borderColor: 'white',
+  },
+  colorMatchBaseColor: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    fontFamily: 'monospace',
+  },
+  emptyBoard: {
+    alignItems: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 40,
+  },
+  emptyBoardIcon: {
+    fontSize: 60,
+    marginBottom: 20,
+  },
+  emptyBoardText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  emptyBoardSubtext: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    padding: 25,
+    borderRadius: 20,
+    width: '85%',
+    maxHeight: '70%',
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    color: '#2c3e50',
+    textAlign: 'center',
+  },
+  titleInput: {
+    borderWidth: 1,
+    borderColor: '#bdc3c7',
+    borderRadius: 10,
+    padding: 15,
+    fontSize: 16,
+    marginBottom: 20,
+  },
+  schemeLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 10,
+  },
+  schemeSelector: {
+    marginBottom: 25,
+  },
+  schemeSelectorButton: {
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    marginRight: 10,
+    borderRadius: 15,
+    backgroundColor: '#f8f9fa',
+    borderWidth: 2,
+    borderColor: 'transparent',
+    minWidth: 80,
+  },
+  selectedSchemeSelector: {
+    backgroundColor: '#3498db',
+    borderColor: '#3498db',
+  },
+  schemeSelectorIcon: {
+    fontSize: 20,
+    marginBottom: 5,
+  },
+  schemeSelectorText: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  selectedSchemeSelectorText: {
+    color: 'white',
+  },
+  // Privacy indicator styles
+  privacyIndicator: {
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  privacyText: {
+    fontSize: 10,
+    color: '#7f8c8d',
+    fontWeight: '600',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  cancelButton: {
+    backgroundColor: '#95a5a6',
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    borderRadius: 10,
+  },
+  cancelText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  uploadButton: {
+    backgroundColor: '#27ae60',
+    paddingVertical: 12,
+    paddingHorizontal: 25,
+    borderRadius: 10,
+  },
+  uploadButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
