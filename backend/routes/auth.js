@@ -163,7 +163,7 @@ router.post('/login', authLimiter, loginValidation, async (req, res) => {
 });
 
 // Demo login endpoint
-router.post('/demo-login', authLimiter, async (req, res) => {
+router.post('/demo-login', demoLoginLimiter, async (req, res) => {
   try {
     let demoUser = await query(
       'SELECT * FROM users WHERE email = ?',
@@ -212,6 +212,57 @@ router.post('/demo-login', authLimiter, async (req, res) => {
       success: false,
       error: 'Demo login failed',
       message: 'Unable to create demo session. Please try again.'
+    });
+  }
+});
+
+// Demo login route (GET for easy browser testing)
+router.get('/demo-login', demoLoginLimiter, async (req, res) => {
+  try {
+    let demoUser = await query(
+      'SELECT * FROM users WHERE email = ?',
+      ['demo@fashioncolorwheel.com']
+    );
+
+    if (demoUser.rows.length === 0) {
+      // Create demo user if it doesn't exist
+      const hashedPassword = await bcrypt.hash('demo123', 10);
+      const userId = uuidv4();
+      
+      await query(
+        'INSERT INTO users (id, username, email, password_hash, email_verified, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
+        [userId, 'demo_user', 'demo@fashioncolorwheel.com', hashedPassword, true]
+      );
+
+      demoUser = await query(
+        'SELECT * FROM users WHERE id = ?',
+        [userId]
+      );
+    }
+
+    const user = demoUser.rows[0];
+    const token = jwt.sign(
+      { userId: user.id, email: user.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      success: true,
+      message: 'Demo login successful',
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        emailVerified: user.email_verified
+      }
+    });
+  } catch (error) {
+    console.error('Demo login error:', error);
+    res.status(500).json({
+      error: 'Demo login failed',
+      message: 'Internal server error'
     });
   }
 });
