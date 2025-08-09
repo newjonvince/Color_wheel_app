@@ -20,8 +20,8 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
   try {
     const { email, username, password, location, birthday, gender } = req.body;
     const birthday_month = birthday?.month || null;
-    const birthday_day = birthday?.day || null;
-    const birthday_year = birthday?.year || null;
+    const birthday_day = parseInt(birthday?.day) || null;
+    const birthday_year = parseInt(birthday?.year) || null;
 
     const existingUser = await query(
       'SELECT id FROM users WHERE email = ? OR username = ?',

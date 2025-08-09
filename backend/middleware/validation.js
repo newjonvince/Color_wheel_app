@@ -30,9 +30,9 @@ const registerValidation = [
     .matches(/^[a-zA-Z0-9_]+$/).withMessage('Letters, numbers, underscores only')
     .customSanitizer(v => v?.toLowerCase()),
   body('location').optional().isLength({ min: 1, max: 100 }).trim(),
-  body('birthday_month').isString().isLength({ min: 3, max: 9 }).withMessage('Month required'),
-  body('birthday_day').isInt({ min: 1, max: 31 }).withMessage('Day 1-31'),
-  body('birthday_year').isInt({ min: 1900, max: 2100 }).withMessage('Year invalid'),
+  body('birthday.month').isString().isLength({ min: 3, max: 9 }).withMessage('Month required'),
+  body('birthday.day').isString().isLength({ min: 1, max: 2 }).withMessage('Day required'),
+  body('birthday.year').isString().isLength({ min: 4, max: 4 }).withMessage('Year required'),
   body('gender')
     .optional()
     .isString()
