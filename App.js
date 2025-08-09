@@ -1,31 +1,62 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, View, Text, Alert } from 'react-native';
+import { StyleSheet, View, Text, Alert, AppState, Platform } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import * as SecureStore from 'expo-secure-store';
 import ApiService from './src/services/api';
 
-// Global error handler for unhandled promise rejections
-const originalHandler = ErrorUtils.getGlobalHandler();
-ErrorUtils.setGlobalHandler((error, isFatal) => {
-  console.error('🚨 Global error handler:', error, 'isFatal:', isFatal);
-  if (isFatal) {
-    console.error('🚨 Fatal error detected, attempting graceful handling');
-    // Log the error but don't crash the app
-    Alert.alert(
-      'Unexpected Error',
-      'The app encountered an error but will continue running. Please restart if issues persist.',
-      [{ text: 'OK' }]
-    );
+// Global error handler for unhandled promise rejections and crashes
+let isErrorHandlerActive = false;
+const originalHandler = ErrorUtils?.getGlobalHandler?.();
+
+const safeErrorHandler = (error, isFatal) => {
+  if (isErrorHandlerActive) return; // Prevent recursive errors
+  isErrorHandlerActive = true;
+  
+  try {
+    console.error('🚨 Global error handler:', error?.message || error, 'isFatal:', isFatal);
+    
+    // For fatal errors, prevent app termination
+    if (isFatal) {
+      console.error('🚨 Fatal error prevented:', error?.stack || error);
+      // Don't show alert during initialization to prevent crashes
+      setTimeout(() => {
+        Alert.alert(
+          'App Error',
+          'An error occurred. Please restart the app if issues persist.',
+          [{ text: 'OK' }]
+        );
+      }, 1000);
+      return; // Prevent calling original handler for fatal errors
+    }
+    
+    // Call original handler for non-fatal errors only
+    if (originalHandler && typeof originalHandler === 'function') {
+      originalHandler(error, false); // Force non-fatal
+    }
+  } catch (handlerError) {
+    console.error('Error in error handler:', handlerError);
+  } finally {
+    isErrorHandlerActive = false;
   }
-  // Call original handler for logging
-  if (originalHandler) {
-    originalHandler(error, isFatal);
-  }
-});
+};
+
+// Set global error handler with safety checks
+if (ErrorUtils && typeof ErrorUtils.setGlobalHandler === 'function') {
+  ErrorUtils.setGlobalHandler(safeErrorHandler);
+}
+
+// Handle unhandled promise rejections
+if (typeof global !== 'undefined') {
+  global.addEventListener?.('unhandledRejection', (event) => {
+    console.error('🚨 Unhandled promise rejection:', event.reason);
+    event.preventDefault(); // Prevent crash
+  });
+}
 
 // Screens
 import ColorWheelScreen from './src/screens/ColorWheelScreen';
@@ -55,19 +86,119 @@ const EmojiTabIcon = React.memo(({ name, focused }) => {
   return <Text style={styles.tabIcon}>{icons[name] || '📱'}</Text>;
 });
 
-// Per-user key for saved color matches
+// Helper: get storage key for color matches based on user ID
 const getMatchesKey = (userId) => `savedColorMatches:${userId || 'anon'}`;
 
 export default function App() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [isInitialized, setIsInitialized] = useState(false);
   const [savedColorMatches, setSavedColorMatches] = useState([]);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentUser, setCurrentUser] = useState(null);
-  const [showSignUp, setShowSignUp] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+
+  // Safe initialization with multiple fallbacks
+  const initializeApp = useCallback(async () => {
+    let initTimeout;
+    try {
+      console.log('🚀 Starting app initialization...');
+      
+      // Set initialization timeout
+      initTimeout = setTimeout(() => {
+        console.error('⏰ App initialization timeout');
+        setLoading(false);
+        setIsInitialized(true);
+      }, 10000);
+
+      // Wait for native modules to be ready
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Check if SecureStore is available
+      let token = null;
+      try {
+        if (SecureStore && typeof SecureStore.getItemAsync === 'function') {
+          token = await SecureStore.getItemAsync('authToken');
+          console.log('📱 SecureStore token check:', token ? 'found' : 'not found');
+        } else {
+          console.log('📱 SecureStore not available, checking AsyncStorage...');
+          token = await AsyncStorage.getItem('authToken');
+        }
+      } catch (storageError) {
+        console.error('📱 Storage access error:', storageError.message);
+        // Continue without token
+      }
+      
+      if (token) {
+        console.log('📱 Token found, validating...');
+        try {
+          // Validate token with shorter timeout for faster startup
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          
+          const profile = await ApiService.getUserProfile();
+          clearTimeout(timeoutId);
+          
+          if (profile && profile.id) {
+            console.log('✅ User authenticated:', profile.username);
+            setUser(profile);
+          } else {
+            console.log('❌ Invalid profile response');
+            await clearStoredToken();
+          }
+        } catch (profileError) {
+          console.error('❌ Profile validation error:', profileError.message);
+          await clearStoredToken();
+        }
+      } else {
+        console.log('📱 No stored token found');
+      }
+      
+      clearTimeout(initTimeout);
+      setIsInitialized(true);
+      
+    } catch (error) {
+      console.error('❌ App initialization error:', error.message);
+      if (initTimeout) clearTimeout(initTimeout);
+      setError('Failed to initialize app');
+      setIsInitialized(true);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Safe token clearing helper
+  const clearStoredToken = async () => {
+    try {
+      if (SecureStore && typeof SecureStore.deleteItemAsync === 'function') {
+        await SecureStore.deleteItemAsync('authToken');
+      }
+      await AsyncStorage.removeItem('authToken');
+      console.log('🗑️ Stored token cleared');
+    } catch (error) {
+      console.error('Failed to clear token:', error.message);
+    }
+  };
 
   useEffect(() => {
-    initializeApp();
-  }, []);
+    // Delay initialization slightly to ensure native modules are ready
+    const initTimer = setTimeout(() => {
+      initializeApp();
+    }, 50);
+    
+    return () => clearTimeout(initTimer);
+  }, [initializeApp]);
+
+  // Handle app state changes
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState) => {
+      if (nextAppState === 'active' && !isInitialized) {
+        console.log('📱 App became active, reinitializing...');
+        initializeApp();
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription?.remove();
+  }, [isInitialized, initializeApp]);
 
   const loadSavedColorMatches = useCallback(async (key) => {
     try {
@@ -79,108 +210,20 @@ export default function App() {
     }
   }, []);
 
-  const initializeApp = async () => {
-    try {
-      console.log('🚀 Initializing Fashion Color Wheel app...');
-      
-      // Ensure ApiService is properly initialized
-      if (!ApiService) {
-        throw new Error('ApiService not available');
-      }
-
-      // Load tokens from secure storage with error handling
-      try {
-        if (typeof ApiService.loadTokenFromStorage === 'function') {
-          await ApiService.loadTokenFromStorage();
-          console.log('✅ Tokens loaded from storage');
-        } else {
-          console.log('⚠️ loadTokenFromStorage method not available');
-        }
-      } catch (tokenError) {
-        console.log('⚠️ Failed to load tokens:', tokenError.message);
-      }
-
-      // Check token presence safely
-      let connectionStatus = {};
-      try {
-        connectionStatus = (typeof ApiService.getConnectionStatus === 'function') 
-          ? ApiService.getConnectionStatus() || {} 
-          : {};
-      } catch (statusError) {
-        console.log('⚠️ Failed to get connection status:', statusError.message);
-      }
-
-      let user = null;
-      if (connectionStatus.hasToken) {
-        try {
-          // Verify token & fetch profile with timeout
-          console.log('🔍 Verifying user token...');
-          if (typeof ApiService.getUserProfile === 'function') {
-            const userProfile = await Promise.race([
-              ApiService.getUserProfile(),
-              new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Profile fetch timeout')), 10000)
-              )
-            ]);
-            user = userProfile?.user || userProfile;
-            setIsLoggedIn(true);
-            setCurrentUser(user);
-            console.log('✅ User authenticated:', user?.username || user?.email);
-          } else {
-            console.log('⚠️ getUserProfile method not available');
-          }
-        } catch (error) {
-          console.log('⚠️ Token verification failed, clearing tokens:', error?.message);
-          try {
-            if (typeof ApiService.clearToken === 'function') {
-              await ApiService.clearToken();
-            }
-          } catch (clearError) {
-            console.log('⚠️ Failed to clear token:', clearError.message);
-          }
-          setIsLoggedIn(false);
-          setCurrentUser(null);
-        }
-      } else {
-        console.log('📝 No valid token found, user not logged in');
-      }
-
-      // Load saved color matches for the resolved user (or anon)
-      const key = getMatchesKey(user?.id);
-      await loadSavedColorMatches(key);
-      console.log('✅ App initialization complete');
-    } catch (error) {
-      console.error('❌ Critical error initializing app:', error);
-      // Ensure app doesn't crash - set safe defaults
-      setIsLoggedIn(false);
-      setCurrentUser(null);
-      try {
-        await loadSavedColorMatches(getMatchesKey(null)); // try anon as last resort
-      } catch (matchError) {
-        console.error('❌ Failed to load anonymous matches:', matchError);
-        setSavedColorMatches([]); // Set empty array as ultimate fallback
-      }
-    } finally {
-      setIsLoading(false);
-      console.log('🏁 App initialization finished');
-    }
-  };
-
   const saveColorMatch = useCallback(async (colorMatch) => {
     try {
-      const key = getMatchesKey(currentUser?.id);
+      const key = getMatchesKey(user?.id);
       const updated = [...savedColorMatches, colorMatch];
       setSavedColorMatches(updated);
       await AsyncStorage.setItem(key, JSON.stringify(updated));
     } catch (error) {
       console.error('Error saving color match:', error);
     }
-  }, [currentUser?.id, savedColorMatches]);
+  }, [user?.id, savedColorMatches]);
 
   const handleLoginSuccess = useCallback(async (u) => {
     const user = pickUser(u);
-    setCurrentUser(user);
-    setIsLoggedIn(true);
+    setUser(user);
 
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
@@ -204,9 +247,7 @@ export default function App() {
 
   const handleSignUpComplete = useCallback(async (u) => {
     const user = pickUser(u);
-    setCurrentUser(user);
-    setIsLoggedIn(true);
-    setShowSignUp(false);
+    setUser(user);
 
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
@@ -225,15 +266,13 @@ export default function App() {
       await AsyncStorage.removeItem('isLoggedIn');
       await AsyncStorage.removeItem('userData');
 
-      setIsLoggedIn(false);
-      setCurrentUser(null);
+      setUser(null);
 
       // Load anon saved data for post-logout state
       await loadSavedColorMatches(getMatchesKey(null));
     } catch (error) {
       console.error('Error logging out:', error);
-      setIsLoggedIn(false);
-      setCurrentUser(null);
+      setUser(null);
       await loadSavedColorMatches(getMatchesKey(null));
     }
   }, [loadSavedColorMatches]);
@@ -244,22 +283,20 @@ export default function App() {
       await ApiService.clearToken?.();
 
       // Remove known keys; avoid blind clear unless you want to wipe all app data
-      const keysToRemove = ['isLoggedIn', 'userData', getMatchesKey(currentUser?.id)];
+      const keysToRemove = ['isLoggedIn', 'userData', getMatchesKey(user?.id)];
       await AsyncStorage.multiRemove(keysToRemove);
 
       setSavedColorMatches([]);
-      setIsLoggedIn(false);
-      setCurrentUser(null);
+      setUser(null);
 
       // After delete, load anon scope (should be empty unless you keep demo state)
       await loadSavedColorMatches(getMatchesKey(null));
     } catch (error) {
       console.error('Error clearing data after account deletion:', error);
-      setIsLoggedIn(false);
-      setCurrentUser(null);
+      setUser(null);
       await loadSavedColorMatches(getMatchesKey(null));
     }
-  }, [currentUser?.id, loadSavedColorMatches]);
+  }, [user?.id, loadSavedColorMatches]);
 
   const TabIcon = ({ name, focused }) => {
     const icons = {
@@ -271,34 +308,23 @@ export default function App() {
     return icons[name] || '📱';
   };
 
-  if (isLoading) {
+  // Show loading state with timeout protection
+  if (loading || !isInitialized) {
     return (
       <SafeAreaProvider>
-        <SafeAreaView style={styles.loadingContainer}>
-          <StatusBar style="auto" />
-          <Text style={styles.loadingEmoji}>🎨</Text>
-          <Text style={styles.loadingText}>Loading Fashion Color Wheel...</Text>
-          <Text style={styles.loadingSubtext}>Preparing your color journey</Text>
+        <SafeAreaView style={styles.container}>
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Loading...</Text>
+            {error && (
+              <Text style={styles.errorText}>{error}</Text>
+            )}
+          </View>
         </SafeAreaView>
       </SafeAreaProvider>
     );
   }
 
-  if (showSignUp) {
-    return (
-      <SafeAreaProvider>
-        <SafeAreaView style={{ flex: 1 }}>
-          <StatusBar style="auto" />
-          <SignUpScreen
-            onSignUpComplete={handleSignUpComplete}
-            onBack={() => setShowSignUp(false)}
-          />
-        </SafeAreaView>
-      </SafeAreaProvider>
-    );
-  }
-
-  if (!isLoggedIn) {
+  if (!user) {
     return (
       <SafeAreaProvider>
         <SafeAreaView style={{ flex: 1 }}>
@@ -330,79 +356,92 @@ export default function App() {
                 headerShown: false,
               })}
             >
-        <Tab.Screen 
-          name="Community" 
-          options={{ title: 'Community' }}
-        >
-          {(props) => (
-            <CommunityFeedScreen 
-              {...props} 
-              currentUser={currentUser}
-              onSaveColorMatch={saveColorMatch}
-              onLogout={handleLogout}
-            />
-          )}
-        </Tab.Screen>
-        
-        <Tab.Screen 
-          name="ColorWheel" 
-          options={{ title: 'Wheel' }}
-        >
-          {(props) => (
-            <ColorWheelScreen 
-              {...props} 
-              currentUser={currentUser}
-              onSaveColorMatch={saveColorMatch}
-              onLogout={handleLogout}
-            />
-          )}
-        </Tab.Screen>
-        
-        <Tab.Screen 
-          name="Boards" 
-          options={{ title: 'My Boards' }}
-        >
-          {(props) => (
-            <BoardsScreen 
-              {...props} 
-              currentUser={currentUser}
-              savedColorMatches={savedColorMatches}
-              onSaveColorMatch={saveColorMatch}
-              onLogout={handleLogout}
-            />
-          )}
-        </Tab.Screen>
-        
-        <Tab.Screen 
-          name="Settings" 
-          options={{ title: 'Settings' }}
-        >
-          {(props) => (
-            <UserSettingsScreen 
-              {...props} 
-              currentUser={currentUser}
-              onLogout={handleLogout}
-              onAccountDeleted={handleAccountDeleted}
-            />
-          )}
-        </Tab.Screen>
+              <Tab.Screen 
+                name="Community" 
+                options={{ title: 'Community' }}
+              >
+                {(props) => (
+                  <CommunityFeedScreen 
+                    {...props} 
+                    user={user}
+                    onSaveColorMatch={saveColorMatch}
+                    onLogout={handleLogout}
+                  />
+                )}
+              </Tab.Screen>
+              
+              <Tab.Screen 
+                name="ColorWheel" 
+                options={{ title: 'Wheel' }}
+              >
+                {(props) => (
+                  <ColorWheelScreen 
+                    {...props} 
+                    user={user}
+                    onSaveColorMatch={saveColorMatch}
+                    onLogout={handleLogout}
+                  />
+                )}
+              </Tab.Screen>
+              
+              <Tab.Screen 
+                name="Boards" 
+                options={{ title: 'My Boards' }}
+              >
+                {(props) => (
+                  <BoardsScreen 
+                    {...props} 
+                    user={user}
+                    savedColorMatches={savedColorMatches}
+                    onSaveColorMatch={saveColorMatch}
+                    onLogout={handleLogout}
+                  />
+                )}
+              </Tab.Screen>
+              
+              <Tab.Screen 
+                name="Settings" 
+                options={{ title: 'Settings' }}
+              >
+                {(props) => (
+                  <UserSettingsScreen 
+                    {...props} 
+                    user={user}
+                    onLogout={handleLogout}
+                    onAccountDeleted={handleAccountDeleted}
+                  />
+                )}
+              </Tab.Screen>
             </Tab.Navigator>
           </NavigationContainer>
         </ErrorBoundary>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
+}
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    padding: 20,
   },
-  loadingEmoji: { fontSize: 64, marginBottom: 20 },
-  loadingText: { fontSize: 24, color: '#2c3e50', fontWeight: 'bold', marginBottom: 10 },
-  loadingSubtext: { fontSize: 16, color: '#7f8c8d', fontStyle: 'italic' },
+  loadingText: {
+    fontSize: 18,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#ff6b6b',
+    textAlign: 'center',
+    marginTop: 10,
+  },
   tabBar: {
     backgroundColor: 'white',
     borderTopWidth: 1,
@@ -414,4 +453,3 @@ const styles = StyleSheet.create({
   tabIcon: { fontSize: 24 },
   tabLabel: { fontSize: 12, fontWeight: '600' },
 });
-}
