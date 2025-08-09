@@ -5,7 +5,7 @@ import Constants from 'expo-constants';
 const getApiUrl = () => {
   if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
   const extra = Constants?.expoConfig?.extra;
-  return extra?.API_URL || 'http://localhost:3000';
+  return extra?.API_URL || 'https://colorwheelapp-production.up.railway.app';
 };
 
 const API_ROOT = getApiUrl();
