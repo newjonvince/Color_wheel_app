@@ -81,6 +81,7 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
     }
 
     res.status(201).json({
+      success: true,
       message: 'User registered successfully',
       user: {
         id: user.id,
@@ -144,6 +145,7 @@ router.post('/login', authLimiter, loginValidation, async (req, res) => {
     );
 
     res.json({
+      success: true,
       message: 'Login successful',
       user: {
         id: user.id,
