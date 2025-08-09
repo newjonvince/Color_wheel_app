@@ -35,15 +35,16 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    const result = await query(
+    // Insert user; IDs are UUIDs in this schema, so insertId is not used.
+    await query(
       `INSERT INTO users (email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [email, username, hashedPassword, location, birthday_month, birthday_day, birthday_year, gender]
     );
-    const insertId = result.insertId || result.rows.insertId;
+    // Fetch by unique email to retrieve the newly created user (and its UUID id)
     const userResult = await query(
-      'SELECT id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at FROM users WHERE id = ?',
-      [insertId]
+      'SELECT id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at FROM users WHERE email = ?',
+      [email]
     );
     const user = userResult.rows[0];
 
@@ -99,7 +100,14 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
       emailVerificationSent: true
     });
   } catch (error) {
-    console.error('Registration error:', error);
+    // Handle duplicate key (email/username) gracefully and log details
+    if (error && (error.code === 'ER_DUP_ENTRY' || /duplicate/i.test(String(error.message)))) {
+      return res.status(409).json({
+        error: 'User already exists',
+        message: 'Email or username is already taken'
+      });
+    }
+    console.error('Registration error:', { message: error.message, code: error.code, stack: error.stack });
     res.status(500).json({
       error: 'Registration failed',
       message: 'Internal server error'
