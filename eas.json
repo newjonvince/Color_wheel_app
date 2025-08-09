@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 5.9.0"
+    "version": ">= 5.9.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -23,7 +24,7 @@
       "autoIncrement": true,
       "env": {
         "NODE_ENV": "production",
-        "API_URL": "https://fashion-color-wheel-backend.up.railway.app"
+        "API_URL": "https://colorwheelapp-production.up.railway.app"
       }
     }
   },

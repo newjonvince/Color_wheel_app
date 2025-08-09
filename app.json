@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Fashion Color Wheel",
-    "slug": "fashion-color-wheel",
+    "name": "Color Fashion Wheel",
+    "slug": "color-fashion-wheel",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -31,7 +31,7 @@
       "android"
     ],
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#f8f9fa"
     },
@@ -46,7 +46,8 @@
         "NSCameraUsageDescription": "This app uses the camera to capture colors from your clothing and surroundings for color matching.",
         "NSPhotoLibraryUsageDescription": "This app accesses your photo library to extract colors from your existing photos for color analysis.",
         "NSPhotoLibraryAddUsageDescription": "This app saves your color collages and fashion inspiration images to your photo library for easy access and sharing.",
-        "NSMicrophoneUsageDescription": "Microphone access is not used by this app."
+        "NSMicrophoneUsageDescription": "Microphone access is not used by this app.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -57,9 +58,11 @@
         "backgroundColor": "#f8f9fa"
       },
       "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ],
       "edgeToEdgeEnabled": true
     },
@@ -85,9 +88,9 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "your-project-id-here"
+        "projectId": "6e03a055-6c53-4d35-b62f-8472a8cae381"
       },
-      "API_URL": "https://fashion-color-wheel-backend.up.railway.app"
+      "API_URL": "https://colorwheelapp-production.up.railway.app"
     }
   }
 }
