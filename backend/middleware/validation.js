@@ -1,38 +1,48 @@
+
 const { body, param, query, validationResult } = require('express-validator');
 
-// Shared helpers
+// Shared error handler
 const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
+    console.log('🚨 Validation errors:', JSON.stringify(errors.array(), null, 2));
     return res.status(400).json({
       error: 'Validation failed',
       details: errors.array().map(err => ({
-        field: err.path, message: err.msg, value: err.value
+        field: err.path || err.param,
+        message: err.msg,
+        value: err.value,
+        location: err.location
       }))
     });
   }
   next();
 };
 
+// Helpers
 const isValidHexColor = v => /^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$/.test(v);
 
 // --- Auth ---
-
-// Match backend: birthday_month/day/year + flexible gender casing
 const registerValidation = [
   body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
-  // Align with frontend (min 6) or keep stricter rules if you prefer:
-  body('password')
-    .isLength({ min: 6, max: 128 })
-    .withMessage('Password must be 6-128 characters'),
+  body('password').isLength({ min: 6, max: 128 }).withMessage('Password must be 6-128 characters'),
   body('username')
     .isLength({ min: 3, max: 30 }).withMessage('Username 3-30 chars')
     .matches(/^[a-zA-Z0-9_]+$/).withMessage('Letters, numbers, underscores only')
     .customSanitizer(v => v?.toLowerCase()),
   body('location').optional().isLength({ min: 1, max: 100 }).trim(),
-  body('birthday.month').isString().isLength({ min: 3, max: 9 }).withMessage('Month required'),
-  body('birthday.day').isString().isLength({ min: 1, max: 2 }).withMessage('Day required'),
-  body('birthday.year').isString().isLength({ min: 4, max: 4 }).withMessage('Year required'),
+  body('birthday.month')
+    .isString()
+    .isIn(['January','February','March','April','May','June','July','August','September','October','November','December'])
+    .withMessage('Valid month name required'),
+  body('birthday.day')
+    .isString()
+    .isInt({ min: 1, max: 31 })
+    .withMessage('Day must be 1-31'),
+  body('birthday.year')
+    .isString()
+    .isInt({ min: 1900, max: new Date().getFullYear() })
+    .withMessage('Valid birth year required'),
   body('gender')
     .optional()
     .isString()
@@ -48,20 +58,12 @@ const registerValidation = [
 ];
 
 const loginValidation = [
-  body('email')
-    .isEmail()
-    .normalizeEmail()
-    .withMessage('Please provide a valid email address'),
-  
-  body('password')
-    .notEmpty()
-    .withMessage('Password is required'),
-  
+  body('email').isEmail().normalizeEmail().withMessage('Valid email required'),
+  body('password').notEmpty().withMessage('Password is required'),
   handleValidationErrors
 ];
 
-// --- Color Matches (align to routes/colors.js) ---
-
+// --- Color Matches ---
 const createColorMatchValidation = [
   body('base_color').custom(isValidHexColor).withMessage('base_color must be hex'),
   body('scheme')
@@ -83,7 +85,6 @@ const updateColorMatchValidation = [
 ];
 
 // --- Boards ---
-
 const createBoardValidation = [
   body('name').isLength({ min: 1, max: 100 }).trim().escape(),
   body('description').optional().isLength({ max: 500 }).trim().escape(),
@@ -95,13 +96,10 @@ const createBoardValidation = [
 ];
 
 // --- Community ---
-
 const createPostValidation = [
   body('description').isLength({ min: 1, max: 500 }).trim().escape(),
-  body('colors')
-    .isArray({ min: 1, max: 10 })
-    .custom(arr => arr.every(isValidHexColor))
-    .withMessage('All colors must be hex'),
+  body('colors').isArray({ min: 1, max: 10 })
+    .custom(arr => arr.every(isValidHexColor)).withMessage('All colors must be hex'),
   body('colorScheme')
     .optional()
     .isIn(['complementary','analogous','triadic','tetradic','monochromatic','freestyle']),
@@ -116,7 +114,6 @@ const commentValidation = [
 ];
 
 // --- Common ---
-
 const paginationValidation = [
   query('limit').optional().isInt({ min: 1, max: 100 }),
   query('offset').optional().isInt({ min: 0 }),
@@ -128,22 +125,26 @@ const idValidation = [
   handleValidationErrors
 ];
 
+// --- Profile ---
+const updateProfileValidation = [
+  body('firstName').optional().isLength({ min:1, max:50 }).matches(/^[a-zA-Z\s\-']+$/).trim(),
+  body('lastName').optional().isLength({ min:1, max:50 }).matches(/^[a-zA-Z\s\-']+$/).trim(),
+  body('bio').optional().isLength({ max:500 }).trim().escape(),
+  body('location').optional().isLength({ min:1, max:100 }).trim(),
+  body('website').optional().isURL(),
+  handleValidationErrors
+];
+
 module.exports = {
   registerValidation,
   loginValidation,
   createColorMatchValidation,
   updateColorMatchValidation,
   createBoardValidation,
-  updateProfileValidation: [
-    body('firstName').optional().isLength({ min:1, max:50 }).matches(/^[a-zA-Z\s\-']+$/).trim(),
-    body('lastName').optional().isLength({ min:1, max:50 }).matches(/^[a-zA-Z\s\-']+$/).trim(),
-    body('bio').optional().isLength({ max:500 }).trim().escape(),
-    body('location').optional().isLength({ min:1, max:100 }).trim(),
-    body('website').optional().isURL(),
-    handleValidationErrors
-  ],
+  updateProfileValidation,
   createPostValidation,
   commentValidation,
   paginationValidation,
-  idValidation
+  idValidation,
+  handleValidationErrors
 };
