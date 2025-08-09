@@ -32,7 +32,8 @@
     "expo-secure-store": "~14.2.3",
     "expo-haptics": "~14.1.4",
     "react-native-view-shot": "4.0.3",
-    "expo-sharing": "~13.1.5"
+    "expo-sharing": "~13.1.5",
+    "expo-clipboard": "~7.1.5"
   },
   "devDependencies": {
     "@babel/core": "^7.20.0"
