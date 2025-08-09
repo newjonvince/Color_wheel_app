@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ApiService from '../services/api';
 
@@ -8,74 +9,68 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
+  const saveSession = useCallback(async ({ user, token }) => {
+    // Persist only non-sensitive user profile in AsyncStorage
+    await AsyncStorage.setItem('userData', JSON.stringify(user));
+    await AsyncStorage.setItem('isLoggedIn', 'true');
+    // Store token securely
+    if (token) await SecureStore.setItemAsync('authToken', token, { keychainService: 'fashioncolorwheel.auth' });
+  }, []);
+
+  const validate = () => {
     if (!email || !password) {
       Alert.alert('Missing Information', 'Please enter both email and password');
-      return;
+      return false;
     }
-
-    setLoading(true);
-
-    try {
-      // Authenticate with backend API
-      const response = await ApiService.login(email, password);
-      
-      if (response.success && response.user) {
-        // Store user data locally for offline access
-        await AsyncStorage.setItem('userData', JSON.stringify(response.user));
-        await AsyncStorage.setItem('isLoggedIn', 'true');
-        await AsyncStorage.setItem('authToken', response.token);
-        
-        onLoginSuccess(response.user);
-      } else {
-        Alert.alert('Login Failed', response.message || 'Invalid credentials');
-      }
-    } catch (error) {
-      console.error('Login error:', error);
-      if (error.message.includes('fetch')) {
-        Alert.alert('Connection Error', 'Unable to connect to server. Please check your internet connection.');
-      } else {
-        Alert.alert('Login Error', error.message || 'Something went wrong. Please try again.');
-      }
+    const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+    if (!emailOk) {
+      Alert.alert('Invalid Email', 'Please enter a valid email address');
+      return false;
     }
-
-    setLoading(false);
+    if (password.length < 6) {
+      Alert.alert('Weak Password', 'Password should be at least 6 characters');
+      return false;
+    }
+    return true;
   };
 
-  const handleDemoLogin = async () => {
+  const handleLogin = useCallback(async () => {
+    if (!validate()) return;
+    if (loading) return; // guard against rapid taps
     setLoading(true);
-    
     try {
-      // Try to login with demo account from database
-      const response = await ApiService.login('demo@fashioncolorwheel.com', 'demo123');
-      
-      if (response.success && response.user) {
-        // Store user data locally
-        await AsyncStorage.setItem('userData', JSON.stringify(response.user));
-        await AsyncStorage.setItem('isLoggedIn', 'true');
-        await AsyncStorage.setItem('authToken', response.token);
-        
-        onLoginSuccess(response.user);
+      const response = await ApiService.login(email.trim(), password);
+      if (response?.success && response?.user) {
+        await saveSession({ user: response.user, token: response.token });
+        onLoginSuccess?.(response.user);
       } else {
-        // Fallback to local demo user if database demo doesn't exist
-        const demoUser = {
-          id: 'demo-user',
-          email: 'demo@fashioncolorwheel.com',
-          username: 'demo_user',
-          location: 'United States',
-          birthday: { month: 'January', day: '1', year: '1990' },
-          gender: 'Prefer not to say',
-          isLoggedIn: true,
-          createdAt: new Date().toISOString()
-        };
-
-        await AsyncStorage.setItem('userData', JSON.stringify(demoUser));
-        await AsyncStorage.setItem('isLoggedIn', 'true');
-        onLoginSuccess(demoUser);
+        const msg = response?.message || 'Invalid email or password.';
+        Alert.alert('Login Failed', msg);
       }
-    } catch (error) {
-      console.error('Demo login error:', error);
-      // Fallback to offline demo user
+    } catch (err) {
+      console.error('Login error:', err);
+      const msg =
+        (err?.name === 'TypeError' && /Network/i.test(String(err))) ? 
+          'Unable to reach the server. Check your internet connection and try again.' :
+        err?.message || 'Something went wrong. Please try again.';
+      Alert.alert('Login Error', msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [email, password, loading, saveSession, onLoginSuccess]);
+
+  const handleDemoLogin = useCallback(async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      // Prefer server-controlled demo login; avoid baking creds into app
+      const response = await ApiService.demoLogin?.();
+      if (response?.success && response?.user) {
+        await saveSession({ user: response.user, token: response.token });
+        onLoginSuccess?.(response.user);
+        return;
+      }
+      // Local fallback (no token stored)
       const demoUser = {
         id: 'demo-user',
         email: 'demo@fashioncolorwheel.com',
@@ -84,16 +79,32 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
         birthday: { month: 'January', day: '1', year: '1990' },
         gender: 'Prefer not to say',
         isLoggedIn: true,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        demo: true,
       };
-
       await AsyncStorage.setItem('userData', JSON.stringify(demoUser));
       await AsyncStorage.setItem('isLoggedIn', 'true');
-      onLoginSuccess(demoUser);
+      onLoginSuccess?.(demoUser);
+    } catch (err) {
+      console.error('Demo login error:', err);
+      const demoUser = {
+        id: 'demo-user',
+        email: 'demo@fashioncolorwheel.com',
+        username: 'demo_user',
+        location: 'United States',
+        birthday: { month: 'January', day: '1', year: '1990' },
+        gender: 'Prefer not to say',
+        isLoggedIn: true,
+        createdAt: new Date().toISOString(),
+        demo: true,
+      };
+      await AsyncStorage.setItem('userData', JSON.stringify(demoUser));
+      await AsyncStorage.setItem('isLoggedIn', 'true');
+      onLoginSuccess?.(demoUser);
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
-  };
+  }, [loading, saveSession, onLoginSuccess]);
 
   return (
     <KeyboardAvoidingView 
@@ -114,7 +125,13 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
           placeholder="Email"
           keyboardType="email-address"
           autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="emailAddress"
           autoComplete="email"
+          returnKeyType="next"
+          onSubmitEditing={() => { /* focus password input via ref if desired */ }}
+          accessibilityLabel="Email input"
+          testID="email-input"
         />
 
         <TextInput
@@ -124,16 +141,23 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
           placeholder="Password"
           secureTextEntry
           autoCapitalize="none"
+          autoCorrect={false}
+          textContentType="password"
+          returnKeyType="go"
+          onSubmitEditing={handleLogin}
+          accessibilityLabel="Password input"
+          testID="password-input"
         />
 
-        <TouchableOpacity 
-          style={[styles.loginButton, loading && styles.loginButtonDisabled]} 
+        <TouchableOpacity
+          style={[styles.loginButton, loading && styles.loginButtonDisabled]}
           onPress={handleLogin}
           disabled={loading}
+          accessibilityRole="button"
+          accessibilityLabel="Log in"
+          testID="login-button"
         >
-          <Text style={styles.loginButtonText}>
-            {loading ? 'Logging in...' : 'Log in'}
-          </Text>
+          {loading ? <ActivityIndicator /> : <Text style={styles.loginButtonText}>Log in</Text>}
         </TouchableOpacity>
 
         <View style={styles.divider}>
@@ -142,10 +166,13 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
           <View style={styles.dividerLine} />
         </View>
 
-        <TouchableOpacity 
-          style={styles.demoButton} 
+        <TouchableOpacity
+          style={styles.demoButton}
           onPress={handleDemoLogin}
           disabled={loading}
+          accessibilityRole="button"
+          accessibilityLabel="Try Demo Account"
+          testID="demo-button"
         >
           <Text style={styles.demoButtonText}>Try Demo Account</Text>
         </TouchableOpacity>
@@ -153,7 +180,7 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>Don't have an account? </Text>
-        <TouchableOpacity onPress={onSignUpPress}>
+        <TouchableOpacity onPress={onSignUpPress} accessibilityRole="button" accessibilityLabel="Sign up">
           <Text style={styles.signUpText}>Sign up</Text>
         </TouchableOpacity>
       </View>
@@ -162,104 +189,25 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    paddingHorizontal: 20,
-  },
-  header: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 60,
-  },
-  logo: {
-    fontSize: 80,
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-    textAlign: 'center',
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 40,
-  },
-  form: {
-    flex: 1,
-    justifyContent: 'center',
-  },
+  container: { flex: 1, backgroundColor: '#fff', paddingHorizontal: 20 },
+  header: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60 },
+  logo: { fontSize: 80, marginBottom: 20 },
+  title: { fontSize: 28, fontWeight: 'bold', color: '#333', marginBottom: 10, textAlign: 'center' },
+  subtitle: { fontSize: 16, color: '#666', textAlign: 'center', marginBottom: 40 },
+  form: { flex: 1, justifyContent: 'center' },
   input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 25,
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    fontSize: 16,
-    backgroundColor: '#f9f9f9',
-    marginBottom: 15,
+    borderWidth: 1, borderColor: '#ddd', borderRadius: 25, paddingHorizontal: 20, paddingVertical: 15,
+    fontSize: 16, backgroundColor: '#f9f9f9', marginBottom: 15,
   },
-  loginButton: {
-    backgroundColor: '#e60023',
-    paddingVertical: 18,
-    borderRadius: 25,
-    alignItems: 'center',
-    marginTop: 10,
-  },
-  loginButtonDisabled: {
-    backgroundColor: '#ccc',
-  },
-  loginButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 30,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#ddd',
-  },
-  dividerText: {
-    marginHorizontal: 15,
-    color: '#666',
-    fontSize: 14,
-  },
-  demoButton: {
-    backgroundColor: '#f9f9f9',
-    paddingVertical: 18,
-    borderRadius: 25,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  demoButtonText: {
-    color: '#333',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingBottom: 40,
-  },
-  footerText: {
-    fontSize: 16,
-    color: '#666',
-  },
-  signUpText: {
-    fontSize: 16,
-    color: '#e60023',
-    fontWeight: 'bold',
-  },
+  loginButton: { backgroundColor: '#e60023', paddingVertical: 18, borderRadius: 25, alignItems: 'center', marginTop: 10 },
+  loginButtonDisabled: { opacity: 0.6 },
+  loginButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  divider: { flexDirection: 'row', alignItems: 'center', marginVertical: 30 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: '#ddd' },
+  dividerText: { marginHorizontal: 15, color: '#666', fontSize: 14 },
+  demoButton: { backgroundColor: '#f9f9f9', paddingVertical: 18, borderRadius: 25, alignItems: 'center', borderWidth: 1, borderColor: '#ddd' },
+  demoButtonText: { color: '#333', fontSize: 16, fontWeight: '600' },
+  footer: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', paddingBottom: 40 },
+  footerText: { fontSize: 16, color: '#666' },
+  signUpText: { fontSize: 16, color: '#e60023', fontWeight: 'bold' },
 });

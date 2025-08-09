@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, FlatList, Dimensions, Alert, Modal, TextInput, RefreshControl } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, FlatList, Dimensions, Alert, Modal, TextInput, ScrollView } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import ApiService from '../services/api';
+import { getColorScheme as computeScheme } from '../utils/color';
 
 const { width: screenWidth } = Dimensions.get('window');
 const boardWidth = (screenWidth - 45) / 2; // 2 columns with margins
@@ -20,14 +20,14 @@ const SCHEME_FOLDERS = [
   { id: 'monochromatic', name: 'Monochromatic', icon: '🎯', description: 'Same hue, different shades' },
 ];
 
-export default function BoardsScreen({ savedColorMatches, onSaveColorMatch, currentUser }) {
+export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser }) {
   const [selectedMainFolder, setSelectedMainFolder] = useState(null);
   const [selectedSchemeFolder, setSelectedSchemeFolder] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadScheme, setUploadScheme] = useState('complementary');
   const [uploadPrivacy, setUploadPrivacy] = useState('private');
-  const [boards, setBoards] = useState([]);
+  const [boards, setBoards] = useState([]); // kept for future use
   const [colorMatches, setColorMatches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -37,62 +37,59 @@ export default function BoardsScreen({ savedColorMatches, onSaveColorMatch, curr
     loadBoardsAndMatches();
   }, []);
 
-  const loadBoardsAndMatches = async () => {
+  const loadBoardsAndMatches = useCallback(async () => {
     if (!currentUser) return;
-    
     setLoading(true);
     try {
-      // Load user's boards
-      const boardsResponse = await ApiService.getBoards();
-      if (boardsResponse.success) {
-        setBoards(boardsResponse.boards);
-      }
-      
-      // Load user's color matches
-      const matchesResponse = await ApiService.getColorMatches();
-      if (matchesResponse.success) {
-        setColorMatches(matchesResponse.colorMatches);
-      }
-    } catch (error) {
-      console.error('Error loading boards and matches:', error);
-      // Fallback to local data
+      const boardsRes = await ApiService.getBoards();
+      const matchesRes = await ApiService.getColorMatches();
+
+      const boardsData = Array.isArray(boardsRes) ? boardsRes : boardsRes?.boards || boardsRes?.data || [];
+      const matchesData = Array.isArray(matchesRes) ? matchesRes : matchesRes?.colorMatches || matchesRes?.data || [];
+
+      setBoards(boardsData);
+      setColorMatches(matchesData);
+    } catch (e) {
+      console.error('loadBoardsAndMatches:', e);
       setColorMatches(savedColorMatches || []);
     } finally {
       setLoading(false);
     }
-  };
+  }, [currentUser, savedColorMatches]);
 
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadBoardsAndMatches();
     setRefreshing(false);
-  };
+  }, [loadBoardsAndMatches]);
 
-  const getBoardColorMatches = (schemeId, privacy = null) => {
-    return colorMatches.filter(match => {
-      const schemeMatch = match.scheme === schemeId;
-      if (privacy === null) return schemeMatch;
-      return schemeMatch && (match.isPublic ? 'public' : 'private') === privacy;
-    });
-  };
+  // Memoized privacy partitions
+  const publicMatches = useMemo(() => colorMatches.filter(m => (m.isPublic ?? (m.privacy === 'public'))), [colorMatches]);
+  const privateMatches = useMemo(() => colorMatches.filter(m => !(m.isPublic ?? (m.privacy === 'public'))), [colorMatches]);
 
-  const getMainFolderColorMatches = (privacy) => {
-    return colorMatches.filter(match => {
-      const matchPrivacy = match.isPublic ? 'public' : 'private';
-      return matchPrivacy === privacy;
-    });
-  };
+  const getMainFolderColorMatches = useCallback((privacy) => (
+    privacy === 'public' ? publicMatches : privateMatches
+  ), [publicMatches, privateMatches]);
 
-  const handleUploadImage = async () => {
+  const getBoardColorMatches = useCallback((schemeId, privacy = null) => {
+    const base = privacy === 'public' ? publicMatches : privacy === 'private' ? privateMatches : colorMatches;
+    return base.filter(m => m.scheme === schemeId);
+  }, [colorMatches, publicMatches, privateMatches]);
+
+  const safeId = (item, idx) => String(item.id ?? item._id ?? item.uuid ?? `${item.baseColor}-${idx}`);
+  const safeDate = (item) => item.timestamp || item.created_at || item.createdAt || null;
+
+  const getColorScheme = useCallback((baseColor, scheme) => computeScheme(baseColor, scheme), []);
+
+  const handleUploadImage = useCallback(async () => {
     if (!currentUser) {
       Alert.alert('Login Required', 'Please log in to upload color matches');
       return;
     }
 
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    
-    if (permissionResult.granted === false) {
-      Alert.alert('Permission Required', 'Permission to access camera roll is required!');
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Permission Required', 'Permission to access your photos is required.');
       return;
     }
 
@@ -100,96 +97,46 @@ export default function BoardsScreen({ savedColorMatches, onSaveColorMatch, curr
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 1,
+      quality: 0.9,
     });
 
-    if (!result.canceled) {
-      try {
-        // Simulate color extraction from uploaded image
-        const fashionColors = [
-          '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
-          '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
-        ];
-        
-        const randomColor = fashionColors[Math.floor(Math.random() * fashionColors.length)];
-        const colorMatch = {
-          baseColor: randomColor,
-          scheme: uploadScheme,
-          isPublic: uploadPrivacy === 'public',
-          colors: getColorScheme(randomColor, uploadScheme),
-          title: uploadTitle || 'Uploaded Color Match',
-          metadata: {
-            extractionMethod: 'upload',
-            originalImage: result.assets[0].uri,
-            uploadTitle: uploadTitle
-          }
-        };
-        
-        // Save to database
-        const response = await ApiService.createColorMatch(colorMatch);
-        
-        if (response.success) {
-          // Update local state
-          setColorMatches(prev => [response.colorMatch, ...prev]);
-          
-          // Also call parent callback for compatibility
-          if (onSaveColorMatch) {
-            onSaveColorMatch({
-              ...colorMatch,
-              id: response.colorMatch.id,
-              timestamp: response.colorMatch.created_at,
-              privacy: uploadPrivacy,
-              image: result.assets[0].uri
-            }, uploadScheme);
-          }
-          
-          setShowUploadModal(false);
-          setUploadTitle('');
-          Alert.alert('Success!', `Color match saved to your ${uploadScheme} board!`);
-        } else {
-          throw new Error(response.message || 'Failed to save color match');
-        }
-      } catch (error) {
-        console.error('Error uploading color match:', error);
-        Alert.alert('Upload Failed', error.message || 'Failed to save color match. Please try again.');
-      }
-    }
-  };
+    if (result.canceled) return;
 
-  const getColorScheme = (baseColor, scheme) => {
-    // Simple color scheme generation (same logic as ColorWheelScreen)
-    const fashionColors = [
-      '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
-      '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
-    ];
-    
-    let colors = [baseColor];
-    
-    switch (scheme) {
-      case 'complementary':
-        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
-        break;
-      case 'analogous':
-        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
-        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
-        break;
-      case 'triadic':
-        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
-        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
-        break;
-      case 'tetradic':
-        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
-        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
-        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
-        break;
-      case 'monochromatic':
-        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
-        colors.push(fashionColors[Math.floor(Math.random() * fashionColors.length)]);
-        break;
+    try {
+      // Placeholder dominant color selection — replace with your extractor when ready
+      const fallbackPalette = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'];
+      const baseColor = fallbackPalette[Math.floor(Math.random() * fallbackPalette.length)];
+
+      const colorMatch = {
+        baseColor,
+        scheme: uploadScheme,
+        isPublic: uploadPrivacy === 'public',
+        colors: getColorScheme(baseColor, uploadScheme),
+        title: uploadTitle || 'Uploaded Color Match',
+        image: result.assets?.[0]?.uri,
+        metadata: { extractionMethod: 'upload', originalImage: result.assets?.[0]?.uri, uploadTitle },
+      };
+
+      const response = await ApiService.createColorMatch(colorMatch);
+      const saved = response?.colorMatch || response?.data || response;
+      if (!saved) throw new Error('Unexpected server response.');
+
+      setColorMatches(prev => [saved, ...prev]);
+      onSaveColorMatch?.({
+        ...colorMatch,
+        id: saved.id ?? saved._id,
+        timestamp: saved.created_at ?? saved.createdAt ?? new Date().toISOString(),
+        privacy: uploadPrivacy,
+      }, uploadScheme);
+
+      setShowUploadModal(false);
+      setUploadTitle('');
+      Alert.alert('Success!', `Color match saved to your ${uploadScheme} board!`);
+    } catch (e) {
+      console.error('Error uploading color match:', e);
+      Alert.alert('Upload Failed', e?.message || 'Failed to save color match. Please try again.');
     }
-    
-    return colors;
-  };
+  }, [currentUser, uploadScheme, uploadPrivacy, uploadTitle, getColorScheme, onSaveColorMatch]);
 
   const renderBoardGrid = () => {
     // Show specific scheme folder content

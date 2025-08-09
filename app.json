@@ -30,6 +30,7 @@
       "ios",
       "android"
     ],
+    "scheme": "colorwheel",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -57,14 +58,10 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#f8f9fa"
       },
+      "edgeToEdgeEnabled": true,
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
-      ],
-      "edgeToEdgeEnabled": true
+        "android.permission.CAMERA"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",

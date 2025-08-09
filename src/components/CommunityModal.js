@@ -1,14 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  StyleSheet,
-  Text,
-  View,
-  Modal,
-  TouchableOpacity,
-  ScrollView,
-  Image,
-  Alert,
-  Dimensions,
+  StyleSheet, Text, View, Modal, TouchableOpacity, FlatList,
+  Image, Alert, Dimensions, ActivityIndicator, SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ApiService from '../services/api';
@@ -16,70 +9,123 @@ import ApiService from '../services/api';
 const { width: screenWidth } = Dimensions.get('window');
 
 export default function CommunityModal({ visible, onClose, currentUser }) {
-  const [activeTab, setActiveTab] = useState('suggested');
+  const [activeTab, setActiveTab] = useState('suggested'); // 'suggested' | 'following' | 'followers'
   const [suggestedUsers, setSuggestedUsers] = useState([]);
-  const [following, setFollowing] = useState([]);
-  const [followers, setFollowers] = useState([]);
+  const [followingUsers, setFollowingUsers] = useState([]);
+  const [followersUsers, setFollowersUsers] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    if (visible) {
-      loadCommunityData();
-    }
-  }, [visible, activeTab]);
+  // Single source of truth for follow state across tabs
+  const [followMap, setFollowMap] = useState({}); // { [userId]: true|false }
+  const mounted = useRef(true);
 
-  const loadCommunityData = async () => {
-    try {
-      setLoading(true);
-      
-      if (activeTab === 'suggested') {
-        const response = await ApiService.get('/users/suggested');
-        setSuggestedUsers(response.data || []);
-      } else if (activeTab === 'following') {
-        const response = await ApiService.get('/users/following');
-        setFollowing(response.data || []);
-      } else if (activeTab === 'followers') {
-        const response = await ApiService.get('/users/followers');
-        setFollowers(response.data || []);
+  // derive counts from lists + map
+  const followingCount = useMemo(
+    () => followingUsers.length,
+    [followingUsers.length]
+  );
+  const followersCount = useMemo(
+    () => followersUsers.length,
+    [followersUsers.length]
+  );
+
+  const setFollowed = useCallback((userId, isFollowed) => {
+    setFollowMap(prev => ({ ...prev, [userId]: !!isFollowed }));
+    // also reflect in following list contents
+    if (isFollowed) {
+      // if the user isn't already in following, optionally add a thin row (if API doesn't return immediately)
+      const exists = followingUsers.some(u => u.id === userId);
+      if (!exists) {
+        const u = suggestedUsers.find(u => u.id === userId) || followersUsers.find(u => u.id === userId);
+        if (u) setFollowingUsers(prev => [{ ...u }, ...prev]);
       }
-    } catch (error) {
-      console.error('Error loading community data:', error);
-    } finally {
-      setLoading(false);
+    } else {
+      setFollowingUsers(prev => prev.filter(u => u.id !== userId));
     }
-  };
+  }, [followingUsers, suggestedUsers, followersUsers]);
 
-  const handleFollowUser = async (userId) => {
+  const loadTab = useCallback(async (tab) => {
+    setLoading(true);
+    try {
+      if (tab === 'suggested') {
+        const res = await ApiService.get('/users/suggested');
+        const data = res.data || [];
+        if (!mounted.current) return;
+        setSuggestedUsers(data);
+        // prime followMap from server (if it returns is_following)
+        setFollowMap(prev => {
+          const next = { ...prev };
+          data.forEach(u => { if (typeof u.is_following === 'boolean') next[u.id] = u.is_following; });
+          return next;
+        });
+      } else if (tab === 'following') {
+        const res = await ApiService.get('/users/following');
+        const data = res.data || [];
+        if (!mounted.current) return;
+        setFollowingUsers(data);
+        setFollowMap(prev => {
+          const next = { ...prev };
+          data.forEach(u => { next[u.id] = true; });
+          return next;
+        });
+      } else if (tab === 'followers') {
+        const res = await ApiService.get('/users/followers');
+        const data = res.data || [];
+        if (!mounted.current) return;
+        setFollowersUsers(data);
+        // note: followers isn't necessarily following; don't force map=true here
+      }
+    } catch (e) {
+      if (mounted.current) {
+        // Consider a non-blocking toast here
+        Alert.alert('Error', 'Failed to load community data.');
+      }
+    } finally {
+      if (mounted.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+
+  // fetch current tab when modal opens or tab changes
+  useEffect(() => {
+    if (!visible) return;
+    loadTab(activeTab);
+  }, [visible, activeTab, loadTab]);
+
+  // actions
+  const handleFollowUser = useCallback(async (userId) => {
+    // optimistic update
+    setFollowed(userId, true);
     try {
       await ApiService.post(`/users/${userId}/follow`);
-      
-      // Update suggested users list
-      setSuggestedUsers(suggestedUsers.map(user => 
-        user.id === userId 
-          ? { ...user, is_following: true }
-          : user
-      ));
-      
-      Alert.alert('Success', 'User followed successfully');
-    } catch (error) {
-      console.error('Error following user:', error);
-      Alert.alert('Error', 'Failed to follow user');
+    } catch (e) {
+      // rollback
+      setFollowed(userId, false);
+      Alert.alert('Error', 'Failed to follow user.');
     }
-  };
+  }, [setFollowed]);
 
-  const handleUnfollowUser = async (userId) => {
+  const handleUnfollowUser = useCallback(async (userId) => {
+    // optimistic
+    const previous = !!followMap[userId];
+    setFollowed(userId, false);
     try {
       await ApiService.delete(`/users/${userId}/follow`);
-      
-      // Update following list
-      setFollowing(following.filter(user => user.id !== userId));
-      
-      Alert.alert('Success', 'User unfollowed successfully');
-    } catch (error) {
-      console.error('Error unfollowing user:', error);
-      Alert.alert('Error', 'Failed to unfollow user');
+    } catch (e) {
+      // rollback
+      setFollowed(userId, previous);
+      Alert.alert('Error', 'Failed to unfollow user.');
     }
-  };
+  }, [followMap, setFollowed]);
+
+  const handleDismissSuggested = useCallback((userId) => {
+    setSuggestedUsers(prev => prev.filter(u => u.id !== userId));
+    // Optional: await ApiService.post(`/users/suggested/${userId}/dismiss`)
+  }, []);
 
   const handleSyncContacts = () => {
     Alert.alert(
@@ -114,229 +160,205 @@ export default function CommunityModal({ visible, onClose, currentUser }) {
     );
   };
 
-  const renderSuggestedUser = (user) => (
-    <View key={user.id} style={styles.userCard}>
-      <TouchableOpacity style={styles.closeButton}>
-        <Ionicons name="close" size={20} color="#9CA3AF" />
-      </TouchableOpacity>
-      
-      <View style={styles.userContent}>
-        <Text style={styles.suggestedLabel}>Suggested for you</Text>
-        
-        <View style={styles.userAvatar}>
-          <Text style={styles.avatarText}>
-            {user.username?.charAt(0).toUpperCase() || 'U'}
-          </Text>
-        </View>
-        
-        <Text style={styles.username}>fit</Text>
-        <Text style={styles.userHandle}>@{user.username || 'user'}</Text>
-        
-        {/* Sample user items */}
-        <View style={styles.userItems}>
-          <Image 
-            source={{ uri: 'https://via.placeholder.com/60x60/333/fff?text=👕' }} 
-            style={styles.itemImage} 
-          />
-          <Image 
-            source={{ uri: 'https://via.placeholder.com/60x60/666/fff?text=🧢' }} 
-            style={styles.itemImage} 
-          />
-          <Image 
-            source={{ uri: 'https://via.placeholder.com/60x60/999/fff?text=👔' }} 
-            style={styles.itemImage} 
-          />
-          <Image 
-            source={{ uri: 'https://via.placeholder.com/60x60/4A90E2/fff?text=👖' }} 
-            style={styles.itemImage} 
-          />
-        </View>
-        
-        <TouchableOpacity
-          style={styles.followButton}
-          onPress={() => handleFollowUser(user.id)}
-        >
-          <Text style={styles.followButtonText}>Follow</Text>
+  const SuggestedCard = ({ item }) => {
+    const isFollowing = !!followMap[item.id];
+    const displayName = item.display_name || item.username || 'User';
+    return (
+      <View style={styles.userCard}>
+        <TouchableOpacity style={styles.closeButton} onPress={() => handleDismissSuggested(item.id)} accessibilityLabel="Dismiss suggestion">
+          <Ionicons name="close" size={20} color="#9CA3AF" />
         </TouchableOpacity>
+
+        <View style={styles.userContent}>
+          <Text style={styles.suggestedLabel}>Suggested for you</Text>
+
+          <View style={styles.userAvatar}>
+            <Text style={styles.avatarText}>{(displayName[0] || 'U').toUpperCase()}</Text>
+          </View>
+
+          <Text style={styles.username}>{displayName}</Text>
+          <Text style={styles.userHandle}>@{item.username || 'user'}</Text>
+
+          {/* Sample tiles — consider real user previews from API */}
+          <View style={styles.userItems}>
+            {['👕','🧢','👔','👖'].map((emoji,i)=>(
+              <View key={i} style={styles.itemImage}><Text style={{textAlign:'center'}}>{emoji}</Text></View>
+            ))}
+          </View>
+
+          <TouchableOpacity
+            style={[styles.followButton, isFollowing && { backgroundColor: '#E5E7EB' }]}
+            onPress={() => isFollowing ? handleUnfollowUser(item.id) : handleFollowUser(item.id)}
+            accessibilityRole="button"
+          >
+            <Text style={[styles.followButtonText, isFollowing && { color: '#6B7280' }]}>
+              {isFollowing ? 'Following' : 'Follow'}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
-    </View>
+    );
+  };
+
+  const RowUser = ({ item, showFollowBack }) => {
+    const isFollowing = !!followMap[item.id];
+    const displayName = item.display_name || item.username || 'User';
+    return (
+      <View style={styles.followingUserItem}>
+        <View style={styles.userInfo}>
+          <View style={styles.smallAvatar}><Text style={styles.smallAvatarText}>{(displayName[0] || 'U').toUpperCase()}</Text></View>
+          <View style={styles.userDetails}>
+            <Text style={styles.followingUsername}>{displayName}</Text>
+            <Text style={styles.followingUserHandle}>@{item.username}</Text>
+          </View>
+        </View>
+
+        {showFollowBack ? (
+          !isFollowing && (
+            <TouchableOpacity style={styles.followBackButton} onPress={() => handleFollowUser(item.id)}>
+              <Text style={styles.followBackButtonText}>Follow Back</Text>
+            </TouchableOpacity>
+          )
+        ) : (
+          <TouchableOpacity style={styles.unfollowButton} onPress={() => handleUnfollowUser(item.id)}>
+            <Text style={styles.unfollowButtonText}>{isFollowing ? 'Following' : 'Follow'}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
+  // lists
+  const renderSuggested = () => (
+    <FlatList
+      data={suggestedUsers}
+      keyExtractor={(u) => String(u.id)}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={{ paddingLeft: 16, paddingVertical: 8 }}
+      renderItem={({ item }) => <SuggestedCard item={item} />}
+      ListEmptyComponent={!loading ? (
+        <View style={{ padding: 16 }}><Text style={{ color: '#9CA3AF' }}>No suggestions right now</Text></View>
+      ) : null}
+      getItemLayout={(_, index) => ({ length: 212, offset: 212 * index, index })}
+      initialNumToRender={6}
+    />
   );
 
-  const renderFollowingUser = (user) => (
-    <View key={user.id} style={styles.followingUserItem}>
-      <View style={styles.userInfo}>
-        <View style={styles.smallAvatar}>
-          <Text style={styles.smallAvatarText}>
-            {user.username?.charAt(0).toUpperCase() || 'U'}
-          </Text>
-        </View>
-        <View style={styles.userDetails}>
-          <Text style={styles.followingUsername}>{user.username}</Text>
-          <Text style={styles.followingUserHandle}>@{user.username}</Text>
-        </View>
-      </View>
-      
-      <TouchableOpacity
-        style={styles.unfollowButton}
-        onPress={() => handleUnfollowUser(user.id)}
-      >
-        <Text style={styles.unfollowButtonText}>Following</Text>
-      </TouchableOpacity>
-    </View>
+  const renderFollowing = () => (
+    <FlatList
+      data={followingUsers}
+      keyExtractor={(u) => String(u.id)}
+      contentContainerStyle={styles.followingList}
+      renderItem={({ item }) => <RowUser item={item} />}
+      ListEmptyComponent={!loading ? (
+        <View style={styles.emptyState}><Text style={styles.emptyStateText}>You're not following anyone yet</Text></View>
+      ) : null}
+      initialNumToRender={12}
+    />
   );
 
-  const renderFollowerUser = (user) => (
-    <View key={user.id} style={styles.followingUserItem}>
-      <View style={styles.userInfo}>
-        <View style={styles.smallAvatar}>
-          <Text style={styles.smallAvatarText}>
-            {user.username?.charAt(0).toUpperCase() || 'U'}
-          </Text>
-        </View>
-        <View style={styles.userDetails}>
-          <Text style={styles.followingUsername}>{user.username}</Text>
-          <Text style={styles.followingUserHandle}>@{user.username}</Text>
-        </View>
-      </View>
-      
-      {!user.is_following && (
-        <TouchableOpacity
-          style={styles.followBackButton}
-          onPress={() => handleFollowUser(user.id)}
-        >
-          <Text style={styles.followBackButtonText}>Follow Back</Text>
-        </TouchableOpacity>
-      )}
-    </View>
+  const renderFollowers = () => (
+    <FlatList
+      data={followersUsers}
+      keyExtractor={(u) => String(u.id)}
+      contentContainerStyle={styles.followingList}
+      renderItem={({ item }) => <RowUser item={item} showFollowBack />}
+      ListEmptyComponent={!loading ? (
+        <View style={styles.emptyState}><Text style={styles.emptyStateText}>No followers yet</Text></View>
+      ) : null}
+      initialNumToRender={12}
+    />
   );
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-    >
-      <View style={styles.container}>
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <SafeAreaView style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeIcon}>
+          <TouchableOpacity onPress={onClose} style={styles.closeIcon} accessibilityLabel="Close">
             <Ionicons name="close" size={24} color="#1F2937" />
           </TouchableOpacity>
-          
           <Text style={styles.headerTitle}>My community</Text>
-          
-          <TouchableOpacity style={styles.profileIcon}>
-            <Ionicons name="person-outline" size={24} color="#1F2937" />
-          </TouchableOpacity>
+          <View style={styles.profileIcon}><Ionicons name="person-outline" size={24} color="#1F2937" /></View>
         </View>
 
-        {/* Tab Navigation */}
+        {/* Tabs */}
         <View style={styles.tabContainer}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'suggested' && styles.activeTab]}
-            onPress={() => setActiveTab('suggested')}
-          >
-            <Text style={[styles.tabText, activeTab === 'suggested' && styles.activeTabText]}>
-              Suggested
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'following' && styles.activeTab]}
-            onPress={() => setActiveTab('following')}
-          >
-            <Text style={[styles.tabText, activeTab === 'following' && styles.activeTabText]}>
-              {following.length} Following
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'followers' && styles.activeTab]}
-            onPress={() => setActiveTab('followers')}
-          >
-            <Text style={[styles.tabText, activeTab === 'followers' && styles.activeTabText]}>
-              {followers.length} Followers
-            </Text>
-          </TouchableOpacity>
+          {[
+            { id: 'suggested', label: 'Suggested' },
+            { id: 'following', label: `${followingCount} Following` },
+            { id: 'followers', label: `${followersCount} Followers` },
+          ].map(tab => (
+            <TouchableOpacity
+              key={tab.id}
+              style={[styles.tab, activeTab === tab.id && styles.activeTab]}
+              onPress={() => setActiveTab(tab.id)}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.tabText, activeTab === tab.id && styles.activeTabText]}>{tab.label}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         {/* Content */}
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={{ flex: 1 }}>
+          {loading && (
+            <View style={{ paddingVertical: 12 }}>
+              <ActivityIndicator size="small" color="#6B7280" />
+            </View>
+          )}
+          {activeTab === 'suggested' && renderSuggested()}
+          {activeTab === 'following' && renderFollowing()}
+          {activeTab === 'followers' && renderFollowers()}
+
+          {/* "Find people you know" can remain below suggested list */}
           {activeTab === 'suggested' && (
-            <>
-              <Text style={styles.sectionTitle}>Suggested for you</Text>
+            <View style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 }}>
+              <Text style={styles.findPeopleTitle}>Find people you know</Text>
               
-              <ScrollView 
-                horizontal 
-                showsHorizontalScrollIndicator={false}
-                style={styles.suggestedScroll}
-              >
-                {suggestedUsers.map(renderSuggestedUser)}
-              </ScrollView>
-              
-              <View style={styles.findPeopleSection}>
-                <Text style={styles.findPeopleTitle}>Find people you know</Text>
-                
-                <TouchableOpacity style={styles.findPeopleItem} onPress={handleSyncContacts}>
-                  <View style={styles.findPeopleIcon}>
-                    <Ionicons name="person-add" size={24} color="#1F2937" />
-                  </View>
-                  <View style={styles.findPeopleContent}>
-                    <Text style={styles.findPeopleLabel}>Contacts</Text>
-                    <Text style={styles.findPeopleDescription}>Find friends from contacts</Text>
-                  </View>
-                  <Text style={styles.syncButton}>Sync</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity style={styles.findPeopleItem} onPress={handleSyncFacebook}>
-                  <View style={[styles.findPeopleIcon, styles.facebookIcon]}>
-                    <Ionicons name="logo-facebook" size={24} color="#1877F2" />
-                  </View>
-                  <View style={styles.findPeopleContent}>
-                    <Text style={styles.findPeopleLabel}>Facebook Friends</Text>
-                    <Text style={styles.findPeopleDescription}>Find friends from Facebook</Text>
-                  </View>
-                  <Text style={styles.syncButton}>Sync</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity style={styles.findPeopleItem} onPress={handleInviteFriends}>
-                  <View style={styles.findPeopleIcon}>
-                    <Ionicons name="person-add" size={24} color="#1F2937" />
-                  </View>
-                  <View style={styles.findPeopleContent}>
-                    <Text style={styles.findPeopleLabel}>Invite friends</Text>
-                    <Text style={styles.findPeopleDescription}>Share your profile to connect</Text>
-                  </View>
-                  <Text style={styles.sendButton}>Send</Text>
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
-          
-          {activeTab === 'following' && (
-            <View style={styles.followingList}>
-              {following.map(renderFollowingUser)}
-              {following.length === 0 && (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyStateText}>You're not following anyone yet</Text>
+              <TouchableOpacity style={styles.findPeopleItem} onPress={handleSyncContacts}>
+                <View style={styles.findPeopleIcon}>
+                  <Ionicons name="person-add" size={20} color="#6B7280" />
                 </View>
-              )}
+                <View style={styles.findPeopleContent}>
+                  <Text style={styles.findPeopleLabel}>Sync contacts</Text>
+                  <Text style={styles.findPeopleDescription}>
+                    Find friends who are already on the platform
+                  </Text>
+                </View>
+                <Text style={styles.syncButton}>Sync</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.findPeopleItem} onPress={handleSyncFacebook}>
+                <View style={[styles.findPeopleIcon, styles.facebookIcon]}>
+                  <Ionicons name="logo-facebook" size={20} color="#1877F2" />
+                </View>
+                <View style={styles.findPeopleContent}>
+                  <Text style={styles.findPeopleLabel}>Connect Facebook</Text>
+                  <Text style={styles.findPeopleDescription}>
+                    Find friends from your Facebook account
+                  </Text>
+                </View>
+                <Text style={styles.syncButton}>Connect</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.findPeopleItem} onPress={handleInviteFriends}>
+                <View style={styles.findPeopleIcon}>
+                  <Ionicons name="mail" size={20} color="#6B7280" />
+                </View>
+                <View style={styles.findPeopleContent}>
+                  <Text style={styles.findPeopleLabel}>Invite friends</Text>
+                  <Text style={styles.findPeopleDescription}>
+                    Send invitations to join the platform
+                  </Text>
+                </View>
+                <Text style={styles.sendButton}>Send</Text>
+              </TouchableOpacity>
             </View>
           )}
-          
-          {activeTab === 'followers' && (
-            <View style={styles.followingList}>
-              {followers.map(renderFollowerUser)}
-              {followers.length === 0 && (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyStateText}>No followers yet</Text>
-                </View>
-              )}
-            </View>
-          )}
-        </ScrollView>
-      </View>
+        </View>
+      </SafeAreaView>
     </Modal>
   );
 }

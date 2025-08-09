@@ -1,14 +1,54 @@
 const express = require('express');
-const { body, validationResult } = require('express-validator');
+const { body, query: queryValidator, validationResult } = require('express-validator');
 const { query } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
+// Valid color schemes
+const VALID_SCHEMES = ['complementary', 'analogous', 'triadic', 'tetradic', 'monochromatic'];
+
+// Helper function to validate hex color
+const isValidHexColor = (color) => /^#[0-9A-F]{6}$/i.test(color);
+
+// Helper function to parse and cap pagination params
+const parsePagination = (limit, offset, maxLimit = 100) => {
+  const parsedLimit = Math.min(Math.max(parseInt(limit) || 20, 1), maxLimit);
+  const parsedOffset = Math.max(parseInt(offset) || 0, 0);
+  return { limit: parsedLimit, offset: parsedOffset };
+};
+
+// Custom validator for colors array
+const validateColorsArray = (colors) => {
+  if (!Array.isArray(colors)) {
+    throw new Error('Colors must be an array');
+  }
+  if (colors.length < 1 || colors.length > 12) {
+    throw new Error('Colors array must contain 1-12 items');
+  }
+  if (!colors.every(color => typeof color === 'string' && isValidHexColor(color))) {
+    throw new Error('All colors must be valid hex format (#RRGGBB)');
+  }
+  return true;
+};
+
 // Get all color matches for a user
-router.get('/', authenticateToken, async (req, res) => {
+router.get('/', [
+  authenticateToken,
+  queryValidator('scheme').optional().isIn(VALID_SCHEMES).withMessage('Invalid color scheme'),
+  queryValidator('privacy').optional().isIn(['private', 'public']).withMessage('Privacy must be private or public')
+], async (req, res) => {
   try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
     const userId = req.user.userId;
-    const { privacy, scheme, limit = 50, offset = 0 } = req.query;
+    const { privacy, scheme } = req.query;
+    const { limit, offset } = parsePagination(req.query.limit, req.query.offset, 100);
 
     let queryText = `
       SELECT cm.*, u.username 
@@ -49,9 +89,20 @@ router.get('/', authenticateToken, async (req, res) => {
 });
 
 // Get public color matches (for discover feed)
-router.get('/public', async (req, res) => {
+router.get('/public', [
+  queryValidator('scheme').optional().isIn(VALID_SCHEMES).withMessage('Invalid color scheme')
+], async (req, res) => {
   try {
-    const { scheme, limit = 20, offset = 0 } = req.query;
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
+    const { scheme } = req.query;
+    const { limit, offset } = parsePagination(req.query.limit, req.query.offset, 50);
 
     let queryText = `
       SELECT cm.*, u.username 
@@ -89,10 +140,19 @@ router.get('/public', async (req, res) => {
 // Create new color match
 router.post('/', [
   authenticateToken,
-  body('base_color').matches(/^#[0-9A-F]{6}$/i),
-  body('scheme').isIn(['complementary', 'analogous', 'triadic', 'tetradic', 'monochromatic']),
-  body('colors').isArray(),
-  body('privacy').optional().isIn(['private', 'public'])
+  body('base_color').matches(/^#[0-9A-F]{6}$/i).withMessage('Base color must be valid hex format (#RRGGBB)'),
+  body('scheme').isIn(VALID_SCHEMES).withMessage('Invalid color scheme'),
+  body('colors').custom(validateColorsArray),
+  body('privacy').optional().isIn(['private', 'public']).withMessage('Privacy must be private or public'),
+  body('is_locked').optional().isBoolean().withMessage('is_locked must be a boolean'),
+  body('locked_color').custom((value, { req }) => {
+    if (req.body.is_locked === true) {
+      if (!value || !isValidHexColor(value)) {
+        throw new Error('locked_color must be a valid hex color when is_locked is true');
+      }
+    }
+    return true;
+  })
 ], async (req, res) => {
   try {
     const errors = validationResult(req);

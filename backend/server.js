@@ -9,6 +9,7 @@ const colorRoutes = require('./routes/colors');
 const boardRoutes = require('./routes/boards');
 const userRoutes = require('./routes/users');
 const communityRoutes = require('./routes/community');
+const imageRoutes = require('./routes/images');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -50,6 +51,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/colors', colorRoutes);
 app.use('/api/boards', boardRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/images', imageRoutes);
 app.use('/api', communityRoutes);
 
 // 404 handler

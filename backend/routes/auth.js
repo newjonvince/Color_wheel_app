@@ -3,10 +3,19 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { query } = require('../config/database');
 const { registerValidation, loginValidation, idValidation } = require('../middleware/validation');
+const { 
+  authLimiter, 
+  registrationLimiter, 
+  usernameCheckLimiter, 
+  passwordResetLimiter, 
+  emailVerificationLimiter 
+} = require('../middleware/rateLimiting');
+const { verifyCaptcha, optionalCaptcha } = require('../middleware/captcha');
+const emailService = require('../services/emailService');
 const router = express.Router();
 
 // Register new user
-router.post('/register', registerValidation, async (req, res) => {
+router.post('/register', registrationLimiter, verifyCaptcha, registerValidation, async (req, res) => {
   try {
 
     const { email, username, password, location, birthday_month, birthday_day, birthday_year, gender } = req.body;
@@ -67,6 +76,14 @@ router.post('/register', registerValidation, async (req, res) => {
       [user.id, token, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)] // 7 days
     );
 
+    // Send email verification
+    try {
+      await emailService.sendVerificationEmail(user.email, user.username, user.id);
+    } catch (emailError) {
+      console.error('Failed to send verification email:', emailError);
+      // Don't fail registration if email fails
+    }
+
     res.status(201).json({
       message: 'User registered successfully',
       user: {
@@ -80,9 +97,11 @@ router.post('/register', registerValidation, async (req, res) => {
           year: user.birthday_year
         },
         gender: user.gender,
-        createdAt: user.created_at
+        createdAt: user.created_at,
+        emailVerified: false
       },
-      token
+      token,
+      emailVerificationSent: true
     });
 
   } catch (error) {
@@ -95,14 +114,14 @@ router.post('/register', registerValidation, async (req, res) => {
 });
 
 // Login user
-router.post('/login', loginValidation, async (req, res) => {
+router.post('/login', authLimiter, optionalCaptcha, loginValidation, async (req, res) => {
   try {
 
     const { email, password } = req.body;
 
     // Find user
     const result = await query(
-      'SELECT id, email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at FROM users WHERE email = $1 AND is_active = true',
+      'SELECT id, email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at, email_verified FROM users WHERE email = $1 AND is_active = true',
       [email]
     );
 
@@ -150,7 +169,8 @@ router.post('/login', loginValidation, async (req, res) => {
           year: user.birthday_year
         },
         gender: user.gender,
-        createdAt: user.created_at
+        createdAt: user.created_at,
+        emailVerified: user.email_verified || false
       },
       token
     });
@@ -225,7 +245,7 @@ router.post('/refresh', async (req, res) => {
 });
 
 // Check username availability
-router.get('/check-username/:username', async (req, res) => {
+router.get('/check-username/:username', usernameCheckLimiter, async (req, res) => {
   try {
     const { username } = req.params;
 
@@ -269,6 +289,206 @@ router.post('/logout', async (req, res) => {
     console.error('Logout error:', error);
     res.status(500).json({
       error: 'Logout failed',
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Verify email address
+router.post('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        error: 'Verification token required',
+        message: 'Please provide a verification token.'
+      });
+    }
+
+    const result = await emailService.verifyEmailToken(token);
+
+    if (!result.success) {
+      return res.status(400).json({
+        error: 'Verification failed',
+        message: result.error
+      });
+    }
+
+    res.json({
+      message: 'Email verified successfully',
+      user: {
+        id: result.userId,
+        email: result.email,
+        username: result.username,
+        emailVerified: true
+      }
+    });
+
+  } catch (error) {
+    console.error('Email verification error:', error);
+    res.status(500).json({
+      error: 'Email verification failed',
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Resend email verification
+router.post('/resend-verification', emailVerificationLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'Email required',
+        message: 'Please provide an email address.'
+      });
+    }
+
+    // Find user
+    const result = await query(
+      'SELECT id, email, username, email_verified FROM users WHERE email = $1 AND is_active = true',
+      [email.trim().toLowerCase()]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'User not found',
+        message: 'No account found with this email address.'
+      });
+    }
+
+    const user = result.rows[0];
+
+    if (user.email_verified) {
+      return res.status(400).json({
+        error: 'Email already verified',
+        message: 'This email address is already verified.'
+      });
+    }
+
+    // Send verification email
+    await emailService.sendVerificationEmail(user.email, user.username, user.id);
+
+    res.json({
+      message: 'Verification email sent',
+      email: user.email
+    });
+
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.status(500).json({
+      error: 'Failed to resend verification',
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Request password reset
+router.post('/forgot-password', passwordResetLimiter, async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({
+        error: 'Email required',
+        message: 'Please provide an email address.'
+      });
+    }
+
+    // Find user
+    const result = await query(
+      'SELECT id, email, username FROM users WHERE email = $1 AND is_active = true',
+      [email.trim().toLowerCase()]
+    );
+
+    if (result.rows.length === 0) {
+      // Don't reveal if email exists or not for security
+      return res.json({
+        message: 'If an account with this email exists, a password reset link has been sent.'
+      });
+    }
+
+    const user = result.rows[0];
+
+    // Send password reset email
+    await emailService.sendPasswordResetEmail(user.email, user.username, user.id);
+
+    res.json({
+      message: 'If an account with this email exists, a password reset link has been sent.'
+    });
+
+  } catch (error) {
+    console.error('Password reset request error:', error);
+    res.status(500).json({
+      error: 'Password reset request failed',
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Reset password with token
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+      return res.status(400).json({
+        error: 'Token and new password required',
+        message: 'Please provide both reset token and new password.'
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        error: 'Password too short',
+        message: 'Password must be at least 6 characters long.'
+      });
+    }
+
+    // Verify reset token
+    const tokenResult = await emailService.verifyResetToken(token);
+
+    if (!tokenResult.success) {
+      return res.status(400).json({
+        error: 'Invalid reset token',
+        message: tokenResult.error
+      });
+    }
+
+    // Hash new password
+    const saltRounds = 12;
+    const passwordHash = await bcrypt.hash(newPassword, saltRounds);
+
+    // Update user password
+    await query(
+      'UPDATE users SET password_hash = $1 WHERE id = $2',
+      [passwordHash, tokenResult.userId]
+    );
+
+    // Mark reset token as used
+    await emailService.markResetTokenUsed(token);
+
+    // Invalidate all existing sessions for security
+    await query(
+      'DELETE FROM user_sessions WHERE user_id = $1',
+      [tokenResult.userId]
+    );
+
+    res.json({
+      message: 'Password reset successful',
+      user: {
+        id: tokenResult.userId,
+        email: tokenResult.email,
+        username: tokenResult.username
+      }
+    });
+
+  } catch (error) {
+    console.error('Password reset error:', error);
+    res.status(500).json({
+      error: 'Password reset failed',
       message: 'Internal server error'
     });
   }

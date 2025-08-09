@@ -1,17 +1,16 @@
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 
-// Get API URL from environment or fallback to localhost
+// Prefer build-time env (set in app.config.* as EXPO_PUBLIC_API_URL)
 const getApiUrl = () => {
-  // Try EAS build environment first, then expo config, then fallback
-  const easEnv = Constants.expoConfig?.env || Constants.manifest?.env;
-  const extra = Constants.expoConfig?.extra || Constants.manifest?.extra;
-  
-  return easEnv?.API_URL || extra?.API_URL || 'http://localhost:3000';
+  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
+  const extra = Constants?.expoConfig?.extra;
+  return extra?.API_URL || 'http://localhost:3000';
 };
 
-const API_BASE_URL = `${getApiUrl()}/api`;
-const HEALTH_CHECK_URL = `${getApiUrl()}/health`;
+const API_ROOT = getApiUrl();
+const API_BASE_URL = `${API_ROOT}/api`;
+const HEALTH_CHECK_URL = `${API_ROOT}/health`;
 const TOKEN_KEY = 'auth_token';
 const REFRESH_TOKEN_KEY = 'refresh_token';
 
@@ -23,104 +22,90 @@ class ApiService {
     this.isOnline = true;
     this.isRefreshing = false;
     this.failedQueue = [];
-    
-    // Load token from secure storage on initialization
+
+    // fire-and-forget; callers can await loadTokenFromStorage() explicitly if needed
     this.loadTokenFromStorage();
   }
 
+  setBaseURL(url) {
+    this.baseURL = url?.replace(/\/$/, '') || this.baseURL;
+  }
+
   async setToken(token, refreshToken = null) {
-    this.token = token;
-    this.refreshToken = refreshToken;
-    
-    if (token) {
-      await SecureStore.setItemAsync(TOKEN_KEY, token);
-      if (refreshToken) {
-        await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
-      }
-    } else {
-      await this.clearToken();
-    }
+    this.token = token || null;
+    this.refreshToken = refreshToken || null;
+
+    if (token) await SecureStore.setItemAsync(TOKEN_KEY, token);
+    else await SecureStore.deleteItemAsync(TOKEN_KEY);
+
+    if (refreshToken) await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
+    else await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
   }
 
   async clearToken() {
     this.token = null;
     this.refreshToken = null;
-    
     try {
       await SecureStore.deleteItemAsync(TOKEN_KEY);
       await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
-    } catch (error) {
-      console.warn('Error clearing tokens from secure storage:', error);
+    } catch (err) {
+      console.warn('Error clearing tokens from secure storage:', err);
     }
   }
 
-  // Load token from secure storage
   async loadTokenFromStorage() {
     try {
-      const token = await SecureStore.getItemAsync(TOKEN_KEY);
-      const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
-      
-      if (token) {
-        this.token = token;
-        this.refreshToken = refreshToken;
-      }
-    } catch (error) {
-      console.warn('Error loading tokens from secure storage:', error);
+      const [token, refreshToken] = await Promise.all([
+        SecureStore.getItemAsync(TOKEN_KEY),
+        SecureStore.getItemAsync(REFRESH_TOKEN_KEY),
+      ]);
+      this.token = token || null;
+      this.refreshToken = refreshToken || null;
+    } catch (err) {
+      console.warn('Error loading tokens from secure storage:', err);
     }
   }
 
-  // Process failed queue after token refresh
+  // Resolve/reject any queued requests waiting for refresh
   processFailedQueue(error, token = null) {
-    this.failedQueue.forEach(({ resolve, reject }) => {
-      if (error) {
-        reject(error);
-      } else {
-        resolve(token);
-      }
-    });
-    
+    this.failedQueue.forEach(({ resolve, reject }) => (error ? reject(error) : resolve(token)));
     this.failedQueue = [];
   }
 
-  // Refresh token flow
+  // Token refresh
   async refreshAuthToken() {
     if (this.isRefreshing) {
-      // If already refreshing, queue this request
-      return new Promise((resolve, reject) => {
-        this.failedQueue.push({ resolve, reject });
-      });
+      return new Promise((resolve, reject) => this.failedQueue.push({ resolve, reject }));
     }
-
-    if (!this.refreshToken) {
-      throw new Error('No refresh token available');
-    }
+    if (!this.refreshToken) throw new Error('No refresh token available');
 
     this.isRefreshing = true;
-
     try {
-      const response = await fetch(`${this.baseURL}/auth/refresh`, {
+      const res = await fetch(`${this.baseURL}/auth/refresh`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.refreshToken}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: this.refreshToken }),
       });
 
-      if (!response.ok) {
-        throw new Error('Token refresh failed');
+      const ct = res.headers.get('content-type') || '';
+      const hasBody = res.status !== 204 && res.headers.get('content-length') !== '0';
+      const payload = hasBody && ct.includes('application/json') ? await res.json() : hasBody ? await res.text() : null;
+
+      if (!res.ok) {
+        const err = new Error(typeof payload === 'string' ? payload : payload?.message || 'Token refresh failed');
+        err.status = res.status;
+        err.response = payload;
+        throw err;
       }
 
-      const data = await response.json();
-      const { token, refreshToken } = data;
-
+      const { token, refreshToken } = payload || {};
       await this.setToken(token, refreshToken);
       this.processFailedQueue(null, token);
-      
       return token;
-    } catch (error) {
-      this.processFailedQueue(error, null);
+    } catch (err) {
+      this.processFailedQueue(err, null);
       await this.clearToken();
-      throw error;
+      throw err;
     } finally {
       this.isRefreshing = false;
     }
@@ -275,6 +260,20 @@ class ApiService {
     return response;
   }
 
+  // User Settings Methods
+  async updateSettings(settings) {
+    return this.request('/users/settings', {
+      method: 'PUT',
+      body: settings,
+    });
+  }
+
+  async requestDataExport() {
+    return this.request('/users/export-data', {
+      method: 'POST',
+    });
+  }
+
   // Color Match Methods
   async getColorMatches(params = {}) {
     const queryString = new URLSearchParams(params).toString();
@@ -282,9 +281,27 @@ class ApiService {
   }
 
   async createColorMatch(colorMatch) {
+    // Transform client data format to server expected format
+    const serverPayload = {
+      base_color: colorMatch.color || colorMatch.baseColor || (colorMatch.colors && colorMatch.colors[0]) || '#000000',
+      scheme: colorMatch.scheme || 'monochromatic',
+      colors: Array.isArray(colorMatch.colors) ? colorMatch.colors : [colorMatch.color || colorMatch.baseColor || '#000000'],
+      privacy: colorMatch.isPublic === true ? 'public' : 'private',
+      is_locked: colorMatch.isLocked || false,
+      locked_color: colorMatch.lockedColor || colorMatch.locked_color || null,
+    };
+
+    // Include optional fields if provided
+    if (colorMatch.boardId) {
+      serverPayload.board_id = colorMatch.boardId;
+    }
+    if (colorMatch.metadata) {
+      serverPayload.metadata = colorMatch.metadata;
+    }
+
     return this.request('/colors', {
       method: 'POST',
-      body: colorMatch,
+      body: serverPayload,
     });
   }
 
@@ -431,6 +448,39 @@ class ApiService {
     }
     
     throw lastError;
+  }
+
+  // HTTP Method Helpers
+  async get(endpoint, options = {}) {
+    return this.request(endpoint, { method: 'GET', ...options });
+  }
+
+  async post(endpoint, data = null, options = {}) {
+    return this.request(endpoint, { 
+      method: 'POST', 
+      body: data,
+      ...options 
+    });
+  }
+
+  async put(endpoint, data = null, options = {}) {
+    return this.request(endpoint, { 
+      method: 'PUT', 
+      body: data,
+      ...options 
+    });
+  }
+
+  async delete(endpoint, options = {}) {
+    return this.request(endpoint, { method: 'DELETE', ...options });
+  }
+
+  async patch(endpoint, data = null, options = {}) {
+    return this.request(endpoint, { 
+      method: 'PATCH', 
+      body: data,
+      ...options 
+    });
   }
 }
 

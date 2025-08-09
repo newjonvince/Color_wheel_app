@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { Svg, Circle, Path, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { GestureHandlerRootView, PanGestureHandler, State } from 'react-native-gesture-handler';
 import Animated, {
@@ -311,6 +312,27 @@ export default function ColorWheelScreen({ navigation, currentUser, onSaveColorM
     setShowCoolorsExtractor(true);
   };
 
+  // Handle color extraction from camera image
+  const handleColorExtractedFromImage = async (imageUri) => {
+    try {
+      // Set the image for the CoolorsColorExtractor to process
+      setCollageImage(imageUri);
+      // For now, we'll use a placeholder color - the CoolorsColorExtractor will handle the actual extraction
+      // This will be replaced by the actual extracted color from CoolorsColorExtractor
+      const extractedColor = '#FF6B6B'; // placeholder
+      const { h: hue } = hexToHsl(extractedColor);
+      setSelectedColor(extractedColor);
+      setLockedColor(extractedColor);
+      setAngle(hue);
+      setIsColorLocked(true);
+      setSelectedScheme('complementary');
+      updateColorState(hue, extractedColor, activeMarkerId);
+    } catch (error) {
+      console.error('Error extracting color from camera image:', error);
+      Alert.alert('Error', 'Could not extract color from image.');
+    }
+  };
+
   const renderColorWheel = () => {
     // Render multiple markers for different schemes
     const renderMarkers = () => {
@@ -445,7 +467,33 @@ export default function ColorWheelScreen({ navigation, currentUser, onSaveColorM
       </View>
 
       <View style={styles.inputButtons}>
-        <TouchableOpacity style={styles.inputButton} onPress={() => {}}>
+        <TouchableOpacity
+          style={styles.inputButton}
+          onPress={async () => {
+            try {
+              const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+              if (permissionResult.status !== 'granted') {
+                Alert.alert('Permission Denied', 'Camera access is required to take a photo.');
+                return;
+              }
+
+              const result = await ImagePicker.launchCameraAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                quality: 1,
+              });
+
+              if (!result.canceled && result.assets && result.assets.length > 0) {
+                setShowCoolorsExtractor(true);
+                setTimeout(() => {
+                  handleColorExtractedFromImage(result.assets[0].uri);
+                }, 300);
+              }
+            } catch (error) {
+              console.error('Error launching camera:', error);
+              Alert.alert('Error', 'Could not open camera.');
+            }
+          }}
+        >
           <Text style={styles.inputButtonText}>📷 Camera</Text>
         </TouchableOpacity>
         

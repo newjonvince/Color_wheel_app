@@ -1,94 +1,197 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   StyleSheet,
   Text,
   View,
-  ScrollView,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   Image,
   RefreshControl,
-  Dimensions,
   Alert,
+  ActivityIndicator,
+  Share,
+  FlatList,
+  Animated,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ApiService from '../services/api';
 import CommunityModal from '../components/CommunityModal';
 
-const { width: screenWidth } = Dimensions.get('window');
+// Double-tap like wrapper with heart burst animation
+const DoubleTapLike = ({ children, onDoubleTap, onLongPress }) => {
+  const lastTap = React.useRef(null);
+  const scale = React.useRef(new Animated.Value(0.6)).current;
+  const opacity = React.useRef(new Animated.Value(0)).current;
 
-export default function CommunityFeedScreen({ navigation, currentUser, onLogout }) {
+  const animate = React.useCallback(() => {
+    scale.setValue(0.6);
+    opacity.setValue(1);
+    Animated.parallel([
+      Animated.spring(scale, { toValue: 1.4, useNativeDriver: true, bounciness: 12 }),
+      Animated.timing(opacity, { toValue: 0, duration: 600, delay: 200, useNativeDriver: true }),
+    ]).start();
+  }, [opacity, scale]);
+
+  const handlePress = React.useCallback(() => {
+    const now = Date.now();
+    if (lastTap.current && now - lastTap.current < 300) {
+      onDoubleTap && onDoubleTap();
+      animate();
+    }
+    lastTap.current = now;
+  }, [animate, onDoubleTap]);
+
+  return (
+    <TouchableWithoutFeedback onPress={handlePress} onLongPress={onLongPress} delayLongPress={300}>
+      <View>
+        {children}
+        <Animated.View pointerEvents="none" style={[styles.heartBurst, { opacity, transform: [{ scale }] }]}> 
+          <Ionicons name="heart" size={96} color="#ff3040" />
+        </Animated.View>
+      </View>
+    </TouchableWithoutFeedback>
+  );
+};
+
+export default function CommunityFeedScreen({ navigation, currentUser }) {
   const [posts, setPosts] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showCommunityModal, setShowCommunityModal] = useState(false);
+  const [pageCursor, setPageCursor] = useState(null); // backend cursor or page number
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  useEffect(() => {
-    loadCommunityPosts();
+  const likeLocks = useRef(new Set()); // prevent double-like spamming per post
+  const followLocks = useRef(new Set());
+
+  const fetchPage = useCallback(async (cursor = null, replace = false) => {
+    const params = cursor ? { cursor } : {};
+    const qs = new URLSearchParams(params).toString();
+    const endpoint = `/posts/community${qs ? `?${qs}` : ''}`;
+    const res = await ApiService.get(endpoint);
+    // Expecting shape: { data: Post[], nextCursor: string|null }
+    const data = res?.data ?? res; // support either {data} or array
+    const next = res?.nextCursor ?? null;
+
+    setPosts((prev) => (replace ? data : [...prev, ...data]));
+    setPageCursor(next);
+    setHasMore(Boolean(next) && (Array.isArray(data) ? data.length > 0 : true));
   }, []);
 
-  const loadCommunityPosts = async () => {
+  const loadInitial = useCallback(async () => {
     try {
       setLoading(true);
-      // Load public posts from all users
-      const response = await ApiService.get('/posts/community');
-      setPosts(response.data || []);
-    } catch (error) {
-      console.error('Error loading community posts:', error);
+      await fetchPage(null, true);
+    } catch (e) {
+      console.error('Error loading community posts:', e);
       Alert.alert('Error', 'Failed to load community posts');
     } finally {
       setLoading(false);
     }
-  };
+  }, [fetchPage]);
 
-  const onRefresh = async () => {
+  useEffect(() => {
+    loadInitial();
+  }, [loadInitial]);
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadCommunityPosts();
-    setRefreshing(false);
-  };
+    try {
+      await fetchPage(null, true);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [fetchPage]);
 
-  const handleFollowUser = async (userId) => {
+  const loadMore = useCallback(async () => {
+    if (!hasMore || loadingMore || loading) return;
+    try {
+      setLoadingMore(true);
+      await fetchPage(pageCursor, false);
+    } catch (e) {
+      console.warn('Load more failed:', e);
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [fetchPage, hasMore, loadingMore, loading, pageCursor]);
+
+  const updatePostsForUser = useCallback((userId, patch) => {
+    setPosts((prev) => prev.map((p) => (p.user_id === userId ? { ...p, ...patch } : p)));
+  }, []);
+
+  const handleFollowUser = useCallback(async (userId) => {
+    if (followLocks.current.has(userId)) return;
+    followLocks.current.add(userId);
+
+    const prevPosts = posts;
+    updatePostsForUser(userId, { is_following: true });
     try {
       await ApiService.post(`/users/${userId}/follow`);
-      // Update posts to reflect follow status
-      setPosts(posts.map(post => 
-        post.user_id === userId 
-          ? { ...post, is_following: true }
-          : post
-      ));
     } catch (error) {
       console.error('Error following user:', error);
       Alert.alert('Error', 'Failed to follow user');
+      // rollback
+      updatePostsForUser(userId, { is_following: false });
+    } finally {
+      followLocks.current.delete(userId);
     }
-  };
+  }, [posts, updatePostsForUser]);
 
-  const handleUnfollowUser = async (userId) => {
+  const handleUnfollowUser = useCallback(async (userId) => {
+    if (followLocks.current.has(userId)) return;
+    followLocks.current.add(userId);
+
+    updatePostsForUser(userId, { is_following: false });
     try {
       await ApiService.delete(`/users/${userId}/follow`);
-      // Update posts to reflect unfollow status
-      setPosts(posts.map(post => 
-        post.user_id === userId 
-          ? { ...post, is_following: false }
-          : post
-      ));
     } catch (error) {
       console.error('Error unfollowing user:', error);
       Alert.alert('Error', 'Failed to unfollow user');
+      // rollback
+      updatePostsForUser(userId, { is_following: true });
+    } finally {
+      followLocks.current.delete(userId);
     }
-  };
+  }, [updatePostsForUser]);
 
-  const handleLikePost = async (postId) => {
+  const handleLikePost = useCallback(async (postId) => {
+    if (likeLocks.current.has(postId)) return;
+    likeLocks.current.add(postId);
+
+    // optimistic update
+    setPosts((prev) => prev.map((p) => (p.id === postId ? {
+      ...p,
+      is_liked: !p.is_liked,
+      likes_count: (p.likes_count || 0) + (p.is_liked ? -1 : 1),
+    } : p)));
+
     try {
       await ApiService.post(`/posts/${postId}/like`);
-      // Update posts to reflect like status
-      setPosts(posts.map(post => 
-        post.id === postId 
-          ? { ...post, is_liked: !post.is_liked, likes_count: post.is_liked ? post.likes_count - 1 : post.likes_count + 1 }
-          : post
-      ));
     } catch (error) {
       console.error('Error liking post:', error);
+      // rollback
+      setPosts((prev) => prev.map((p) => (p.id === postId ? {
+        ...p,
+        is_liked: !p.is_liked,
+        likes_count: (p.likes_count || 0) + (p.is_liked ? -1 : 1),
+      } : p)));
+    } finally {
+      likeLocks.current.delete(postId);
     }
-  };
+  }, []);
+
+  const handleShare = useCallback(async (post) => {
+    try {
+      await Share.share({
+        message: post.description ? `${post.description}\n${post.image_url || ''}` : (post.image_url || ''),
+        url: post.image_url || undefined,
+        title: `Styled by ${post.username}`,
+      });
+    } catch (e) {
+      console.warn('Share error:', e);
+    }
+  }, []);
 
   const renderPost = (post) => (
     <View key={post.id} style={styles.postCard}>

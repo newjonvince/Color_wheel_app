@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -9,118 +9,161 @@ import {
   Alert,
   PanResponder,
 } from 'react-native';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
+import ApiService from '../services/api';
+import { hexToHsl } from '../utils/color';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
+const MAGNIFIER_SIZE = 120;
 
-export default function CoolorsColorExtractor({ onColorExtracted, onClose, onCreateCollage }) {
-  const [selectedImage, setSelectedImage] = useState(null);
+/**
+ * Props:
+ *  - initialImageUri?: string  // when provided, skips gallery and loads this image directly (e.g., from camera)
+ *  - onColorExtracted(hex: string): void
+ *  - onCreateCollage?(imageAssetOrUri, hex): void
+ *  - onClose(): void
+ */
+export default function CoolorsColorExtractor({ initialImageUri, onColorExtracted, onCreateCollage, onClose }) {
+  const [selectedImage, setSelectedImage] = useState(null); // { uri }
   const [magnifierPosition, setMagnifierPosition] = useState({ x: screenWidth / 2, y: screenHeight / 2 });
   const [extractedColor, setExtractedColor] = useState('#808080');
+  const [palette, setPalette] = useState([]); // ['#xxxxxx']
   const [isLoading, setIsLoading] = useState(false);
   const [imageLayout, setImageLayout] = useState({ width: 0, height: 0, x: 0, y: 0 });
+  const mounted = useRef(true);
 
-  const MAGNIFIER_SIZE = 120;
-  const colorSamples = [
-    '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FECA57',
-    '#FF9FF3', '#54A0FF', '#5F27CD', '#00D2D3', '#FF9F43',
-    '#10AC84', '#EE5A24', '#0984E3', '#A29BFE', '#6C5CE7'
-  ];
+  // --- helpers --------------------------------------------------------------
+  const fallbackPalette = useMemo(() => (
+    ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FECA57','#FF9FF3','#54A0FF','#5F27CD','#00D2D3','#FF9F43','#10AC84','#EE5A24','#0984E3','#A29BFE','#6C5CE7']
+  ), []);
 
-  useEffect(() => {
-    pickImage();
-  }, []);
+  const chooseDominant = useCallback((paletteArray) => paletteArray?.[0] || '#808080', []);
 
-  const pickImage = async () => {
+  const callServerExtract = useCallback(async (uri) => {
+    // Uses the API base URL from ApiService and includes auth token if present.
+    // Endpoint implemented below: POST /images/extract-colors (multipart/form-data)
+    try {
+      const apiBase = ApiService.baseURL?.replace(/\/?$/, ''); // no trailing slash
+      const url = `${apiBase}/images/extract-colors`;
+
+      const form = new FormData();
+      form.append('image', { uri, name: 'upload.jpg', type: 'image/jpeg' });
+
+      const headers = { Accept: 'application/json' };
+      if (ApiService.token) headers['Authorization'] = `Bearer ${ApiService.token}`;
+
+      const res = await fetch(url, { method: 'POST', headers, body: form });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      // expected: { dominant: '#rrggbb', palette: ['#..', ...] }
+      return data;
+    } catch (e) {
+      console.warn('Server extraction failed, using fallback palette:', e?.message);
+      return { dominant: fallbackPalette[0], palette: fallbackPalette };
+    }
+  }, [fallbackPalette]);
+
+  const processImage = useCallback(async (asset) => {
+    setIsLoading(true);
+    try {
+      setSelectedImage(asset);
+      const { dominant, palette: srvPalette } = await callServerExtract(asset.uri);
+      setPalette(Array.isArray(srvPalette) && srvPalette.length ? srvPalette : fallbackPalette);
+      setExtractedColor(dominant || fallbackPalette[0]);
+    } catch (e) {
+      setPalette(fallbackPalette);
+      setExtractedColor(fallbackPalette[0]);
+    } finally {
+      if (mounted.current) setIsLoading(false);
+    }
+  }, [callServerExtract, fallbackPalette]);
+
+  const pickImage = useCallback(async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: false,
-        quality: 1,
+        quality: 0.9,
       });
-
-      if (!result.canceled && result.assets[0]) {
-        setSelectedImage(result.assets[0]);
-        await processImageForColorExtraction(result.assets[0]);
+      if (!result.canceled && result.assets?.[0]) {
+        await processImage(result.assets[0]);
       } else {
-        onClose();
+        onClose?.();
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to select image');
-      onClose();
+      onClose?.();
     }
-  };
+  }, [onClose, processImage]);
 
-  const processImageForColorExtraction = async (imageAsset) => {
-    setIsLoading(true);
-    try {
-      // For React Native, we'll simulate color extraction with predefined colors
-      // In a real implementation, you'd use a native module or server-side processing
-      setExtractedColor(colorSamples[0]);
-    } catch (error) {
-      console.error('Error processing image:', error);
-      Alert.alert('Error', 'Failed to process image');
-    }
-    setIsLoading(false);
-  };
+  // mount
+  useEffect(() => {
+    mounted.current = true;
+    (async () => {
+      if (initialImageUri) {
+        await processImage({ uri: initialImageUri });
+      } else {
+        await pickImage();
+      }
+    })();
+    return () => { mounted.current = false; };
+  }, [initialImageUri, pickImage, processImage]);
 
-  const extractColorAtPosition = (relativeX, relativeY) => {
-    // Simulate color extraction based on position
-    // In a real implementation, this would analyze the actual pixel data
-    const colorIndex = Math.floor((relativeX + relativeY) * colorSamples.length) % colorSamples.length;
-    setExtractedColor(colorSamples[colorIndex]);
-  };
+  // --- interaction ---------------------------------------------------------
+  const extractColorAtPosition = useCallback((relativeX, relativeY) => {
+    if (!palette.length) return;
+    // Simple mapping: pick color index based on relative position.
+    const idx = Math.max(0, Math.min(palette.length - 1, Math.floor((relativeX + relativeY) * palette.length) % palette.length));
+    setExtractedColor(palette[idx]);
+  }, [palette]);
 
-  const panResponder = PanResponder.create({
+  const updateMagnifierPosition = useCallback((x, y) => {
+    const w = imageLayout.width || 1;
+    const h = imageLayout.height || 1;
+    const cx = Math.max(MAGNIFIER_SIZE / 2, Math.min(w - MAGNIFIER_SIZE / 2, x));
+    const cy = Math.max(MAGNIFIER_SIZE / 2, Math.min(h - MAGNIFIER_SIZE / 2, y));
+    setMagnifierPosition({ x: cx, y: cy });
+    extractColorAtPosition(cx / w, cy / h);
+  }, [imageLayout.width, imageLayout.height, extractColorAtPosition]);
+
+  const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (evt) => {
+      if (!selectedImage) return;
       const { locationX, locationY } = evt.nativeEvent;
       updateMagnifierPosition(locationX, locationY);
     },
     onPanResponderMove: (evt) => {
+      if (!selectedImage) return;
       const { locationX, locationY } = evt.nativeEvent;
       updateMagnifierPosition(locationX, locationY);
     },
-  });
+  }), [selectedImage, updateMagnifierPosition]);
 
-  const updateMagnifierPosition = (x, y) => {
-    // Constrain magnifier within image bounds
-    const constrainedX = Math.max(MAGNIFIER_SIZE / 2, Math.min(imageLayout.width - MAGNIFIER_SIZE / 2, x));
-    const constrainedY = Math.max(MAGNIFIER_SIZE / 2, Math.min(imageLayout.height - MAGNIFIER_SIZE / 2, y));
-    
-    setMagnifierPosition({ x: constrainedX, y: constrainedY });
-    
-    // Calculate relative position for color extraction
-    const relativeX = constrainedX / imageLayout.width;
-    const relativeY = constrainedY / imageLayout.height;
-    
-    extractColorAtPosition(relativeX, relativeY);
-  };
 
-  const onImageLayout = (event) => {
+
+  const onImageLayout = useCallback((event) => {
     const { width, height, x, y } = event.nativeEvent.layout;
     setImageLayout({ width, height, x, y });
-    // Set initial magnifier position at center
-    setMagnifierPosition({ x: width / 2, y: height / 2 });
-    extractColorAtPosition(0.5, 0.5);
-  };
-
-  const handleViewOnColorWheel = () => {
-    onColorExtracted(extractedColor);
-  };
-
-  const handleCreateCollage = () => {
-    if (onCreateCollage && selectedImage) {
-      onCreateCollage(selectedImage, extractedColor);
+    if (width > 0 && height > 0) {
+      setMagnifierPosition({ x: width / 2, y: height / 2 });
+      extractColorAtPosition(0.5, 0.5);
     }
-  };
+  }, [extractColorAtPosition]);
+
+  const handleUseOnWheel = useCallback(() => {
+    onColorExtracted?.(extractedColor);
+  }, [extractedColor, onColorExtracted]);
+
+  const handleCreateCollagePress = useCallback(() => {
+    if (onCreateCollage && selectedImage) onCreateCollage(selectedImage, extractedColor);
+  }, [onCreateCollage, selectedImage, extractedColor]);
 
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Processing image...</Text>
+        <Text style={styles.loadingText}>Processing image…</Text>
       </View>
     );
   }
@@ -132,34 +175,40 @@ export default function CoolorsColorExtractor({ onColorExtracted, onClose, onCre
         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
           <Text style={styles.closeButtonText}>✕</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Image picker</Text>
-        <TouchableOpacity onPress={handleViewOnColorWheel} style={styles.nextButton}>
-          <Text style={styles.nextButtonText}>Next</Text>
+        <Text style={styles.headerTitle}>Color Extractor</Text>
+        <TouchableOpacity
+          onPress={() => initialImageUri ? pickImage() : handleUseOnWheel()}
+          style={styles.nextButton}
+        >
+          <Text style={styles.nextButtonText}>{initialImageUri ? 'Pick another' : 'Next'}</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Image Display */}
+      {/* Image */}
       {selectedImage && (
         <View style={styles.imageContainer}>
           <View style={styles.imageWrapper} {...panResponder.panHandlers}>
-            <Image 
-              source={{ uri: selectedImage.uri }} 
+            <Image
+              source={{ uri: selectedImage.uri }}
               style={styles.image}
               resizeMode="contain"
               onLayout={onImageLayout}
             />
-            
-            {/* Magnifier Circle */}
-            <View 
-              style={[
-                styles.magnifier,
-                {
-                  left: magnifierPosition.x - MAGNIFIER_SIZE / 2,
-                  top: magnifierPosition.y - MAGNIFIER_SIZE / 2,
-                }
-              ]}
+            {/* Magnifier */}
+            <View
+              style={[styles.magnifier, { left: magnifierPosition.x - MAGNIFIER_SIZE / 2, top: magnifierPosition.y - MAGNIFIER_SIZE / 2 }]}
             >
               <View style={styles.magnifierInner}>
+                {/* Contrast back ring to keep the colored ring visible on any photo */}
+                <View style={styles.dominantRingBack} />
+
+                {/* The dominant color ring (updates live with extractedColor) */}
+                <View style={[styles.dominantRing, { borderColor: extractedColor }]} />
+
+                {/* Optional tiny center dot filled with the color */}
+                <View style={[styles.dominantCenterDot, { backgroundColor: extractedColor }]} />
+
+                {/* Existing crosshair stays on top for precise aiming */}
                 <View style={styles.crosshair}>
                   <View style={styles.crosshairHorizontal} />
                   <View style={styles.crosshairVertical} />
@@ -170,27 +219,30 @@ export default function CoolorsColorExtractor({ onColorExtracted, onClose, onCre
         </View>
       )}
 
-      {/* Color Bar */}
+      {/* Palette + selected color */}
       <View style={styles.colorBarContainer}>
         <View style={[styles.colorBar, { backgroundColor: extractedColor }]}>
           <View style={styles.colorDot} />
         </View>
         <Text style={styles.colorText}>{extractedColor.toUpperCase()}</Text>
+
+        {palette.length > 0 && (
+          <View style={styles.paletteRow}>
+            {palette.slice(0, 8).map((c) => (
+              <TouchableOpacity key={c} onPress={() => setExtractedColor(c)}>
+                <View style={[styles.paletteSwatch, { backgroundColor: c, borderColor: c === extractedColor ? '#000' : '#fff' }]} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </View>
 
-      {/* Action Buttons */}
+      {/* Actions */}
       <View style={styles.actionButtonsContainer}>
-        <TouchableOpacity 
-          style={[styles.actionButton, styles.secondaryButton]} 
-          onPress={handleCreateCollage}
-        >
+        <TouchableOpacity style={[styles.actionButton, styles.secondaryButton]} onPress={handleCreateCollagePress}>
           <Text style={styles.secondaryButtonText}>Create Collage</Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={[styles.actionButton, styles.primaryButton]} 
-          onPress={handleViewOnColorWheel}
-        >
+        <TouchableOpacity style={[styles.actionButton, styles.primaryButton]} onPress={handleUseOnWheel}>
           <Text style={styles.primaryButtonText}>View on Color Wheel</Text>
         </TouchableOpacity>
       </View>
@@ -199,161 +251,62 @@ export default function CoolorsColorExtractor({ onColorExtracted, onClose, onCre
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#666',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 50,
-    paddingBottom: 20,
-    backgroundColor: '#fff',
-  },
-  closeButton: {
-    padding: 10,
-  },
-  closeButtonText: {
-    fontSize: 18,
-    color: '#333',
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-  },
-  nextButton: {
-    padding: 10,
-  },
-  nextButtonText: {
-    fontSize: 16,
-    color: '#007AFF',
-    fontWeight: '600',
-  },
-  imageContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  imageWrapper: {
-    flex: 1,
-    position: 'relative',
-  },
-  image: {
-    width: '100%',
-    height: '100%',
-  },
-  magnifier: {
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' },
+  loadingText: { fontSize: 16, color: '#666' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 20, backgroundColor: '#fff' },
+  closeButton: { padding: 10 },
+  closeButtonText: { fontSize: 18, color: '#333' },
+  headerTitle: { fontSize: 18, fontWeight: '600', color: '#333' },
+  nextButton: { padding: 10 },
+  nextButtonText: { fontSize: 16, color: '#007AFF', fontWeight: '600' },
+  imageContainer: { flex: 1, paddingHorizontal: 20 },
+  imageWrapper: { flex: 1, position: 'relative' },
+  image: { width: '100%', height: '100%' },
+  magnifier: { position: 'absolute', width: MAGNIFIER_SIZE, height: MAGNIFIER_SIZE, borderRadius: MAGNIFIER_SIZE / 2, borderWidth: 4, borderColor: '#fff', backgroundColor: 'rgba(255,255,255,0.9)', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 5 },
+  magnifierInner: { flex: 1, borderRadius: (MAGNIFIER_SIZE - 8) / 2, overflow: 'hidden', justifyContent: 'center', alignItems: 'center' },
+  // Ring sizes derived from the magnifier size
+  dominantRingBack: {
     position: 'absolute',
-    width: MAGNIFIER_SIZE,
-    height: MAGNIFIER_SIZE,
-    borderRadius: MAGNIFIER_SIZE / 2,
+    width: MAGNIFIER_SIZE - 24,   // slightly larger than the color ring for contrast
+    height: MAGNIFIER_SIZE - 24,
+    borderRadius: (MAGNIFIER_SIZE - 24) / 2,
     borderWidth: 4,
     borderColor: '#fff',
-    backgroundColor: 'rgba(255, 255, 255, 0.9)',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  magnifierInner: {
-    flex: 1,
-    borderRadius: (MAGNIFIER_SIZE - 8) / 2,
-    overflow: 'hidden',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  crosshair: {
+  dominantRing: {
     position: 'absolute',
-    width: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: MAGNIFIER_SIZE - 30,   // main color ring
+    height: MAGNIFIER_SIZE - 30,
+    borderRadius: (MAGNIFIER_SIZE - 30) / 2,
+    borderWidth: 6,               // ring thickness
   },
-  crosshairHorizontal: {
+  dominantCenterDot: {
     position: 'absolute',
-    width: 20,
-    height: 2,
-    backgroundColor: '#333',
-  },
-  crosshairVertical: {
-    position: 'absolute',
-    width: 2,
-    height: 20,
-    backgroundColor: '#333',
-  },
-  colorBarContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-  },
-  colorBar: {
-    width: screenWidth - 40,
-    height: 60,
-    borderRadius: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  colorDot: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#fff',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
     borderWidth: 2,
-    borderColor: 'rgba(0, 0, 0, 0.2)',
+    borderColor: '#fff',
   },
-  colorText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
-  },
-  actionButtonsContainer: {
-    flexDirection: 'row',
-    marginHorizontal: 20,
-    marginBottom: 40,
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-    paddingVertical: 16,
-    borderRadius: 25,
-    alignItems: 'center',
-  },
-  primaryButton: {
-    backgroundColor: '#007AFF',
-  },
-  secondaryButton: {
-    backgroundColor: '#f8f8f8',
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  secondaryButtonText: {
-    color: '#333',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  crosshair: { position: 'absolute', width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
+  crosshairHorizontal: { position: 'absolute', width: 20, height: 2, backgroundColor: '#333' },
+  crosshairVertical: { position: 'absolute', width: 2, height: 20, backgroundColor: '#333' },
+  colorBarContainer: { paddingHorizontal: 20, paddingVertical: 20, backgroundColor: '#fff', alignItems: 'center' },
+  colorBar: { width: screenWidth - 40, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  colorDot: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff', borderWidth: 2, borderColor: 'rgba(0,0,0,0.2)' },
+  colorText: { fontSize: 16, fontWeight: '600', color: '#333' },
+  paletteRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  paletteSwatch: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, marginRight: 6 },
+  actionButtonsContainer: { flexDirection: 'row', marginHorizontal: 20, marginBottom: 40, gap: 12 },
+  actionButton: { flex: 1, paddingVertical: 16, borderRadius: 25, alignItems: 'center' },
+  primaryButton: { backgroundColor: '#007AFF' },
+  secondaryButton: { backgroundColor: '#f8f8f8', borderWidth: 1, borderColor: '#e0e0e0' },
+  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  secondaryButtonText: { color: '#333', fontSize: 16, fontWeight: '600' },
 });

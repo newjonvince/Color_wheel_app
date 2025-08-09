@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import ApiService from './src/services/api';
 
-// Import screens
+// Screens
 import ColorWheelScreen from './src/screens/ColorWheelScreen';
 import BoardsScreen from './src/screens/BoardsScreen';
 import DiscoverScreen from './src/screens/DiscoverScreen';
@@ -16,20 +17,27 @@ import LoginScreen from './src/screens/LoginScreen';
 import SignUpScreen from './src/screens/SignUpScreen';
 import UserSettingsScreen from './src/screens/UserSettingsScreen';
 
-// Import components
+// Components
 import ErrorBoundary from './src/components/ErrorBoundary';
 
 const Tab = createBottomTabNavigator();
 
-// Tab Icon Helper Function
-const TabIcon = ({ name, focused }) => {
+// Helper: normalize various callback shapes to a user object
+const pickUser = (u) => (u?.user ? u.user : u);
+
+// Emoji tab icon (memoized)
+const EmojiTabIcon = React.memo(({ name, focused }) => {
   const icons = {
-    'Community': focused ? '🏠' : '🏘️',
-    'ColorWheel': focused ? '🎨' : '🎭',
-    'Boards': focused ? '📌' : '📋',
+    Community: focused ? '🏠' : '🏘️',
+    ColorWheel: focused ? '🎨' : '🎭',
+    Boards: focused ? '📌' : '📋',
+    Settings: focused ? '⚙️' : '🔧',
   };
-  return icons[name] || '📱';
-};
+  return <Text style={styles.tabIcon}>{icons[name] || '📱'}</Text>;
+});
+
+// Per-user key for saved color matches
+const getMatchesKey = (userId) => `savedColorMatches:${userId || 'anon'}`;
 
 export default function App() {
   const [savedColorMatches, setSavedColorMatches] = useState([]);
@@ -42,119 +50,147 @@ export default function App() {
     initializeApp();
   }, []);
 
+  const loadSavedColorMatches = useCallback(async (key) => {
+    try {
+      const saved = await AsyncStorage.getItem(key);
+      setSavedColorMatches(saved ? JSON.parse(saved) : []);
+    } catch (error) {
+      console.error('Error loading saved color matches:', error);
+      setSavedColorMatches([]);
+    }
+  }, []);
+
   const initializeApp = async () => {
     try {
-      // Load tokens from secure storage (handled by ApiService)
-      await ApiService.loadTokenFromStorage();
-      
-      // Check if user has valid tokens
-      const connectionStatus = ApiService.getConnectionStatus();
-      
+      // Load tokens from secure storage (handled inside ApiService)
+      await ApiService.loadTokenFromStorage?.();
+
+      // Check token presence
+      const connectionStatus = ApiService.getConnectionStatus?.() || {};
+
+      let user = null;
       if (connectionStatus.hasToken) {
         try {
-          // Verify token by getting user profile
+          // Verify token & fetch profile
           const userProfile = await ApiService.getUserProfile();
+          user = userProfile?.user || userProfile;
           setIsLoggedIn(true);
-          setCurrentUser(userProfile.user);
+          setCurrentUser(user);
         } catch (error) {
-          // Token might be expired, clear it
-          console.log('Token verification failed, clearing tokens');
-          await ApiService.clearToken();
+          console.log('Token verification failed, clearing tokens:', error?.message);
+          await ApiService.clearToken?.();
           setIsLoggedIn(false);
           setCurrentUser(null);
         }
       }
-      
-      // Load saved color matches
-      await loadSavedColorMatches();
+
+      // Load saved color matches for the resolved user (or anon)
+      const key = getMatchesKey(user?.id);
+      await loadSavedColorMatches(key);
     } catch (error) {
       console.error('Error initializing app:', error);
+      setIsLoggedIn(false);
+      setCurrentUser(null);
+      await loadSavedColorMatches(getMatchesKey(null)); // try anon as last resort
     } finally {
       setIsLoading(false);
     }
   };
 
-  const loadSavedColorMatches = async () => {
+  const saveColorMatch = useCallback(async (colorMatch) => {
     try {
-      const saved = await AsyncStorage.getItem('savedColorMatches');
-      if (saved) {
-        setSavedColorMatches(JSON.parse(saved));
-      }
-    } catch (error) {
-      console.error('Error loading saved color matches:', error);
-    }
-  };
-
-  const saveColorMatch = async (colorMatch, scheme) => {
-    try {
-      const updatedMatches = [...savedColorMatches, colorMatch];
-      setSavedColorMatches(updatedMatches);
-      await AsyncStorage.setItem('savedColorMatches', JSON.stringify(updatedMatches));
+      const key = getMatchesKey(currentUser?.id);
+      const updated = [...savedColorMatches, colorMatch];
+      setSavedColorMatches(updated);
+      await AsyncStorage.setItem(key, JSON.stringify(updated));
     } catch (error) {
       console.error('Error saving color match:', error);
     }
-  };
+  }, [currentUser?.id, savedColorMatches]);
 
-  const handleLoginSuccess = async (userData) => {
-    setCurrentUser(userData.user);
+  const handleLoginSuccess = useCallback(async (u) => {
+    const user = pickUser(u);
+    setCurrentUser(user);
     setIsLoggedIn(true);
-    
-    // Store user data in AsyncStorage for backward compatibility
+
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
-      await AsyncStorage.setItem('userData', JSON.stringify(userData.user));
+      await AsyncStorage.setItem('userData', JSON.stringify(user));
+
+      // migrate anon saved matches if user has none yet
+      const anonKey = getMatchesKey('anon');
+      const userKey = getMatchesKey(user?.id);
+      const [anon, existing] = await Promise.all([
+        AsyncStorage.getItem(anonKey),
+        AsyncStorage.getItem(userKey),
+      ]);
+      if (anon && !existing) {
+        await AsyncStorage.setItem(userKey, anon);
+      }
+      await loadSavedColorMatches(userKey);
     } catch (error) {
       console.warn('Error storing user data in AsyncStorage:', error);
     }
-  };
+  }, [loadSavedColorMatches]);
 
-  const handleSignUpComplete = async (userData) => {
-    setCurrentUser(userData.user);
+  const handleSignUpComplete = useCallback(async (u) => {
+    const user = pickUser(u);
+    setCurrentUser(user);
     setIsLoggedIn(true);
     setShowSignUp(false);
-    
-    // Store user data in AsyncStorage for backward compatibility
+
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
-      await AsyncStorage.setItem('userData', JSON.stringify(userData.user));
+      await AsyncStorage.setItem('userData', JSON.stringify(user));
+      await loadSavedColorMatches(getMatchesKey(user?.id));
     } catch (error) {
       console.warn('Error storing user data in AsyncStorage:', error);
     }
-  };
+  }, [loadSavedColorMatches]);
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     try {
-      // Call API logout
-      await ApiService.logout();
-      
-      // Clear AsyncStorage
+      await ApiService.logout?.();
+      await ApiService.clearToken?.(); // ensure secure token is wiped
+
       await AsyncStorage.removeItem('isLoggedIn');
       await AsyncStorage.removeItem('userData');
-      
+
       setIsLoggedIn(false);
       setCurrentUser(null);
+
+      // Load anon saved data for post-logout state
+      await loadSavedColorMatches(getMatchesKey(null));
     } catch (error) {
       console.error('Error logging out:', error);
-      // Still clear local state even if API call fails
       setIsLoggedIn(false);
       setCurrentUser(null);
+      await loadSavedColorMatches(getMatchesKey(null));
     }
-  };
+  }, [loadSavedColorMatches]);
 
-  const handleAccountDeleted = async () => {
+  const handleAccountDeleted = useCallback(async () => {
     try {
-      // Clear all local data
-      await AsyncStorage.clear();
+      // Clear secure token too
+      await ApiService.clearToken?.();
+
+      // Remove known keys; avoid blind clear unless you want to wipe all app data
+      const keysToRemove = ['isLoggedIn', 'userData', getMatchesKey(currentUser?.id)];
+      await AsyncStorage.multiRemove(keysToRemove);
+
       setSavedColorMatches([]);
       setIsLoggedIn(false);
       setCurrentUser(null);
+
+      // After delete, load anon scope (should be empty unless you keep demo state)
+      await loadSavedColorMatches(getMatchesKey(null));
     } catch (error) {
       console.error('Error clearing data after account deletion:', error);
-      // Still clear state
       setIsLoggedIn(false);
       setCurrentUser(null);
+      await loadSavedColorMatches(getMatchesKey(null));
     }
-  };
+  }, [currentUser?.id, loadSavedColorMatches]);
 
   const TabIcon = ({ name, focused }) => {
     const icons = {
@@ -166,63 +202,65 @@ export default function App() {
     return icons[name] || '📱';
   };
 
-  // Show loading screen while initializing
   if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingEmoji}>🎨</Text>
-        <Text style={styles.loadingText}>Loading Fashion Color Wheel...</Text>
-        <Text style={styles.loadingSubtext}>Preparing your color journey</Text>
-      </View>
+      <SafeAreaProvider>
+        <SafeAreaView style={styles.loadingContainer}>
+          <StatusBar style="auto" />
+          <Text style={styles.loadingEmoji}>🎨</Text>
+          <Text style={styles.loadingText}>Loading Fashion Color Wheel...</Text>
+          <Text style={styles.loadingSubtext}>Preparing your color journey</Text>
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
-  // Show sign up screen
   if (showSignUp) {
     return (
-      <>
-        <StatusBar style="auto" />
-        <SignUpScreen 
-          onSignUpComplete={handleSignUpComplete}
-          onBack={() => setShowSignUp(false)}
-        />
-      </>
+      <SafeAreaProvider>
+        <SafeAreaView style={{ flex: 1 }}>
+          <StatusBar style="auto" />
+          <SignUpScreen
+            onSignUpComplete={handleSignUpComplete}
+            onBack={() => setShowSignUp(false)}
+          />
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
-  // Show login screen if not logged in
   if (!isLoggedIn) {
     return (
-      <>
-        <StatusBar style="auto" />
-        <LoginScreen 
-          onLoginSuccess={handleLoginSuccess}
-          onSignUpPress={() => setShowSignUp(true)}
-        />
-      </>
+      <SafeAreaProvider>
+        <SafeAreaView style={{ flex: 1 }}>
+          <StatusBar style="auto" />
+          <LoginScreen
+            onLoginSuccess={handleLoginSuccess}
+            onSignUpPress={() => setShowSignUp(true)}
+          />
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
-  // Show main app if logged in
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ErrorBoundary>
-        <NavigationContainer>
-      <StatusBar style="auto" />
-      <Tab.Navigator
-        screenOptions={({ route }) => ({
-          tabBarIcon: ({ focused }) => (
-            <Text style={styles.tabIcon}>
-              {TabIcon({ name: route.name, focused })}
-            </Text>
-          ),
-          tabBarActiveTintColor: '#e74c3c',
-          tabBarInactiveTintColor: '#7f8c8d',
-          tabBarStyle: styles.tabBar,
-          tabBarLabelStyle: styles.tabLabel,
-          headerShown: false,
-        })}
-      >
+      <SafeAreaProvider>
+        <ErrorBoundary>
+          <NavigationContainer>
+            <StatusBar style="auto" />
+            <Tab.Navigator
+              screenOptions={({ route }) => ({
+                tabBarIcon: ({ focused }) => (
+                  <EmojiTabIcon focused={focused} name={route.name} />
+                ),
+                tabBarActiveTintColor: '#e74c3c',
+                tabBarInactiveTintColor: '#7f8c8d',
+                tabBarStyle: styles.tabBar,
+                tabBarLabelStyle: styles.tabLabel,
+                headerShown: false,
+              })}
+            >
         <Tab.Screen 
           name="Community" 
           options={{ title: 'Community' }}
@@ -279,11 +317,12 @@ export default function App() {
             />
           )}
         </Tab.Screen>
-      </Tab.Navigator>
-    </NavigationContainer>
-  </ErrorBoundary>
-  </GestureHandlerRootView>
-);
+            </Tab.Navigator>
+          </NavigationContainer>
+        </ErrorBoundary>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
 
 const styles = StyleSheet.create({
   loadingContainer: {
@@ -292,21 +331,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#f8f9fa',
   },
-  loadingEmoji: {
-    fontSize: 64,
-    marginBottom: 20,
-  },
-  loadingText: {
-    fontSize: 24,
-    color: '#2c3e50',
-    fontWeight: 'bold',
-    marginBottom: 10,
-  },
-  loadingSubtext: {
-    fontSize: 16,
-    color: '#7f8c8d',
-    fontStyle: 'italic',
-  },
+  loadingEmoji: { fontSize: 64, marginBottom: 20 },
+  loadingText: { fontSize: 24, color: '#2c3e50', fontWeight: 'bold', marginBottom: 10 },
+  loadingSubtext: { fontSize: 16, color: '#7f8c8d', fontStyle: 'italic' },
   tabBar: {
     backgroundColor: 'white',
     borderTopWidth: 1,
@@ -315,12 +342,7 @@ const styles = StyleSheet.create({
     paddingTop: 5,
     height: 65,
   },
-  tabIcon: {
-    fontSize: 24,
-  },
-  tabLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  tabIcon: { fontSize: 24 },
+  tabLabel: { fontSize: 12, fontWeight: '600' },
 });
 }

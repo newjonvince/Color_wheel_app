@@ -206,4 +206,139 @@ router.put('/preferences', [
   }
 });
 
+// Update user settings (for UserSettingsScreen toggles)
+router.put('/settings', [
+  authenticateToken,
+  body('notifications').optional().isBoolean(),
+  body('share_usage').optional().isBoolean()
+], async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        details: errors.array()
+      });
+    }
+
+    const userId = req.user.userId;
+    const { notifications, share_usage } = req.body;
+
+    // Check if user_preferences exists
+    const existing = await query(
+      'SELECT id FROM user_preferences WHERE user_id = $1',
+      [userId]
+    );
+
+    let result;
+    if (existing.rows.length === 0) {
+      // Create new preferences with settings
+      result = await query(
+        `INSERT INTO user_preferences (user_id, notifications_enabled, share_usage_data)
+         VALUES ($1, $2, $3)
+         RETURNING *`,
+        [userId, notifications !== undefined ? notifications : true, share_usage !== undefined ? share_usage : false]
+      );
+    } else {
+      // Update existing preferences
+      const updates = [];
+      const values = [];
+      let paramCount = 1;
+
+      if (notifications !== undefined) {
+        updates.push(`notifications_enabled = $${paramCount++}`);
+        values.push(notifications);
+      }
+
+      if (share_usage !== undefined) {
+        updates.push(`share_usage_data = $${paramCount++}`);
+        values.push(share_usage);
+      }
+
+      if (updates.length === 0) {
+        return res.status(400).json({
+          error: 'No settings to update',
+          message: 'Please provide at least one setting to update'
+        });
+      }
+
+      updates.push('updated_at = CURRENT_TIMESTAMP');
+      values.push(userId);
+
+      result = await query(
+        `UPDATE user_preferences 
+         SET ${updates.join(', ')}
+         WHERE user_id = $${paramCount}
+         RETURNING *`,
+        values
+      );
+    }
+
+    res.json({
+      message: 'Settings updated successfully',
+      settings: {
+        notifications: result.rows[0].notifications_enabled,
+        share_usage: result.rows[0].share_usage_data
+      }
+    });
+
+  } catch (error) {
+    console.error('Update settings error:', error);
+    res.status(500).json({
+      error: 'Failed to update settings',
+      message: 'Internal server error'
+    });
+  }
+});
+
+// Request data export
+router.post('/export-data', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    // Get user info for email
+    const userResult = await query(
+      'SELECT email, username FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({
+        error: 'User not found',
+        message: 'User account does not exist'
+      });
+    }
+
+    const user = userResult.rows[0];
+
+    // In a real implementation, you would:
+    // 1. Queue a background job to collect all user data
+    // 2. Generate a secure download link
+    // 3. Send an email with the download link
+    // 4. Set an expiration time for the download
+
+    // For now, we'll simulate the request and log it
+    console.log(`📦 Data export requested for user ${user.username} (${user.email})`);
+
+    // TODO: Implement actual data export job
+    // - Collect user profile, preferences, color matches, boards, community posts
+    // - Generate JSON/CSV export file
+    // - Create secure temporary download link
+    // - Send email with download instructions
+
+    res.json({
+      message: 'Data export requested successfully',
+      details: 'You will receive an email with your data export within 24 hours.',
+      requestedAt: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Data export request error:', error);
+    res.status(500).json({
+      error: 'Failed to request data export',
+      message: 'Internal server error'
+    });
+  }
+});
+
 module.exports = router;

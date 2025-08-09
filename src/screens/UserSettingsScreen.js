@@ -10,9 +10,11 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ApiService from '../services/api';
+import { wipeLocalSession, performSecureLogout, performSecureAccountDeletion } from '../utils/session';
 
 export default function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
   const [isDeleting, setIsDeleting] = useState(false);
@@ -20,9 +22,58 @@ export default function UserSettingsScreen({ currentUser, onLogout, onAccountDel
   const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [shareDataEnabled, setShareDataEnabled] = useState(false);
+  const [savingToggle, setSavingToggle] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [loadingSettings, setLoadingSettings] = useState(true);
+
+  // Load user settings from server on mount
+  React.useEffect(() => {
+    loadUserSettings();
+  }, []);
+
+  const loadUserSettings = async () => {
+    try {
+      setLoadingSettings(true);
+      const response = await ApiService.request('/users/preferences');
+      const preferences = response.preferences;
+      
+      setNotificationsEnabled(preferences.notifications_enabled ?? true);
+      setShareDataEnabled(preferences.share_usage_data ?? false);
+    } catch (error) {
+      console.error('Failed to load user settings:', error);
+      // Keep defaults if loading fails
+    } finally {
+      setLoadingSettings(false);
+    }
+  };
+
+  // Optimistic UI update for settings with rollback on failure
+  async function updateSetting(key, value) {
+    const prev = key === 'notifications' ? notificationsEnabled : shareDataEnabled;
+    
+    // Optimistically update UI
+    key === 'notifications' ? setNotificationsEnabled(value) : setShareDataEnabled(value);
+    setSavingToggle(key);
+    
+    try {
+      // Save to backend
+      await ApiService.updateSettings({ [key]: value });
+    } catch (error) {
+      console.error('Failed to save setting:', error);
+      // Rollback on failure
+      key === 'notifications' ? setNotificationsEnabled(prev) : setShareDataEnabled(prev);
+      Alert.alert('Oops', 'Could not save your setting. Try again.');
+    } finally {
+      setSavingToggle(null);
+    }
+  }
 
   const handleDeleteAccount = async () => {
-    if (deleteConfirmationText.toLowerCase() !== 'delete my account') {
+    // Prevent double submission
+    if (isDeleting) return;
+    
+    // Validate confirmation text with trimming
+    if (deleteConfirmationText.trim().toLowerCase() !== 'delete my account') {
       Alert.alert('Confirmation Required', 'Please type "delete my account" to confirm.');
       return;
     }
@@ -38,11 +89,10 @@ export default function UserSettingsScreen({ currentUser, onLogout, onAccountDel
         [
           {
             text: 'OK',
-            onPress: () => {
+            onPress: async () => {
               setShowDeleteConfirmation(false);
-              if (onAccountDeleted) {
-                onAccountDeleted();
-              }
+              // Use secure session cleanup
+              await performSecureAccountDeletion(onAccountDeleted);
             }
           }
         ]
@@ -76,15 +126,18 @@ export default function UserSettingsScreen({ currentUser, onLogout, onAccountDel
 
   const handleExportData = async () => {
     try {
+      setExporting(true);
+      await ApiService.requestDataExport();
       Alert.alert(
-        'Export Data',
-        'Your data export has been requested. You will receive an email with your data within 24 hours.',
+        'Export Requested', 
+        'We\'ll email you a download link within 24 hours.',
         [{ text: 'OK' }]
       );
-      // In a real app, you would call an API to request data export
-      // await ApiService.requestDataExport();
     } catch (error) {
+      console.error('Data export error:', error);
       Alert.alert('Error', 'Failed to request data export. Please try again.');
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -116,35 +169,58 @@ export default function UserSettingsScreen({ currentUser, onLogout, onAccountDel
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Privacy & Data</Text>
         
-        <TouchableOpacity style={styles.settingItem} onPress={handleExportData}>
+        <TouchableOpacity 
+          style={styles.settingItem} 
+          onPress={handleExportData}
+          disabled={exporting}
+          accessibilityRole="button"
+          accessibilityLabel="Export my data - request a download of all your account data"
+        >
           <View style={styles.settingLeft}>
             <Ionicons name="download-outline" size={20} color="#666" />
             <Text style={styles.settingText}>Export My Data</Text>
+            {exporting && (
+              <ActivityIndicator size="small" color="#007AFF" style={{ marginLeft: 8 }} />
+            )}
           </View>
-          <Ionicons name="chevron-forward" size={16} color="#999" />
+          <Ionicons name="chevron-forward" size={20} color="#666" />
         </TouchableOpacity>
 
-        <View style={styles.settingItem}>
+        <View 
+          style={styles.settingItem}
+          accessibilityRole="switch"
+          accessibilityLabel="Push notifications toggle"
+        >
           <View style={styles.settingLeft}>
             <Ionicons name="notifications-outline" size={20} color="#666" />
             <Text style={styles.settingText}>Push Notifications</Text>
+            {(savingToggle === 'notifications' || loadingSettings) && (
+              <ActivityIndicator size="small" color="#007AFF" style={{ marginLeft: 8 }} />
+            )}
           </View>
           <Switch
             value={notificationsEnabled}
-            onValueChange={setNotificationsEnabled}
-            trackColor={{ false: '#e0e0e0', true: '#007AFF' }}
+            onValueChange={(v) => updateSetting('notifications', v)}
+            disabled={savingToggle === 'notifications' || loadingSettings}
           />
         </View>
 
-        <View style={styles.settingItem}>
+        <View 
+          style={styles.settingItem}
+          accessibilityRole="switch"
+          accessibilityLabel="Share usage data toggle"
+        >
           <View style={styles.settingLeft}>
             <Ionicons name="analytics-outline" size={20} color="#666" />
             <Text style={styles.settingText}>Share Usage Data</Text>
+            {(savingToggle === 'share_usage' || loadingSettings) && (
+              <ActivityIndicator size="small" color="#007AFF" style={{ marginLeft: 8 }} />
+            )}
           </View>
           <Switch
             value={shareDataEnabled}
-            onValueChange={setShareDataEnabled}
-            trackColor={{ false: '#e0e0e0', true: '#007AFF' }}
+            onValueChange={(v) => updateSetting('share_usage', v)}
+            disabled={savingToggle === 'share_usage' || loadingSettings}
           />
         </View>
       </View>
@@ -190,23 +266,33 @@ export default function UserSettingsScreen({ currentUser, onLogout, onAccountDel
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Account Actions</Text>
         
-        <TouchableOpacity style={styles.settingItem} onPress={onLogout}>
+        <TouchableOpacity
+          style={styles.settingItem}
+          onPress={async () => {
+            // Secure logout using reusable helper
+            await performSecureLogout(ApiService, onLogout);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Sign out of your account"
+        >
           <View style={styles.settingLeft}>
             <Ionicons name="log-out-outline" size={20} color="#666" />
             <Text style={styles.settingText}>Sign Out</Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color="#999" />
+          <Ionicons name="chevron-forward" size={20} color="#666" />
         </TouchableOpacity>
 
         <TouchableOpacity 
           style={[styles.settingItem, styles.dangerItem]} 
           onPress={showDeleteAccountConfirmation}
+          accessibilityRole="button"
+          accessibilityLabel="Permanently delete account - this action cannot be undone"
         >
           <View style={styles.settingLeft}>
             <Ionicons name="trash-outline" size={20} color="#FF3B30" />
             <Text style={[styles.settingText, styles.dangerText]}>Delete Account</Text>
           </View>
-          <Ionicons name="chevron-forward" size={16} color="#FF3B30" />
+          <Ionicons name="alert-circle-outline" size={20} color="#FF3B30" />
         </TouchableOpacity>
       </View>
 
@@ -214,7 +300,7 @@ export default function UserSettingsScreen({ currentUser, onLogout, onAccountDel
       <Modal
         visible={showDeleteConfirmation}
         animationType="slide"
-        presentationStyle="formSheet"
+        presentationStyle={Platform.OS === 'ios' ? 'formSheet' : 'fullScreen'}
         onRequestClose={() => setShowDeleteConfirmation(false)}
       >
         <View style={styles.modalContainer}>

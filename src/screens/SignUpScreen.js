@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, TextInput, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ApiService from '../services/api';
+import { saveToken } from '../services/secureStore';
+import useDebounce from '../hooks/useDebounce';
 
 const SIGNUP_STEPS = {
   EMAIL: 'email',
@@ -35,6 +37,10 @@ export default function SignUpScreen({ onSignUpComplete, onBack }) {
     gender: ''
   });
   const [loading, setLoading] = useState(false);
+  const [usernameStatus, setUsernameStatus] = useState({ isValid: null, message: '' });
+  
+  // Debounce username for availability checks
+  const debouncedUsername = useDebounce(formData.username, 400);
 
   // Mock existing usernames for validation (in real app, this would be from backend)
   const existingUsernames = ['fashionlover', 'colormaster', 'styleicon', 'trendsettr', 'artlover'];
@@ -45,92 +51,141 @@ export default function SignUpScreen({ onSignUpComplete, onBack }) {
   };
 
   const validateUsername = async (username) => {
-    if (username.length < 3) {
+    const normalizedUsername = username.trim().toLowerCase();
+    
+    // Enhanced username validation with regex
+    if (!/^[a-z0-9._-]{3,20}$/.test(normalizedUsername)) {
       return {
         isValid: false,
-        message: 'Username must be at least 3 characters'
+        message: 'Use 3–20 chars: letters, numbers, dot, underscore, hyphen.'
       };
     }
 
     try {
       // Check username availability with backend API
-      const response = await ApiService.checkUsername(username);
+      const response = await ApiService.checkUsername(normalizedUsername);
       return {
         isValid: response.available,
-        message: response.available ? '' : 'Username already taken'
+        message: response.available ? 'Username available!' : 'Username already taken'
       };
     } catch (error) {
       console.error('Username validation error:', error);
       // Fallback to local validation if API fails
-      const isUnique = !existingUsernames.includes(username.toLowerCase());
+      const isUnique = !existingUsernames.includes(normalizedUsername);
       return {
         isValid: isUnique,
-        message: isUnique ? '' : 'Username already taken'
+        message: isUnique ? 'Username available!' : 'Username already taken'
       };
     }
   };
 
+  // Birthday validation helpers
+  const isValidDate = (year, month, day) => {
+    const monthIdx = MONTHS.indexOf(month);
+    if (monthIdx < 0) return false;
+    const dt = new Date(Number(year), monthIdx, Number(day));
+    return dt.getFullYear() == year && dt.getMonth() == monthIdx && dt.getDate() == Number(day);
+  };
+
+  const isOldEnough = (year, month, day, minYears = 13) => {
+    const monthIdx = MONTHS.indexOf(month);
+    const dob = new Date(Number(year), monthIdx, Number(day));
+    const today = new Date();
+    const min = new Date(today.getFullYear() - minYears, today.getMonth(), today.getDate());
+    return dob <= min;
+  };
+
+  // Debounced username validation effect
+  useEffect(() => {
+    if (debouncedUsername && debouncedUsername.length >= 3) {
+      validateUsername(debouncedUsername).then(result => {
+        setUsernameStatus(result);
+      });
+    } else if (debouncedUsername && debouncedUsername.length > 0) {
+      setUsernameStatus({ isValid: false, message: 'Username too short' });
+    } else {
+      setUsernameStatus({ isValid: null, message: '' });
+    }
+  }, [debouncedUsername]);
+
+  // Step validation logic
+  const isStepValid = () => {
+    switch (currentStep) {
+      case SIGNUP_STEPS.EMAIL:
+        const email = formData.email.trim().toLowerCase();
+        return email && validateEmail(email);
+        
+      case SIGNUP_STEPS.PASSWORD:
+        return formData.password && formData.password.length >= 6;
+        
+      case SIGNUP_STEPS.USERNAME:
+        const username = formData.username.trim().toLowerCase();
+        return username && 
+               /^[a-z0-9._-]{3,20}$/.test(username) && 
+               usernameStatus.isValid === true;
+        
+      case SIGNUP_STEPS.LOCATION:
+        return formData.location && formData.location.length > 0;
+        
+      case SIGNUP_STEPS.BIRTHDAY:
+        const { month, day, year } = formData.birthday;
+        return month && day && year && 
+               isValidDate(year, month, day) && 
+               isOldEnough(year, month, day);
+        
+      case SIGNUP_STEPS.GENDER:
+        return formData.gender && formData.gender.length > 0;
+        
+      case SIGNUP_STEPS.COMPLETE:
+        return true;
+        
+      default:
+        return false;
+    }
+  };
+
   const handleNext = async () => {
+    // Don't proceed if step is invalid (button should be disabled)
+    if (!isStepValid()) return;
+    
     setLoading(true);
     
     try {
       switch (currentStep) {
         case SIGNUP_STEPS.EMAIL:
-          if (!validateEmail(formData.email)) {
-            Alert.alert('Invalid Email', 'Please enter a valid email address');
-            setLoading(false);
-            return;
-          }
+          const email = formData.email.trim().toLowerCase();
+          setFormData(prev => ({ ...prev, email }));
           setCurrentStep(SIGNUP_STEPS.PASSWORD);
           break;
 
         case SIGNUP_STEPS.PASSWORD:
-          if (formData.password.length < 6) {
-            Alert.alert('Weak Password', 'Password must be at least 6 characters');
-            setLoading(false);
-            return;
-          }
           setCurrentStep(SIGNUP_STEPS.USERNAME);
           break;
 
         case SIGNUP_STEPS.USERNAME:
-          const usernameValidation = await validateUsername(formData.username);
-          if (!usernameValidation.isValid) {
-            Alert.alert('Invalid Username', usernameValidation.message);
-            setLoading(false);
-            return;
-          }
+          const username = formData.username.trim().toLowerCase();
+          setFormData(prev => ({ ...prev, username }));
           setCurrentStep(SIGNUP_STEPS.LOCATION);
           break;
 
         case SIGNUP_STEPS.LOCATION:
-          if (!formData.location) {
-            Alert.alert('Location Required', 'Please select your location');
-            setLoading(false);
-            return;
-          }
           setCurrentStep(SIGNUP_STEPS.BIRTHDAY);
           break;
 
         case SIGNUP_STEPS.BIRTHDAY:
-          if (!formData.birthday.month || !formData.birthday.day || !formData.birthday.year) {
-            Alert.alert('Birthday Required', 'Please enter your complete birthday');
-            setLoading(false);
-            return;
-          }
           setCurrentStep(SIGNUP_STEPS.GENDER);
           break;
 
         case SIGNUP_STEPS.GENDER:
-          if (!formData.gender) {
-            Alert.alert('Gender Required', 'Please select your gender');
-            setLoading(false);
-            return;
-          }
           await completeSignUp();
+          break;
+
+        default:
           break;
       }
     } catch (error) {
+      console.error('Navigation error:', error);
+      // Only show error for actual failures, not validation issues
       Alert.alert('Error', 'Something went wrong. Please try again.');
     }
     
@@ -152,11 +207,13 @@ export default function SignUpScreen({ onSignUpComplete, onBack }) {
       const response = await ApiService.register(registrationData);
       
       if (response.success && response.user) {
-        // Store user data locally for offline access
+        // Store user data and token securely
         await AsyncStorage.setItem('userData', JSON.stringify(response.user));
         await AsyncStorage.setItem('isLoggedIn', 'true');
-        await AsyncStorage.setItem('authToken', response.token);
         
+        if (response.token) {
+          await saveToken(response.token);
+        }  
         setCurrentStep(SIGNUP_STEPS.COMPLETE);
         
         // Auto-complete after showing success
@@ -239,34 +296,83 @@ export default function SignUpScreen({ onSignUpComplete, onBack }) {
     </View>
   );
 
-  const renderPasswordStep = () => (
-    <View style={styles.stepContainer}>
-      <Text style={styles.stepTitle}>Create a password</Text>
-      <TextInput
-        style={styles.input}
-        value={formData.password}
-        onChangeText={(text) => setFormData({ ...formData, password: text })}
-        placeholder="Enter password"
-        secureTextEntry
-        autoCapitalize="none"
-      />
-      <Text style={styles.helperText}>Password must be at least 6 characters</Text>
-    </View>
-  );
+  const renderPasswordStep = () => {
+    const getPasswordStrength = () => {
+      const password = formData.password;
+      if (!password) return { strength: 0, text: '', color: '#ddd' };
+      if (password.length < 6) return { strength: 1, text: 'Too short', color: '#dc3545' };
+      if (password.length < 8) return { strength: 2, text: 'Weak', color: '#fd7e14' };
+      if (password.length < 12) return { strength: 3, text: 'Good', color: '#ffc107' };
+      return { strength: 4, text: 'Strong', color: '#28a745' };
+    };
+
+    const passwordStrength = getPasswordStrength();
+
+    return (
+      <View style={styles.stepContainer}>
+        <Text style={styles.stepTitle}>Create a password</Text>
+        <Text style={styles.stepSubtitle}>
+          Choose a strong password to keep your account secure
+        </Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Enter password"
+          value={formData.password}
+          onChangeText={(text) => setFormData({...formData, password: text})}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {formData.password.length > 0 && (
+          <View style={styles.passwordStrengthContainer}>
+            <View style={styles.passwordStrengthBar}>
+              {[1, 2, 3, 4].map((level) => (
+                <View
+                  key={level}
+                  style={[
+                    styles.passwordStrengthSegment,
+                    { backgroundColor: level <= passwordStrength.strength ? passwordStrength.color : '#e9ecef' }
+                  ]}
+                />
+              ))}
+            </View>
+            <Text style={[styles.passwordStrengthText, { color: passwordStrength.color }]}>
+              {passwordStrength.text}
+            </Text>
+          </View>
+        )}
+        <Text style={styles.helperText}>
+          Password must be at least 6 characters long
+        </Text>
+      </View>
+    );
+  };
 
   const renderUsernameStep = () => (
     <View style={styles.stepContainer}>
-      <Text style={styles.stepTitle}>Create a username</Text>
+      <Text style={styles.stepTitle}>Choose a username</Text>
+      <Text style={styles.stepSubtitle}>
+        This is how others will find you on the platform
+      </Text>
       <TextInput
         style={styles.input}
-        value={formData.username}
-        onChangeText={(text) => setFormData({ ...formData, username: text.toLowerCase() })}
         placeholder="Enter username"
+        value={formData.username}
+        onChangeText={(text) => setFormData({...formData, username: text})}
         autoCapitalize="none"
-        autoComplete="username"
+        autoCorrect={false}
       />
+      {usernameStatus.message ? (
+        <Text style={[
+          styles.usernameStatus,
+          usernameStatus.isValid === true ? styles.usernameStatusValid : 
+          usernameStatus.isValid === false ? styles.usernameStatusInvalid : styles.usernameStatusNeutral
+        ]}>
+          {usernameStatus.message}
+        </Text>
+      ) : null}
       <Text style={styles.helperText}>
-        This will be your unique identifier. Choose something memorable!
+        Use 3–20 characters: letters, numbers, dots, underscores, or hyphens
       </Text>
     </View>
   );
@@ -472,13 +578,17 @@ export default function SignUpScreen({ onSignUpComplete, onBack }) {
       </ScrollView>
 
       <View style={styles.footer}>
-        <TouchableOpacity 
-          style={[styles.nextButton, loading && styles.nextButtonDisabled]} 
+        <TouchableOpacity
+          style={[
+            styles.nextButton,
+            (!isStepValid() || loading) && styles.nextButtonDisabled
+          ]}
           onPress={handleNext}
-          disabled={loading}
+          disabled={!isStepValid() || loading}
         >
           <Text style={styles.nextButtonText}>
-            {loading ? 'Loading...' : 'Next'}
+            {loading ? 'Loading...' : 
+             currentStep === SIGNUP_STEPS.GENDER ? 'Complete' : 'Next'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -688,5 +798,42 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  usernameStatus: {
+    fontSize: 14,
+    marginTop: 8,
+    marginHorizontal: 20,
+    fontWeight: '500',
+  },
+  usernameStatusValid: {
+    color: '#28a745',
+  },
+  usernameStatusInvalid: {
+    color: '#dc3545',
+  },
+  usernameStatusNeutral: {
+    color: '#6c757d',
+  },
+  passwordStrengthContainer: {
+    marginTop: 12,
+    marginHorizontal: 20,
+  },
+  passwordStrengthBar: {
+    flexDirection: 'row',
+    height: 4,
+    backgroundColor: '#e9ecef',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  passwordStrengthSegment: {
+    flex: 1,
+    marginRight: 2,
+    borderRadius: 1,
+  },
+  passwordStrengthText: {
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
   },
 });

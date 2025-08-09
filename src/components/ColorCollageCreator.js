@@ -1,18 +1,21 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   StyleSheet,
   View,
   Text,
   TouchableOpacity,
-  Image,
+  Image as RNImage,
   Dimensions,
   Alert,
   ScrollView,
   Modal,
+  Linking,
 } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import * as MediaLibrary from 'expo-media-library';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -29,137 +32,205 @@ const LAYOUT_OPTIONS = [
 const ASPECT_RATIOS = [
   { id: 'original', name: 'Original', ratio: null },
   { id: 'square', name: 'Square', ratio: 1 },
-  { id: 'portrait', name: 'Portrait', ratio: 4/5 },
-  { id: 'landscape', name: 'Landscape', ratio: 16/9 },
+  { id: 'portrait', name: 'Portrait', ratio: 4 / 5 },
+  { id: 'landscape', name: 'Landscape', ratio: 16 / 9 },
 ];
 
-export default function ColorCollageCreator({ 
-  image, 
-  colors, 
-  onClose, 
-  onExport 
+export default function ColorCollageCreator({
+  image,        // { uri, width?, height? }
+  colors = [],  // ['#RRGGBB', ...]
+  onClose,
+  onExport,
 }) {
   const [selectedLayout, setSelectedLayout] = useState('bottom');
   const [selectedAspect, setSelectedAspect] = useState('original');
   const [isExporting, setIsExporting] = useState(false);
-  const collageRef = useRef();
+  const collageRef = useRef(null);
 
-  const getImageDimensions = () => {
-    const aspectRatio = ASPECT_RATIOS.find(ar => ar.id === selectedAspect);
-    const maxWidth = screenWidth - 40;
-    const maxHeight = screenHeight * 0.6;
-
-    if (!aspectRatio.ratio) {
-      // Original aspect ratio
-      if (image.width && image.height) {
-        const imageAspect = image.width / image.height;
-        if (imageAspect > 1) {
-          return { width: maxWidth, height: maxWidth / imageAspect };
-        } else {
-          return { width: maxHeight * imageAspect, height: maxHeight };
-        }
-      }
-      return { width: maxWidth, height: maxWidth };
+  // Robust image dimension handling
+  const [imgWH, setImgWH] = useState({ w: image?.width || 0, h: image?.height || 0 });
+  useEffect(() => {
+    let isMounted = true;
+    if (!image?.uri) return;
+    if (image.width && image.height) {
+      setImgWH({ w: image.width, h: image.height });
+      return;
     }
+    RNImage.getSize(
+      image.uri,
+      (w, h) => isMounted && setImgWH({ w, h }),
+      () => isMounted && setImgWH({ w: screenWidth, h: screenWidth }) // safe default
+    );
+    return () => { isMounted = false; };
+  }, [image?.uri]);
 
-    // Fixed aspect ratio
-    if (aspectRatio.ratio > 1) {
-      return { width: maxWidth, height: maxWidth / aspectRatio.ratio };
-    } else {
-      return { width: maxHeight * aspectRatio.ratio, height: maxHeight };
+  const maxW = screenWidth - 40;
+  const maxH = screenHeight * 0.6;
+
+  const computedDims = useMemo(() => {
+    const aspect = ASPECT_RATIOS.find(ar => ar.id === selectedAspect);
+    if (!aspect?.ratio) {
+      // Original aspect ratio (fallback safe)
+      const iw = imgWH.w || maxW;
+      const ih = imgWH.h || maxW;
+      const imageAspect = iw / ih;
+      if (imageAspect > 1) return { width: maxW, height: maxW / imageAspect };
+      return { width: maxH * imageAspect, height: maxH };
     }
+    // Fixed ratio
+    if (aspect.ratio > 1) return { width: maxW, height: maxW / aspect.ratio };
+    return { width: maxH * aspect.ratio, height: maxH };
+  }, [selectedAspect, imgWH.w, imgWH.h]);
+
+  // Adaptive swatch sizing (linear single row)
+  const fitSwatchSize = (count, containerWidth, { min = 22, max = 44, gutter = 8 } = {}) => {
+    if (!count || containerWidth <= 0) return min;
+    const totalGutters = gutter * (count - 1);
+    const raw = (containerWidth - totalGutters) / count;
+    return Math.max(min, Math.min(max, Math.floor(raw)));
   };
 
+
+
   const renderColorSwatches = () => {
-    const swatchSize = 40;
+    if (!colors?.length) return null;
     const spacing = 8;
+    const sw = 40; // base default (some layouts override adaptively)
 
     switch (selectedLayout) {
-      case 'bottom':
+      case 'bottom': {
+        const containerW = computedDims.width - 20; // side padding
+        const size = fitSwatchSize(colors.length, containerW);
         return (
           <View style={styles.swatchContainer}>
             <View style={[styles.swatchRow, { justifyContent: 'center' }]}>
               {colors.map((color, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.colorSwatch,
-                    {
-                      backgroundColor: color,
-                      width: swatchSize,
-                      height: swatchSize,
-                      marginHorizontal: spacing / 2,
-                    }
-                  ]}
-                />
+                <TouchableOpacity
+                  key={`${color}-${index}`}
+                  activeOpacity={0.85}
+                  onLongPress={async () => {
+                    await Clipboard.setStringAsync(color.toUpperCase());
+                    Haptics.selectionAsync();
+                    Alert.alert('Copied', color.toUpperCase());
+                  }}
+                  style={{ marginHorizontal: spacing / 2, alignItems: 'center' }}
+                >
+                  <View
+                    style={[
+                      styles.colorSwatch,
+                      { backgroundColor: color, width: size, height: size },
+                    ]}
+                  />
+                  <Text style={styles.swatchHex}>{color.toUpperCase()}</Text>
+                </TouchableOpacity>
               ))}
             </View>
           </View>
         );
+      }
 
-      case 'top':
+      case 'top': {
+        const containerW = computedDims.width - 20;
+        const size = fitSwatchSize(colors.length, containerW);
         return (
           <View style={[styles.swatchContainer, { position: 'absolute', top: 10, left: 10, right: 10 }]}>
             <View style={[styles.swatchRow, { justifyContent: 'center' }]}>
               {colors.map((color, index) => (
-                <View
-                  key={index}
-                  style={[
-                    styles.colorSwatch,
-                    {
-                      backgroundColor: color,
-                      width: swatchSize,
-                      height: swatchSize,
-                      marginHorizontal: spacing / 2,
-                    }
-                  ]}
-                />
+                <TouchableOpacity
+                  key={`${color}-${index}`}
+                  activeOpacity={0.85}
+                  onLongPress={async () => {
+                    await Clipboard.setStringAsync(color.toUpperCase());
+                    Haptics.selectionAsync();
+                    Alert.alert('Copied', color.toUpperCase());
+                  }}
+                  style={{ marginHorizontal: spacing / 2, alignItems: 'center' }}
+                >
+                  <View
+                    style={[
+                      styles.colorSwatch,
+                      { backgroundColor: color, width: size, height: size },
+                    ]}
+                  />
+                  <Text style={styles.swatchHex}>{color.toUpperCase()}</Text>
+                </TouchableOpacity>
               ))}
             </View>
           </View>
         );
+      }
 
-      case 'left':
+      case 'left': {
         return (
-          <View style={[styles.swatchContainer, { position: 'absolute', left: 10, top: '50%', transform: [{ translateY: -((colors.length * (swatchSize + spacing)) / 2) }] }]}>
+          <View
+            style={[
+              styles.swatchContainer,
+              {
+                position: 'absolute',
+                left: 10,
+                top: '50%',
+                transform: [{ translateY: -((colors.length * (sw + spacing)) / 2) }],
+              },
+            ]}
+          >
             {colors.map((color, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.colorSwatch,
-                  {
-                    backgroundColor: color,
-                    width: swatchSize,
-                    height: swatchSize,
-                    marginVertical: spacing / 2,
-                  }
-                ]}
-              />
+              <TouchableOpacity
+                key={`${color}-${index}`}
+                activeOpacity={0.85}
+                onLongPress={async () => {
+                  await Clipboard.setStringAsync(color.toUpperCase());
+                  Haptics.selectionAsync();
+                  Alert.alert('Copied', color.toUpperCase());
+                }}
+              >
+                <View
+                  style={[
+                    styles.colorSwatch,
+                    { backgroundColor: color, width: sw, height: sw, marginVertical: spacing / 2 },
+                  ]}
+                />
+              </TouchableOpacity>
             ))}
           </View>
         );
+      }
 
-      case 'right':
+      case 'right': {
         return (
-          <View style={[styles.swatchContainer, { position: 'absolute', right: 10, top: '50%', transform: [{ translateY: -((colors.length * (swatchSize + spacing)) / 2) }] }]}>
+          <View
+            style={[
+              styles.swatchContainer,
+              {
+                position: 'absolute',
+                right: 10,
+                top: '50%',
+                transform: [{ translateY: -((colors.length * (sw + spacing)) / 2) }],
+              },
+            ]}
+          >
             {colors.map((color, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.colorSwatch,
-                  {
-                    backgroundColor: color,
-                    width: swatchSize,
-                    height: swatchSize,
-                    marginVertical: spacing / 2,
-                  }
-                ]}
-              />
+              <TouchableOpacity
+                key={`${color}-${index}`}
+                activeOpacity={0.85}
+                onLongPress={async () => {
+                  await Clipboard.setStringAsync(color.toUpperCase());
+                  Haptics.selectionAsync();
+                  Alert.alert('Copied', color.toUpperCase());
+                }}
+              >
+                <View
+                  style={[
+                    styles.colorSwatch,
+                    { backgroundColor: color, width: sw, height: sw, marginVertical: spacing / 2 },
+                  ]}
+                />
+              </TouchableOpacity>
             ))}
           </View>
         );
+      }
 
-      case 'grid-bottom':
+      case 'grid-bottom': {
         const cols = Math.ceil(Math.sqrt(colors.length));
         const rows = Math.ceil(colors.length / cols);
         return (
@@ -167,22 +238,27 @@ export default function ColorCollageCreator({
             <View style={styles.swatchGrid}>
               {Array.from({ length: rows }).map((_, rowIndex) => (
                 <View key={rowIndex} style={styles.swatchRow}>
-                  {Array.from({ length: cols }).map((_, colIndex) => {
+                  {Array.from({ length: cols }).map((__, colIndex) => {
                     const colorIndex = rowIndex * cols + colIndex;
-                    if (colorIndex >= colors.length) return null;
+                    if (colorIndex >= colors.length) return <View key={colIndex} style={{ width: sw + spacing, height: sw + spacing }} />;
+                    const color = colors[colorIndex];
                     return (
-                      <View
-                        key={colIndex}
-                        style={[
-                          styles.colorSwatch,
-                          {
-                            backgroundColor: colors[colorIndex],
-                            width: swatchSize,
-                            height: swatchSize,
-                            margin: spacing / 2,
-                          }
-                        ]}
-                      />
+                      <TouchableOpacity
+                        key={`${color}-${colorIndex}`}
+                        activeOpacity={0.85}
+                        onLongPress={async () => {
+                          await Clipboard.setStringAsync(color.toUpperCase());
+                          Haptics.selectionAsync();
+                          Alert.alert('Copied', color.toUpperCase());
+                        }}
+                      >
+                        <View
+                          style={[
+                            styles.colorSwatch,
+                            { backgroundColor: color, width: sw, height: sw, margin: spacing / 2 },
+                          ]}
+                        />
+                      </TouchableOpacity>
                     );
                   })}
                 </View>
@@ -190,36 +266,52 @@ export default function ColorCollageCreator({
             </View>
           </View>
         );
+      }
 
-      case 'circular':
+      case 'circular': {
         const radius = 60;
-        const centerX = 0;
-        const centerY = 0;
+        const size = 40;
+        // Container sized to the full circle + swatch radius padding
         return (
-          <View style={[styles.swatchContainer, { position: 'absolute', bottom: 20, right: 20, width: radius * 2, height: radius * 2 }]}>
+          <View
+            style={[
+              styles.swatchContainer,
+              {
+                position: 'absolute',
+                bottom: 20,
+                right: 20,
+                width: radius * 2 + size,
+                height: radius * 2 + size,
+              },
+            ]}
+          >
             {colors.map((color, index) => {
               const angle = (index / colors.length) * 2 * Math.PI;
-              const x = centerX + radius * Math.cos(angle);
-              const y = centerY + radius * Math.sin(angle);
+              const cx = (radius + size / 2) + radius * Math.cos(angle);
+              const cy = (radius + size / 2) + radius * Math.sin(angle);
               return (
-                <View
-                  key={index}
-                  style={[
-                    styles.colorSwatch,
-                    {
-                      backgroundColor: color,
-                      width: swatchSize,
-                      height: swatchSize,
-                      position: 'absolute',
-                      left: radius + x - swatchSize / 2,
-                      top: radius + y - swatchSize / 2,
-                    }
-                  ]}
-                />
+                <TouchableOpacity
+                  key={`${color}-${index}`}
+                  activeOpacity={0.85}
+                  onLongPress={async () => {
+                    await Clipboard.setStringAsync(color.toUpperCase());
+                    Haptics.selectionAsync();
+                    Alert.alert('Copied', color.toUpperCase());
+                  }}
+                  style={{ position: 'absolute', left: cx - size / 2, top: cy - size / 2 }}
+                >
+                  <View
+                    style={[
+                      styles.colorSwatch,
+                      { backgroundColor: color, width: size, height: size },
+                    ]}
+                  />
+                </TouchableOpacity>
               );
             })}
           </View>
         );
+      }
 
       default:
         return null;
@@ -227,93 +319,84 @@ export default function ColorCollageCreator({
   };
 
   const handleExport = async () => {
-    setIsExporting(true);
     try {
-      // Request permissions
+      setIsExporting(true);
+
+      // Photos permission
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Please grant permission to save images to your photo library.');
-        setIsExporting(false);
+        Alert.alert('Permission needed', 'Enable Photos to save collages.', [
+          { text: 'Cancel', style: 'cancel', onPress: () => setIsExporting(false) },
+          { text: 'Open Settings', onPress: () => { setIsExporting(false); Linking.openSettings(); } },
+        ]);
         return;
       }
 
-      // Capture the collage
-      const uri = await captureRef(collageRef, {
-        format: 'png',
-        quality: 1,
+      // Capture
+      const uri = await captureRef(collageRef.current, {
+        format: 'png',  // could be 'jpg'
+        quality: 1,     // for jpg
       });
 
-      // Save to media library
+      // Save
       await MediaLibrary.saveToLibraryAsync(uri);
 
-      // Share the image
+      // Optional share
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri);
       }
 
-      Alert.alert('Success!', 'Your color collage has been saved and shared!');
-      
-      if (onExport) {
-        onExport(uri);
-      }
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Success!', 'Your color collage has been saved.');
+
+      onExport?.(uri);
     } catch (error) {
       console.error('Export error:', error);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert('Error', 'Failed to export collage. Please try again.');
+    } finally {
+      setIsExporting(false);
     }
-    setIsExporting(false);
   };
 
-  const imageDimensions = getImageDimensions();
+return (
+  <Modal visible={true} animationType="slide" presentationStyle="fullScreen">
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={onClose} style={styles.headerButton}>
+          <Ionicons name="close" size={24} color="#333" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Create Collage</Text>
+        <TouchableOpacity onPress={handleExport} style={styles.headerButton} disabled={isExporting}>
+          <Text style={[styles.exportText, isExporting && styles.exportTextDisabled]}>
+            {isExporting ? 'Saving…' : 'Export'}
+          </Text>
+        </TouchableOpacity>
+      </View>
 
-  return (
-    <Modal visible={true} animationType="slide" presentationStyle="fullScreen">
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.headerButton}>
-            <Ionicons name="close" size={24} color="#333" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Create Collage</Text>
-          <TouchableOpacity 
-            onPress={handleExport} 
-            style={styles.headerButton}
-            disabled={isExporting}
-          >
-            <Text style={[styles.exportText, isExporting && styles.exportTextDisabled]}>
-              {isExporting ? 'Saving...' : 'Export'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Collage Preview */}
-        <View style={styles.previewContainer}>
-          <View 
-            ref={collageRef}
-            style={[
-              styles.collageContainer,
-              {
-                width: imageDimensions.width,
-                height: imageDimensions.height,
-              }
-            ]}
-          >
-            <Image
+      {/* Collage Preview */}
+      <View style={styles.previewContainer}>
+        <View
+          ref={collageRef}
+          style={[
+            styles.collageContainer,
+            { width: computedDims.width, height: computedDims.height },
+          ]}
+        >
+          {!!image?.uri && (
+            <RNImage
               source={{ uri: image.uri }}
-              style={[
-                styles.collageImage,
-                {
-                  width: imageDimensions.width,
-                  height: imageDimensions.height,
-                }
-              ]}
+              style={[styles.collageImage, { width: computedDims.width, height: computedDims.height }]}
               resizeMode="cover"
             />
-            {renderColorSwatches()}
-          </View>
+          )}
+          {renderColorSwatches()}
         </View>
+      </View>
 
-        {/* Controls */}
-        <ScrollView style={styles.controlsContainer} showsVerticalScrollIndicator={false}>
+      {/* Controls */}
+      <ScrollView style={styles.controlsContainer} showsVerticalScrollIndicator={false}>
           {/* Layout Options */}
           <View style={styles.controlSection}>
             <Text style={styles.controlTitle}>Layout</Text>
@@ -425,13 +508,9 @@ const styles = StyleSheet.create({
   },
   collageContainer: {
     position: 'relative',
-    backgroundColor: '#fff',
+    backgroundColor: '#ffffff', // ensures a clean export (no transparent corners)
     borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 5,
     overflow: 'hidden',
   },
   collageImage: {
@@ -460,8 +539,9 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
+  swatchHex: { fontSize: 10, color: '#333', textAlign: 'center', marginTop: 4 },
   controlsContainer: {
-    maxHeight: 200,
+    maxHeight: 220,
     backgroundColor: '#fff',
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',

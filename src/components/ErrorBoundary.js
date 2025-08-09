@@ -4,58 +4,85 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { hasError: false, error: null, errorInfo: null };
+    this.state = { hasError: false, error: null, errorInfo: null, retrySeq: 0 };
   }
 
-  static getDerivedStateFromError(error) {
-    // Update state so the next render will show the fallback UI
+  static getDerivedStateFromError() {
     return { hasError: true };
   }
 
   componentDidCatch(error, errorInfo) {
-    // Log the error to console and potentially to a crash reporting service
+    // Local log
     console.error('ErrorBoundary caught an error:', error, errorInfo);
-    
-    this.setState({
-      error: error,
-      errorInfo: errorInfo
-    });
+    this.setState({ error, errorInfo });
 
-    // In production, you might want to log this to a service like Sentry
-    // Sentry.captureException(error, { extra: errorInfo });
+    // Optional external logger
+    if (typeof this.props.onError === 'function') {
+      try { this.props.onError(error, errorInfo); } catch {}
+    }
+    // Example: Sentry.captureException(error, { extra: errorInfo });
   }
 
-  handleRetry = () => {
-    this.setState({ hasError: false, error: null, errorInfo: null });
+  componentDidUpdate(prevProps) {
+    // Auto-reset when resetKeys change (shallow compare)
+    const { resetKeys } = this.props;
+    if (!this.state.hasError || !Array.isArray(resetKeys)) return;
+
+    const changed = Array.isArray(prevProps.resetKeys) &&
+      (resetKeys.length !== prevProps.resetKeys.length ||
+       resetKeys.some((v, i) => v !== prevProps.resetKeys[i]));
+
+    if (changed) {
+      this.resetBoundary();
+    }
+  }
+
+  resetBoundary = () => {
+    this.setState((s) => ({
+      hasError: false,
+      error: null,
+      errorInfo: null,
+      retrySeq: s.retrySeq + 1, // bumps key to remount children
+    }));
+    if (typeof this.props.onReset === 'function') {
+      try { this.props.onReset(); } catch {}
+    }
   };
 
   render() {
     if (this.state.hasError) {
-      // Render fallback UI
+      const showDev =
+        typeof __DEV__ !== 'undefined' ? __DEV__ : false;
+
       return (
-        <View style={styles.container}>
+        <View style={styles.container} testID="error-boundary-fallback">
           <View style={styles.errorContainer}>
-            <Text style={styles.errorEmoji}>😔</Text>
+            <Text style={styles.errorEmoji} accessibilityRole="image">😔</Text>
             <Text style={styles.errorTitle}>Oops! Something went wrong</Text>
             <Text style={styles.errorMessage}>
-              We encountered an unexpected error. Don't worry, your data is safe.
+              We encountered an unexpected error. Don&apos;t worry, your data is safe.
             </Text>
-            
-            {__DEV__ && this.state.error && (
+
+            {showDev && this.state.error && (
               <View style={styles.debugContainer}>
                 <Text style={styles.debugTitle}>Debug Information:</Text>
                 <Text style={styles.debugText}>
-                  {this.state.error.toString()}
+                  {String(this.state.error)}
                 </Text>
-                {this.state.errorInfo && (
+                {this.state.errorInfo?.componentStack ? (
                   <Text style={styles.debugText}>
                     {this.state.errorInfo.componentStack}
                   </Text>
-                )}
+                ) : null}
               </View>
             )}
-            
-            <TouchableOpacity style={styles.retryButton} onPress={this.handleRetry}>
+
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={this.resetBoundary}
+              accessibilityRole="button"
+              accessibilityLabel="Try again"
+            >
               <Text style={styles.retryButtonText}>Try Again</Text>
             </TouchableOpacity>
           </View>
@@ -63,7 +90,8 @@ class ErrorBoundary extends React.Component {
       );
     }
 
-    return this.props.children;
+    // Force subtree remount after retry via key
+    return <React.Fragment key={this.state.retrySeq}>{this.props.children}</React.Fragment>;
   }
 }
 
