@@ -144,24 +144,51 @@ export default function App() {
           }
           
           // Validate token with shorter timeout for faster startup
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
-          );
-          
-          const profile = await Promise.race([
-            ApiService.getUserProfile(),
-            timeoutPromise
-          ]);
-          
-          if (profile && profile.id) {
-            console.log('✅ User authenticated:', profile.username);
-            setUser(profile);
-            // Load saved color matches for the authenticated user
-            await loadSavedColorMatches(getMatchesKey(profile.id));
-            console.log('✅ User color matches loaded');
-          } else {
-            console.log('❌ Invalid profile response');
-            await clearStoredToken();
+          try {
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
+            );
+            
+            // Check if getUserProfile method exists before calling
+            if (ApiService.getUserProfile && typeof ApiService.getUserProfile === 'function') {
+              const profile = await Promise.race([
+                ApiService.getUserProfile(),
+                timeoutPromise
+              ]);
+              
+              if (profile && profile.id) {
+                console.log('✅ User authenticated:', profile.username);
+                setUser(profile);
+                // Load saved color matches for the authenticated user
+                await loadSavedColorMatches(getMatchesKey(profile.id));
+                console.log('✅ User color matches loaded');
+              } else {
+                console.log('❌ Invalid profile response');
+                await clearStoredToken();
+              }
+            } else {
+              console.log('⚠️ getUserProfile method not available, skipping profile load');
+              // Use stored user data from AsyncStorage as fallback
+              const storedUserData = await AsyncStorage.getItem('userData');
+              if (storedUserData) {
+                const userData = JSON.parse(storedUserData);
+                console.log('✅ Using stored user data:', userData.username);
+                setUser(userData);
+                await loadSavedColorMatches(getMatchesKey(userData.id));
+              }
+            }
+          } catch (profileError) {
+            console.log('⚠️ Profile fetch failed, using stored data fallback');
+            // Use stored user data as fallback
+            const storedUserData = await AsyncStorage.getItem('userData');
+            if (storedUserData) {
+              const userData = JSON.parse(storedUserData);
+              console.log('✅ Using stored user data fallback:', userData.username);
+              setUser(userData);
+              await loadSavedColorMatches(getMatchesKey(userData.id));
+            } else {
+              await clearStoredToken();
+            }
           }
         } catch (profileError) {
           console.error('❌ Profile validation error:', profileError.message);
