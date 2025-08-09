@@ -163,7 +163,7 @@ router.post('/login', authLimiter, loginValidation, async (req, res) => {
 });
 
 // Demo login endpoint
-router.post('/demo-login', demoLoginLimiter, async (req, res) => {
+router.post('/demo-login', authLimiter, async (req, res) => {
   try {
     let demoUser = await query(
       'SELECT * FROM users WHERE email = ?',
@@ -217,7 +217,7 @@ router.post('/demo-login', demoLoginLimiter, async (req, res) => {
 });
 
 // Demo login route (GET for easy browser testing)
-router.get('/demo-login', demoLoginLimiter, async (req, res) => {
+router.get('/demo-login', authLimiter, async (req, res) => {
   try {
     let demoUser = await query(
       'SELECT * FROM users WHERE email = ?',
