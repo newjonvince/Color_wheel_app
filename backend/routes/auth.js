@@ -1,4 +1,4 @@
-const express = require('express');
+const express = require('express'); 
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { query } = require('../config/database');
@@ -10,27 +10,23 @@ const {
   passwordResetLimiter, 
   emailVerificationLimiter 
 } = require('../middleware/rateLimiting');
-// CAPTCHA verification removed for testing
 const emailService = require('../services/emailService');
 const router = express.Router();
+
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:19006';
 
 // Register new user
 router.post('/register', registrationLimiter, registerValidation, async (req, res) => {
   try {
-
     const { email, username, password, location, birthday, gender } = req.body;
-    
-    // Extract birthday fields from object (frontend sends birthday as object)
     const birthday_month = birthday?.month || null;
     const birthday_day = birthday?.day || null;
     const birthday_year = birthday?.year || null;
 
-    // Check if user already exists
     const existingUser = await query(
-      'SELECT id FROM users WHERE email = :email OR username = :username',
-      { email, username }
+      'SELECT id FROM users WHERE email = ? OR username = ?',
+      [email, username]
     );
-
     if (existingUser.rows.length > 0) {
       return res.status(409).json({
         error: 'User already exists',
@@ -38,27 +34,19 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
       });
     }
 
-    // Hash password
-    const saltRounds = 12;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-    // Create new user
+    const hashedPassword = await bcrypt.hash(password, 12);
     const result = await query(
       `INSERT INTO users (email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [email, username, hashedPassword, location, birthday_month, birthday_day, birthday_year, gender]
     );
-
-    // Get the newly created user data (MySQL2 returns insertId)
-    const insertId = result.rows.insertId || result.insertId;
+    const insertId = result.insertId || result.rows.insertId;
     const userResult = await query(
       'SELECT id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at FROM users WHERE id = ?',
       [insertId]
     );
-    
     const user = userResult.rows[0];
 
-    // Create default boards for new user
     await query(
       `INSERT INTO boards (user_id, name, type, scheme) VALUES
        (?, 'Private Complementary', 'private', 'complementary'),
@@ -71,28 +59,24 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
        (?, 'Public Triadic', 'public', 'triadic'),
        (?, 'Public Tetradic', 'public', 'tetradic'),
        (?, 'Public Monochromatic', 'public', 'monochromatic')`,
-      [user.id, user.id, user.id, user.id, user.id, user.id, user.id, user.id, user.id, user.id]
+      Array(10).fill(user.id)
     );
 
-    // Generate JWT token
     const token = jwt.sign(
       { userId: user.id, email: user.email },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
 
-    // Save session
     await query(
       'INSERT INTO user_sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)',
-      [user.id, token, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)] // 7 days
+      [user.id, token, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)]
     );
 
-    // Send email verification
     try {
       await emailService.sendVerificationEmail(user.email, user.username, user.id);
     } catch (emailError) {
       console.error('Failed to send verification email:', emailError);
-      // Don't fail registration if email fails
     }
 
     res.status(201).json({
@@ -114,7 +98,6 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
       token,
       emailVerificationSent: true
     });
-
   } catch (error) {
     console.error('Registration error:', error);
     res.status(500).json({
@@ -127,41 +110,26 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
 // Login user
 router.post('/login', authLimiter, loginValidation, async (req, res) => {
   try {
-
     const { email, password } = req.body;
-
-    // Find user
     const result = await query(
       'SELECT id, email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at, email_verified FROM users WHERE email = ? AND is_active = true',
       [email]
     );
-
     if (result.rows.length === 0) {
-      return res.status(401).json({
-        error: 'Invalid credentials',
-        message: 'Email or password is incorrect'
-      });
+      return res.status(401).json({ error: 'Invalid credentials', message: 'Email or password is incorrect' });
     }
 
     const user = result.rows[0];
-
-    // Verify password
     const isValidPassword = await bcrypt.compare(password, user.password_hash);
     if (!isValidPassword) {
-      return res.status(401).json({
-        error: 'Invalid credentials',
-        message: 'Email or password is incorrect'
-      });
+      return res.status(401).json({ error: 'Invalid credentials', message: 'Email or password is incorrect' });
     }
 
-    // Generate JWT token
     const token = jwt.sign(
       { userId: user.id, email: user.email },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
-
-    // Save session
     await query(
       'INSERT INTO user_sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)',
       [user.id, token, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)]
@@ -185,7 +153,6 @@ router.post('/login', authLimiter, loginValidation, async (req, res) => {
       },
       token
     });
-
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({
@@ -195,128 +162,31 @@ router.post('/login', authLimiter, loginValidation, async (req, res) => {
   }
 });
 
-// Refresh token endpoint
-router.post('/refresh', async (req, res) => {
-  try {
-    const refreshToken = req.headers.authorization?.replace('Bearer ', '');
-    
-    if (!refreshToken) {
-      return res.status(401).json({
-        error: 'Refresh token required'
-      });
-    }
-    
-    // Verify refresh token
-    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET);
-    
-    if (decoded.type !== 'refresh') {
-      return res.status(401).json({
-        error: 'Invalid refresh token'
-      });
-    }
-    
-    // Get user
-    const result = await query(
-      'SELECT id, email, username FROM users WHERE id = ? AND is_active = true',
-      [decoded.userId]
-    );
-    
-    if (result.rows.length === 0) {
-      return res.status(401).json({
-        error: 'User not found'
-      });
-    }
-    
-    const user = result.rows[0];
-    
-    // Generate new tokens
-    const newToken = jwt.sign(
-      { userId: user.id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: '1h' }
-    );
-    
-    const newRefreshToken = jwt.sign(
-      { userId: user.id, type: 'refresh' },
-      process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
-      { expiresIn: '7d' }
-    );
-    
-    res.json({
-      token: newToken,
-      refreshToken: newRefreshToken
-    });
-    
-  } catch (error) {
-    console.error('Token refresh error:', error);
-    res.status(401).json({
-      error: 'Invalid refresh token'
-    });
-  }
-});
-
-// Check username availability
-router.get('/check-username/:username', usernameCheckLimiter, async (req, res) => {
-  try {
-    const { username } = req.params;
-
-    const result = await query(
-      'SELECT id FROM users WHERE username = ?',
-      [username]
-    );
-
-    res.json({
-      available: result.rows.length === 0,
-      username
-    });
-
-  } catch (error) {
-    console.error('Username check error:', error);
-    res.status(500).json({
-      error: 'Username check failed',
-    });
-  }
-});
-
-// Demo login endpoint for testing
+// Demo login endpoint
 router.post('/demo-login', authLimiter, async (req, res) => {
   try {
-    // Create or get demo user
     let demoUser = await query(
       'SELECT * FROM users WHERE email = ?',
       ['demo@fashioncolorwheel.com']
     );
-
     if (demoUser.rows.length === 0) {
-      // Create demo user if it doesn't exist
       const hashedPassword = await bcrypt.hash('demo123', 12);
       await query(
         `INSERT INTO users (email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, email_verified, created_at) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
         ['demo@fashioncolorwheel.com', 'demo_user', hashedPassword, 'United States', 'January', 1, 1990, 'Prefer not to say', true]
       );
-      
-      // Fetch the created user
       demoUser = await query(
         'SELECT * FROM users WHERE email = ?',
         ['demo@fashioncolorwheel.com']
       );
     }
-
     const user = demoUser.rows[0];
-    
-    // Generate JWT token
     const token = jwt.sign(
-      { 
-        userId: user.id, 
-        email: user.email,
-        username: user.username 
-      },
+      { userId: user.id, email: user.email, username: user.username },
       process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
-
-    // Return user data and token
     res.json({
       success: true,
       message: 'Demo login successful',
@@ -336,7 +206,6 @@ router.post('/demo-login', authLimiter, async (req, res) => {
       },
       token
     });
-
   } catch (error) {
     console.error('Demo login error:', error);
     res.status(500).json({
@@ -347,63 +216,92 @@ router.post('/demo-login', authLimiter, async (req, res) => {
   }
 });
 
-// Logout user
-router.post('/logout', async (req, res) => {
+// Check username availability
+router.get('/check-username/:username', usernameCheckLimiter, async (req, res) => {
   try {
-    const token = req.headers.authorization?.replace('Bearer ', '');
+    const { username } = req.params;
+    const result = await query(
+      'SELECT id FROM users WHERE username = ?',
+      [username]
+    );
     
-    if (token) {
-      // Remove session from database
-      await query(
-        'DELETE FROM user_sessions WHERE session_token = ?',
-        [token]
-      );
-    }
-
     res.json({
-      message: 'Logout successful'
+      available: result.rows.length === 0,
+      message: result.rows.length === 0 ? 'Username is available' : 'Username is already taken'
     });
-
   } catch (error) {
-    console.error('Logout error:', error);
+    console.error('Username check error:', error);
     res.status(500).json({
-      error: 'Logout failed',
+      error: 'Username check failed',
       message: 'Internal server error'
     });
   }
 });
 
-// Verify email address
-router.post('/verify-email', async (req, res) => {
+// Token refresh endpoint
+router.post('/refresh', async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+    if (!refreshToken) {
+      return res.status(401).json({ error: 'Refresh token required' });
+    }
+
+    // Verify refresh token (implement your refresh token logic here)
+    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET);
+    const newToken = jwt.sign(
+      { userId: decoded.userId, email: decoded.email },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    res.json({ token: newToken });
+  } catch (error) {
+    console.error('Token refresh error:', error);
+    res.status(401).json({
+      error: 'Invalid refresh token',
+      message: 'Token refresh failed'
+    });
+  }
+});
+
+// Email verification endpoint
+router.post('/verify-email', emailVerificationLimiter, async (req, res) => {
   try {
     const { token } = req.body;
-
     if (!token) {
+      return res.status(400).json({ error: 'Verification token required' });
+    }
+
+    const verification = await query(
+      'SELECT * FROM email_verifications WHERE token = ? AND expires_at > NOW() AND verified_at IS NULL',
+      [token]
+    );
+
+    if (verification.rows.length === 0) {
       return res.status(400).json({
-        error: 'Verification token required',
-        message: 'Please provide a verification token.'
+        error: 'Invalid or expired token',
+        message: 'Email verification failed'
       });
     }
 
-    const result = await emailService.verifyEmailToken(token);
+    const verificationRecord = verification.rows[0];
+    
+    // Mark email as verified
+    await query(
+      'UPDATE users SET email_verified = true, email_verified_at = NOW() WHERE id = ?',
+      [verificationRecord.user_id]
+    );
 
-    if (!result.success) {
-      return res.status(400).json({
-        error: 'Verification failed',
-        message: result.error
-      });
-    }
+    // Mark verification as used
+    await query(
+      'UPDATE email_verifications SET verified_at = NOW() WHERE id = ?',
+      [verificationRecord.id]
+    );
 
     res.json({
-      message: 'Email verified successfully',
-      user: {
-        id: result.userId,
-        email: result.email,
-        username: result.username,
-        emailVerified: true
-      }
+      success: true,
+      message: 'Email verified successfully'
     });
-
   } catch (error) {
     console.error('Email verification error:', error);
     res.status(500).json({
@@ -413,157 +311,42 @@ router.post('/verify-email', async (req, res) => {
   }
 });
 
-// Resend email verification
-router.post('/resend-verification', emailVerificationLimiter, async (req, res) => {
+// Password reset request
+router.post('/reset-password', passwordResetLimiter, async (req, res) => {
   try {
     const { email } = req.body;
-
     if (!email) {
-      return res.status(400).json({
-        error: 'Email required',
-        message: 'Please provide an email address.'
-      });
+      return res.status(400).json({ error: 'Email is required' });
     }
 
-    // Find user
-    const result = await query(
-      'SELECT id, email, username, email_verified FROM users WHERE email = ? AND is_active = true',
-      [email.trim().toLowerCase()]
+    const user = await query(
+      'SELECT id, email, username FROM users WHERE email = ?',
+      [email]
     );
 
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        error: 'User not found',
-        message: 'No account found with this email address.'
-      });
-    }
-
-    const user = result.rows[0];
-
-    if (user.email_verified) {
-      return res.status(400).json({
-        error: 'Email already verified',
-        message: 'This email address is already verified.'
-      });
-    }
-
-    // Send verification email
-    await emailService.sendVerificationEmail(user.email, user.username, user.id);
-
-    res.json({
-      message: 'Verification email sent',
-      email: user.email
-    });
-
-  } catch (error) {
-    console.error('Resend verification error:', error);
-    res.status(500).json({
-      error: 'Failed to resend verification',
-      message: 'Internal server error'
-    });
-  }
-});
-
-// Request password reset
-router.post('/request-password-reset', passwordResetLimiter, async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({
-        error: 'Email required',
-        message: 'Please provide an email address.'
-      });
-    }
-
-    // Find user
-    const result = await query(
-      'SELECT id, email, username FROM users WHERE email = ? AND is_active = true',
-      [email.trim().toLowerCase()]
-    );
-
-    if (result.rows.length === 0) {
-      // Don't reveal if email exists or not for security
+    if (user.rows.length === 0) {
+      // Don't reveal if email exists for security
       return res.json({
-        message: 'If an account with this email exists, a password reset link has been sent.'
+        success: true,
+        message: 'If an account with that email exists, a password reset link has been sent.'
       });
     }
 
-    const user = result.rows[0];
-
-    // Send password reset email
-    await emailService.sendPasswordResetEmail(user.email, user.username, user.id);
-
-    res.json({
-      message: 'If an account with this email exists, a password reset link has been sent.'
-    });
-
-  } catch (error) {
-    console.error('Password reset request error:', error);
-    res.status(500).json({
-      error: 'Password reset request failed',
-      message: 'Internal server error'
-    });
-  }
-});
-
-// Reset password with token
-router.post('/reset-password', async (req, res) => {
-  try {
-    const { token, newPassword } = req.body;
-
-    if (!token || !newPassword) {
-      return res.status(400).json({
-        error: 'Token and new password required',
-        message: 'Please provide both reset token and new password.'
+    const userData = user.rows[0];
+    
+    try {
+      await emailService.sendPasswordResetEmail(userData.email, userData.username, userData.id);
+      res.json({
+        success: true,
+        message: 'Password reset link has been sent to your email.'
+      });
+    } catch (emailError) {
+      console.error('Failed to send password reset email:', emailError);
+      res.status(500).json({
+        error: 'Failed to send reset email',
+        message: 'Please try again later'
       });
     }
-
-    if (newPassword.length < 6) {
-      return res.status(400).json({
-        error: 'Password too short',
-        message: 'Password must be at least 6 characters long.'
-      });
-    }
-
-    // Verify reset token
-    const tokenResult = await emailService.verifyResetToken(token);
-
-    if (!tokenResult.success) {
-      return res.status(400).json({
-        error: 'Invalid reset token',
-        message: tokenResult.error
-      });
-    }
-
-    // Hash new password
-    const saltRounds = 12;
-    const passwordHash = await bcrypt.hash(newPassword, saltRounds);
-
-    // Update user password
-    await query(
-      'UPDATE users SET password_hash = ? WHERE id = ?',
-      [passwordHash, tokenResult.userId]
-    );
-
-    // Mark reset token as used
-    await emailService.markResetTokenUsed(token);
-
-    // Invalidate all existing sessions for security
-    await query(
-      'DELETE FROM user_sessions WHERE user_id = ?',
-      [tokenResult.userId]
-    );
-
-    res.json({
-      message: 'Password reset successful',
-      user: {
-        id: tokenResult.userId,
-        email: tokenResult.email,
-        username: tokenResult.username
-      }
-    });
-
   } catch (error) {
     console.error('Password reset error:', error);
     res.status(500).json({

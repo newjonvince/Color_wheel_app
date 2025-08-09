@@ -63,6 +63,24 @@ app.use((err, req, res, next) => {
   return next(err);
 });
 
+// Root endpoint
+app.get('/', (req, res) => {
+  res.status(200).json({
+    message: 'Fashion Color Wheel API',
+    version: '1.0.0',
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: '/health',
+      auth: '/api/auth',
+      colors: '/api/colors',
+      boards: '/api/boards',
+      users: '/api/users',
+      community: '/api/community'
+    }
+  });
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({
@@ -91,13 +109,10 @@ app.use('*', (req, res) => {
 // Global error handler - prevent double headers
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
-  console.log('// Fashion Color Wheel Backend Server');
-  console.log('// Production-ready Express.js API with MySQL, authentication, and rate limiting');
-  console.log('// Updated: All Railway deployment warnings fixed');
-  console.log('📱 Environment:', process.env.NODE_ENV);
-  console.log('🔗 Health check: http://localhost:' + PORT + '/health');
-  console.log('✨ All warnings fixed - clean deployment!');
+  
+  console.error('Global error handler:', err.message);
   const isDev = process.env.NODE_ENV !== 'production';
+  
   res.status(err.status || 500).json({
     error: 'Internal Server Error',
     message: isDev ? err.message : 'Something went wrong!',
@@ -108,6 +123,12 @@ app.use((err, req, res, next) => {
 
 // Start server with graceful shutdown (Railway)
 const server = app.listen(PORT, () => {
+  console.log('// Fashion Color Wheel Backend Server');
+  console.log('// Production-ready Express.js API with MySQL, authentication, and rate limiting');
+  console.log('// Updated: All Railway deployment warnings fixed');
+  console.log('📱 Environment:', process.env.NODE_ENV);
+  console.log('🔗 Health check: http://localhost:' + PORT + '/health');
+  console.log('✨ All warnings fixed - clean deployment!');
   console.log(`🚀 API up on ${PORT}`);
 });
 
