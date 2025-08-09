@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, View, Text } from 'react-native';
+import { StyleSheet, View, Text, Alert } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -7,6 +7,25 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import ApiService from './src/services/api';
+
+// Global error handler for unhandled promise rejections
+const originalHandler = ErrorUtils.getGlobalHandler();
+ErrorUtils.setGlobalHandler((error, isFatal) => {
+  console.error('🚨 Global error handler:', error, 'isFatal:', isFatal);
+  if (isFatal) {
+    console.error('🚨 Fatal error detected, attempting graceful handling');
+    // Log the error but don't crash the app
+    Alert.alert(
+      'Unexpected Error',
+      'The app encountered an error but will continue running. Please restart if issues persist.',
+      [{ text: 'OK' }]
+    );
+  }
+  // Call original handler for logging
+  if (originalHandler) {
+    originalHandler(error, isFatal);
+  }
+});
 
 // Screens
 import ColorWheelScreen from './src/screens/ColorWheelScreen';
@@ -62,38 +81,88 @@ export default function App() {
 
   const initializeApp = async () => {
     try {
-      // Load tokens from secure storage (handled inside ApiService)
-      await ApiService.loadTokenFromStorage?.();
+      console.log('🚀 Initializing Fashion Color Wheel app...');
+      
+      // Ensure ApiService is properly initialized
+      if (!ApiService) {
+        throw new Error('ApiService not available');
+      }
 
-      // Check token presence
-      const connectionStatus = ApiService.getConnectionStatus?.() || {};
+      // Load tokens from secure storage with error handling
+      try {
+        if (typeof ApiService.loadTokenFromStorage === 'function') {
+          await ApiService.loadTokenFromStorage();
+          console.log('✅ Tokens loaded from storage');
+        } else {
+          console.log('⚠️ loadTokenFromStorage method not available');
+        }
+      } catch (tokenError) {
+        console.log('⚠️ Failed to load tokens:', tokenError.message);
+      }
+
+      // Check token presence safely
+      let connectionStatus = {};
+      try {
+        connectionStatus = (typeof ApiService.getConnectionStatus === 'function') 
+          ? ApiService.getConnectionStatus() || {} 
+          : {};
+      } catch (statusError) {
+        console.log('⚠️ Failed to get connection status:', statusError.message);
+      }
 
       let user = null;
       if (connectionStatus.hasToken) {
         try {
-          // Verify token & fetch profile
-          const userProfile = await ApiService.getUserProfile();
-          user = userProfile?.user || userProfile;
-          setIsLoggedIn(true);
-          setCurrentUser(user);
+          // Verify token & fetch profile with timeout
+          console.log('🔍 Verifying user token...');
+          if (typeof ApiService.getUserProfile === 'function') {
+            const userProfile = await Promise.race([
+              ApiService.getUserProfile(),
+              new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Profile fetch timeout')), 10000)
+              )
+            ]);
+            user = userProfile?.user || userProfile;
+            setIsLoggedIn(true);
+            setCurrentUser(user);
+            console.log('✅ User authenticated:', user?.username || user?.email);
+          } else {
+            console.log('⚠️ getUserProfile method not available');
+          }
         } catch (error) {
-          console.log('Token verification failed, clearing tokens:', error?.message);
-          await ApiService.clearToken?.();
+          console.log('⚠️ Token verification failed, clearing tokens:', error?.message);
+          try {
+            if (typeof ApiService.clearToken === 'function') {
+              await ApiService.clearToken();
+            }
+          } catch (clearError) {
+            console.log('⚠️ Failed to clear token:', clearError.message);
+          }
           setIsLoggedIn(false);
           setCurrentUser(null);
         }
+      } else {
+        console.log('📝 No valid token found, user not logged in');
       }
 
       // Load saved color matches for the resolved user (or anon)
       const key = getMatchesKey(user?.id);
       await loadSavedColorMatches(key);
+      console.log('✅ App initialization complete');
     } catch (error) {
-      console.error('Error initializing app:', error);
+      console.error('❌ Critical error initializing app:', error);
+      // Ensure app doesn't crash - set safe defaults
       setIsLoggedIn(false);
       setCurrentUser(null);
-      await loadSavedColorMatches(getMatchesKey(null)); // try anon as last resort
+      try {
+        await loadSavedColorMatches(getMatchesKey(null)); // try anon as last resort
+      } catch (matchError) {
+        console.error('❌ Failed to load anonymous matches:', matchError);
+        setSavedColorMatches([]); // Set empty array as ultimate fallback
+      }
     } finally {
       setIsLoading(false);
+      console.log('🏁 App initialization finished');
     }
   };
 

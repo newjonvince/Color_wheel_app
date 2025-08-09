@@ -81,7 +81,8 @@
         }
       ],
       "expo-secure-store",
-      "expo-mail-composer"
+      "expo-mail-composer",
+      "expo-font"
     ],
     "extra": {
       "eas": {

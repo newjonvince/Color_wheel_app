@@ -12,13 +12,31 @@ class ErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    // Local log
-    console.error('ErrorBoundary caught an error:', error, errorInfo);
+    // Enhanced logging for production debugging
+    console.error('🚨 ErrorBoundary caught an error:', error, errorInfo);
+    console.error('🚨 Error stack:', error?.stack);
+    console.error('🚨 Component stack:', errorInfo?.componentStack);
+    
     this.setState({ error, errorInfo });
+
+    // Log to console with more context for TestFlight debugging
+    const errorDetails = {
+      message: error?.message,
+      stack: error?.stack,
+      componentStack: errorInfo?.componentStack,
+      timestamp: new Date().toISOString(),
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'React Native',
+    };
+    
+    console.error('🚨 Full error details:', JSON.stringify(errorDetails, null, 2));
 
     // Optional external logger
     if (typeof this.props.onError === 'function') {
-      try { this.props.onError(error, errorInfo); } catch {}
+      try { 
+        this.props.onError(error, errorInfo, errorDetails); 
+      } catch (loggerError) {
+        console.error('🚨 Error logger failed:', loggerError);
+      }
     }
     // Example: Sentry.captureException(error, { extra: errorInfo });
   }
