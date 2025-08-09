@@ -90,6 +90,16 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Request logging middleware for debugging
+app.use('/api', (req, res, next) => {
+  console.log(`🔍 API Request: ${req.method} ${req.originalUrl} from ${req.ip}`);
+  console.log(`🔍 Headers:`, JSON.stringify(req.headers, null, 2));
+  if (req.body && Object.keys(req.body).length > 0) {
+    console.log(`🔍 Body:`, JSON.stringify(req.body, null, 2));
+  }
+  next();
+});
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/colors', colorRoutes);
