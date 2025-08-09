@@ -1,69 +1,28 @@
+// config/database.js
 const mysql = require('mysql2/promise');
-require('dotenv').config();
 
-// MySQL connection configuration
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
-  port: process.env.DB_PORT || 3306,
-  database: process.env.DB_NAME,
   user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-  connectionLimit: 20, // Maximum number of connections in the pool
-  queueLimit: 0, // No limit on queued connections
-  charset: 'utf8mb4',
-  // Remove invalid options: acquireTimeout, timeout, reconnect are not valid for mysql2
+  password: process.env.DB_PASS,
+  database: process.env.DB_NAME,
+  // recommended pool opts
+  waitForConnections: true,
+  connectionLimit: 10,
+  maxIdle: 10,
+  idleTimeout: 60000,
+  queueLimit: 0,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 0,
+  // connection timeout in ms
+  connectTimeout: 10000,
+  // Optional on pool (NOT on single connection):
+  acquireTimeout: 10000,
 });
 
-// Test database connection
-pool.on('connection', (connection) => {
-  console.log('✅ Connected to MySQL database as id ' + connection.threadId);
-});
+async function query(sql, params) {
+  const [rows] = await pool.execute(sql, params);
+  return { rows }; // keep .rows for caller compatibility
+}
 
-pool.on('error', (err) => {
-  console.error('❌ MySQL connection error:', err);
-  if (err.code === 'PROTOCOL_CONNECTION_LOST') {
-    console.log('🔄 Reconnecting to MySQL database...');
-  } else {
-    throw err;
-  }
-});
-
-// Helper function to execute queries
-const query = async (text, params = []) => {
-  const start = Date.now();
-  try {
-    const [rows, fields] = await pool.execute(text, params);
-    const duration = Date.now() - start;
-    console.log('📊 Executed query', { text, duration, rowCount: Array.isArray(rows) ? rows.length : 1 });
-    return { rows, fields };
-  } catch (error) {
-    console.error('❌ Database query error:', error);
-    throw error;
-  }
-};
-
-// Helper function to get a connection from the pool
-const getConnection = async () => {
-  return await pool.getConnection();
-};
-
-// Test connection on startup
-const testConnection = async () => {
-  try {
-    const connection = await pool.getConnection();
-    console.log('✅ MySQL database connection test successful');
-    connection.release();
-  } catch (error) {
-    console.error('❌ MySQL database connection test failed:', error);
-  }
-};
-
-// Test connection immediately
-testConnection();
-
-module.exports = {
-  query,
-  getConnection,
-  pool
-};
+module.exports = { pool, query };

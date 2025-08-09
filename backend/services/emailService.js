@@ -11,50 +11,40 @@ class EmailService {
   initializeTransporter() {
     try {
       const provider = process.env.EMAIL_PROVIDER; // 'gmail' | 'sendgrid' | 'smtp'
-      if (!provider) {
-        console.log('📧 No EMAIL_PROVIDER set. Email sending disabled (will log only).');
-        this.transporter = null;
-        return;
-      }
 
       if (provider === 'gmail') {
         this.transporter = nodemailer.createTransport({
           service: 'gmail',
-          auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_APP_PASSWORD, // App Password
-          },
+          auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_APP_PASSWORD }
         });
       } else if (provider === 'sendgrid') {
-        // Use SMTP for SendGrid
         this.transporter = nodemailer.createTransport({
-          host: 'smtp.sendgrid.net',
-          port: 587,
-          secure: false,
-          auth: {
-            user: 'apikey',
-            pass: process.env.SENDGRID_API_KEY,
-          },
+          service: 'SendGrid',
+          auth: { user: 'apikey', pass: process.env.SENDGRID_API_KEY }
         });
       } else if (provider === 'smtp') {
         this.transporter = nodemailer.createTransport({
           host: process.env.SMTP_HOST,
-          port: parseInt(process.env.SMTP_PORT || '587', 10),
+          port: Number(process.env.SMTP_PORT || 587),
           secure: process.env.SMTP_SECURE === 'true',
-          auth: {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASS,
-          },
+          auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
         });
       } else {
-        console.log(`📧 Unknown EMAIL_PROVIDER: ${provider}. Email disabled.`);
-        this.transporter = null;
+        // No provider configured
+        if (process.env.NODE_ENV === 'development') {
+          console.log('📧 Email disabled in dev; emails will be logged only.');
+          this.transporter = null; // don't throw
+          return;
+        }
+        // In production, either throw or continue "log-only"
+        console.warn('📧 No email provider configured; continuing without email send.');
+        this.transporter = null; // keep app running; your code already logs + stores tokens
         return;
       }
 
-      console.log('📧 Email service initialized');
+      console.log('📧 Email service initialized successfully');
     } catch (err) {
-      console.error('❌ Email transporter init failed:', err.message);
+      console.error('❌ Email init failed:', err.message);
       this.transporter = null;
     }
   }
