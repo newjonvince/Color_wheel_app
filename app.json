@@ -8,24 +8,6 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "description": "Transform your fashion sense with AI-powered color analysis. Extract colors from photos, create stunning color collages, discover perfect outfit combinations, and share your style inspiration with our interactive color wheel technology.",
-    "keywords": [
-      "fashion",
-      "color matching",
-      "style guide",
-      "outfit planner",
-      "color wheel",
-      "photo color extraction",
-      "color palette",
-      "fashion design",
-      "style inspiration",
-      "color harmony",
-      "wardrobe planning",
-      "color analysis",
-      "fashion photography",
-      "color collage",
-      "accessibility"
-    ],
-    "privacy": "public",
     "platforms": [
       "ios",
       "android"
@@ -44,10 +26,10 @@
       "bundleIdentifier": "com.fashioncolorwheel.app",
       "buildNumber": "1",
       "infoPlist": {
-        "NSCameraUsageDescription": "This app uses the camera to capture colors from your clothing and surroundings for color matching.",
-        "NSPhotoLibraryUsageDescription": "This app accesses your photo library to extract colors from your existing photos for color analysis.",
-        "NSPhotoLibraryAddUsageDescription": "This app saves your color collages and fashion inspiration images to your photo library for easy access and sharing.",
-        "NSMicrophoneUsageDescription": "Microphone access is not used by this app.",
+        "NSCameraUsageDescription": "We use the camera to capture outfits and colors.",
+        "NSPhotoLibraryUsageDescription": "We need access to your photos so you can pick images.",
+        "NSPhotoLibraryAddUsageDescription": "We save your collages and palettes to your library.",
+        "NSMicrophoneUsageDescription": "We use the microphone only when recording videos.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
