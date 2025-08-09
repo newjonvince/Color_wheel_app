@@ -10,10 +10,9 @@ const pool = mysql.createPool({
   password: process.env.DB_PASSWORD,
   ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
   connectionLimit: 20, // Maximum number of connections in the pool
-  acquireTimeout: 60000, // Maximum time to get connection from pool
-  timeout: 60000, // Maximum time for a query
-  reconnect: true,
-  charset: 'utf8mb4'
+  queueLimit: 0, // No limit on queued connections
+  charset: 'utf8mb4',
+  // Remove invalid options: acquireTimeout, timeout, reconnect are not valid for mysql2
 });
 
 // Test database connection
