@@ -57,19 +57,18 @@ router.get('/', [
       WHERE cm.user_id = ?
     `;
     const queryParams = [userId];
-    let paramCount = 1;
 
     if (privacy) {
-      queryText += ` AND cm.privacy = $${++paramCount}`;
+      queryText += ` AND cm.privacy = ?`;
       queryParams.push(privacy);
     }
 
     if (scheme) {
-      queryText += ` AND cm.scheme = $${++paramCount}`;
+      queryText += ` AND cm.scheme = ?`;
       queryParams.push(scheme);
     }
 
-    queryText += ` ORDER BY cm.created_at DESC LIMIT $${++paramCount} OFFSET $${++paramCount}`;
+    queryText += ` ORDER BY cm.created_at DESC LIMIT ? OFFSET ?`;
     queryParams.push(limit, offset);
 
     const result = await query(queryText, queryParams);
@@ -111,14 +110,13 @@ router.get('/public', [
       WHERE cm.privacy = 'public'
     `;
     const queryParams = [];
-    let paramCount = 0;
 
     if (scheme) {
-      queryText += ` AND cm.scheme = $${++paramCount}`;
+      queryText += ` AND cm.scheme = ?`;
       queryParams.push(scheme);
     }
 
-    queryText += ` ORDER BY cm.created_at DESC LIMIT $${++paramCount} OFFSET $${++paramCount}`;
+    queryText += ` ORDER BY cm.created_at DESC LIMIT ? OFFSET ?`;
     queryParams.push(limit, offset);
 
     const result = await query(queryText, queryParams);
@@ -166,11 +164,17 @@ router.post('/', [
     const userId = req.user.userId;
     const { base_color, scheme, colors, privacy = 'private', is_locked = false, locked_color } = req.body;
 
-    const result = await query(
+    const insertResult = await query(
       `INSERT INTO color_matches (user_id, base_color, scheme, colors, privacy, is_locked, locked_color)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       RETURNING *`,
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [userId, base_color, scheme, JSON.stringify(colors), privacy, is_locked, locked_color]
+    );
+
+    // Get the newly created color match
+    const insertId = insertResult.insertId;
+    const result = await query(
+      'SELECT cm.*, u.username FROM color_matches cm JOIN users u ON cm.user_id = u.id WHERE cm.id = ?',
+      [insertId]
     );
 
     res.status(201).json({
@@ -210,9 +214,15 @@ router.put('/:id', [
       });
     }
 
-    const result = await query(
+    await query(
       'UPDATE color_matches SET privacy = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
       [privacy, id, userId]
+    );
+
+    // Get the updated color match
+    const result = await query(
+      'SELECT cm.*, u.username FROM color_matches cm JOIN users u ON cm.user_id = u.id WHERE cm.id = ?',
+      [id]
     );
 
     res.json({
@@ -240,7 +250,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       [id, userId]
     );
 
-    if (result.rows.length === 0) {
+    if (result.affectedRows === 0) {
       return res.status(404).json({
         error: 'Color match not found',
         message: 'Color match does not exist or you do not have permission to delete it'

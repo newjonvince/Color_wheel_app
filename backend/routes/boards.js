@@ -43,7 +43,7 @@ router.get('/:boardId/items', authenticateToken, async (req, res) => {
 
     // Verify board belongs to user
     const boardCheck = await query(
-      'SELECT id FROM boards WHERE id = $1 AND user_id = $2',
+      'SELECT id FROM boards WHERE id = ? AND user_id = ?',
       [boardId, userId]
     );
 
@@ -96,7 +96,7 @@ router.post('/:boardId/items', [
 
     // Verify board belongs to user
     const boardCheck = await query(
-      'SELECT id FROM boards WHERE id = $1 AND user_id = $2',
+      'SELECT id FROM boards WHERE id = ? AND user_id = ?',
       [boardId, userId]
     );
 
@@ -174,7 +174,7 @@ router.delete('/:boardId/items/:itemId', authenticateToken, async (req, res) => 
       [itemId, boardId, userId]
     );
 
-    if (result.rows.affectedRows === 0) {
+    if (result.affectedRows === 0) {
       return res.status(404).json({
         error: 'Item not found',
         message: 'Board item does not exist or you do not have access to it'

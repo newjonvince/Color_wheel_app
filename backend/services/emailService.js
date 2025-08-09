@@ -128,13 +128,14 @@ class EmailService {
   }
 
   async verifyEmailToken(token) {
-    const [rows] = await query(
+    const result = await query(
       `SELECT ev.*, u.email, u.username
        FROM email_verifications ev
        JOIN users u ON ev.user_id = u.id
        WHERE ev.token = ? AND ev.expires_at > NOW() AND ev.verified_at IS NULL`,
       [token]
     );
+    const rows = result.rows;
     if (!rows.length) return { success: false, error: 'Invalid or expired verification token' };
 
     const v = rows[0];
@@ -145,13 +146,14 @@ class EmailService {
   }
 
   async verifyResetToken(token) {
-    const [rows] = await query(
+    const result = await query(
       `SELECT pr.*, u.email, u.username
        FROM password_resets pr
        JOIN users u ON pr.user_id = u.id
        WHERE pr.token = ? AND pr.expires_at > NOW() AND pr.used_at IS NULL`,
       [token]
     );
+    const rows = result.rows;
     if (!rows.length) return { success: false, error: 'Invalid or expired reset token' };
 
     const r = rows[0];

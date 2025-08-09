@@ -82,7 +82,7 @@ router.put('/profile', [
       [userId]
     );
 
-    const user = result.rows[0];
+    const user = userResult.rows[0];
 
     res.json({
       message: 'Profile updated successfully',
@@ -181,11 +181,16 @@ router.put('/preferences', [
     let result;
     if (existing.rows.length === 0) {
       // Create new preferences
-      result = await query(
+      await query(
         `INSERT INTO user_preferences (user_id, skin_tone, favorite_colors, style_personality, notifications_enabled)
-         VALUES (?, ?, ?, ?, ?)
-         RETURNING *`,
+         VALUES (?, ?, ?, ?, ?)`,
         [userId, skin_tone, JSON.stringify(favorite_colors), style_personality, notifications_enabled]
+      );
+      
+      // Get the newly created preferences
+      result = await query(
+        'SELECT * FROM user_preferences WHERE user_id = ?',
+        [userId]
       );
     } else {
       // Update existing preferences
@@ -289,7 +294,7 @@ router.put('/settings', [
         `UPDATE user_preferences 
          SET ${updates.join(', ')}
          WHERE user_id = ?`,
-        [...values, userId]
+        values
       );
       
       // Get updated preferences

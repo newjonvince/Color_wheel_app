@@ -27,8 +27,8 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
 
     // Check if user already exists
     const existingUser = await query(
-      'SELECT id FROM users WHERE email = ? OR username = ?',
-      [email, username]
+      'SELECT id FROM users WHERE email = :email OR username = :username',
+      { email, username }
     );
 
     if (existingUser.rows.length > 0) {
@@ -49,8 +49,8 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
       [email, username, hashedPassword, location, birthday_month, birthday_day, birthday_year, gender]
     );
 
-    // Get the newly created user data (MySQL returns insertId in result.rows.insertId)
-    const insertId = result.rows.insertId;
+    // Get the newly created user data (MySQL2 returns insertId)
+    const insertId = result.rows.insertId || result.insertId;
     const userResult = await query(
       'SELECT id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at FROM users WHERE id = ?',
       [insertId]
@@ -71,7 +71,7 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
        (?, 'Public Triadic', 'public', 'triadic'),
        (?, 'Public Tetradic', 'public', 'tetradic'),
        (?, 'Public Monochromatic', 'public', 'monochromatic')`,
-      [user.id]
+      [user.id, user.id, user.id, user.id, user.id, user.id, user.id, user.id, user.id, user.id]
     );
 
     // Generate JWT token
@@ -287,7 +287,7 @@ router.post('/demo-login', authLimiter, async (req, res) => {
       ['demo@fashioncolorwheel.com']
     );
 
-    if (demoUser.length === 0) {
+    if (demoUser.rows.length === 0) {
       // Create demo user if it doesn't exist
       const hashedPassword = await bcrypt.hash('demo123', 12);
       await query(
@@ -303,7 +303,7 @@ router.post('/demo-login', authLimiter, async (req, res) => {
       );
     }
 
-    const user = demoUser[0];
+    const user = demoUser.rows[0];
     
     // Generate JWT token
     const token = jwt.sign(
