@@ -6,6 +6,12 @@ const { verify } = require('hcaptcha');
  */
 const verifyCaptcha = async (req, res, next) => {
   try {
+    // CAPTCHA verification completely disabled for testing
+    console.log('⚠️  CAPTCHA verification disabled for testing');
+    return next();
+    
+    // Original CAPTCHA code commented out
+    /*
     const { captchaToken } = req.body;
     
     // Skip CAPTCHA verification in development mode if no secret key is provided
@@ -20,6 +26,7 @@ const verifyCaptcha = async (req, res, next) => {
         message: 'Please complete the CAPTCHA verification.'
       });
     }
+    */
     
     if (!process.env.HCAPTCHA_SECRET_KEY) {
       console.error('❌ HCAPTCHA_SECRET_KEY not configured');

@@ -10,11 +10,11 @@ router.get('/', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     const { type } = req.query; // private or public
 
-    let queryText = 'SELECT * FROM boards WHERE user_id = $1';
+    let queryText = 'SELECT * FROM boards WHERE user_id = ?';
     const queryParams = [userId];
 
     if (type) {
-      queryText += ' AND type = $2';
+      queryText += ' AND type = ?';
       queryParams.push(type);
     }
 
@@ -58,7 +58,7 @@ router.get('/:boardId/items', authenticateToken, async (req, res) => {
       `SELECT cm.*, bi.added_at 
        FROM board_items bi 
        JOIN color_matches cm ON bi.color_match_id = cm.id 
-       WHERE bi.board_id = $1 
+       WHERE bi.board_id = ? 
        ORDER BY bi.added_at DESC`,
       [boardId]
     );
@@ -109,7 +109,7 @@ router.post('/:boardId/items', [
 
     // Verify color match belongs to user
     const colorMatchCheck = await query(
-      'SELECT id FROM color_matches WHERE id = $1 AND user_id = $2',
+      'SELECT id FROM color_matches WHERE id = ? AND user_id = ?',
       [colorMatchId, userId]
     );
 
@@ -122,7 +122,7 @@ router.post('/:boardId/items', [
 
     // Check if already in board
     const existingItem = await query(
-      'SELECT id FROM board_items WHERE board_id = $1 AND color_match_id = $2',
+      'SELECT id FROM board_items WHERE board_id = ? AND color_match_id = ?',
       [boardId, colorMatchId]
     );
 
@@ -134,8 +134,14 @@ router.post('/:boardId/items', [
     }
 
     // Add to board
+    await query(
+      'INSERT INTO board_items (board_id, color_match_id) VALUES (?, ?)',
+      [boardId, colorMatchId]
+    );
+    
+    // Get the newly created item
     const result = await query(
-      'INSERT INTO board_items (board_id, color_match_id) VALUES ($1, $2) RETURNING *',
+      'SELECT * FROM board_items WHERE board_id = ? AND color_match_id = ? ORDER BY added_at DESC LIMIT 1',
       [boardId, colorMatchId]
     );
 
@@ -162,13 +168,13 @@ router.delete('/:boardId/items/:itemId', authenticateToken, async (req, res) => 
     // Verify board belongs to user and remove item
     const result = await query(
       `DELETE FROM board_items 
-       WHERE id = $1 AND board_id = $2 AND board_id IN (
-         SELECT id FROM boards WHERE user_id = $3
-       ) RETURNING id`,
+       WHERE id = ? AND board_id = ? AND board_id IN (
+         SELECT id FROM boards WHERE user_id = ?
+       )`,
       [itemId, boardId, userId]
     );
 
-    if (result.rows.length === 0) {
+    if (result.rows.affectedRows === 0) {
       return res.status(404).json({
         error: 'Item not found',
         message: 'Board item does not exist or you do not have access to it'

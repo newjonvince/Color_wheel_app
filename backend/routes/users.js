@@ -69,12 +69,17 @@ router.put('/profile', [
 
     const result = await query(
       `UPDATE users 
-       SET location = COALESCE($1, location), 
-           gender = COALESCE($2, gender),
+       SET location = COALESCE(?, location), 
+           gender = COALESCE(?, gender),
            updated_at = CURRENT_TIMESTAMP 
-       WHERE id = $3
-       RETURNING id, email, username, location, birthday_month, birthday_day, birthday_year, gender, updated_at`,
+       WHERE id = ?`,
       [location, gender, userId]
+    );
+
+    // Get updated user data
+    const userResult = await query(
+      'SELECT id, email, username, location, birthday_month, birthday_day, birthday_year, gender, updated_at FROM users WHERE id = ?',
+      [userId]
     );
 
     const user = result.rows[0];
@@ -119,13 +124,18 @@ router.get('/preferences', authenticateToken, async (req, res) => {
       // Create default preferences
       const defaultPrefs = await query(
         `INSERT INTO user_preferences (user_id, notifications_enabled)
-         VALUES (?, true)
-         RETURNING *`,
+         VALUES (?, true)`,
+        [userId]
+      );
+      
+      // Get the newly created preferences
+      const newPrefsResult = await query(
+        'SELECT * FROM user_preferences WHERE user_id = ?',
         [userId]
       );
       
       return res.json({
-        preferences: defaultPrefs.rows[0]
+        preferences: newPrefsResult.rows[0]
       });
     }
 
@@ -164,7 +174,7 @@ router.put('/preferences', [
 
     // Check if preferences exist
     const existing = await query(
-      'SELECT id FROM user_preferences WHERE user_id = $1',
+      'SELECT id FROM user_preferences WHERE user_id = ?',
       [userId]
     );
 
@@ -181,14 +191,19 @@ router.put('/preferences', [
       // Update existing preferences
       result = await query(
         `UPDATE user_preferences 
-         SET skin_tone = COALESCE($1, skin_tone),
-             favorite_colors = COALESCE($2, favorite_colors),
-             style_personality = COALESCE($3, style_personality),
-             notifications_enabled = COALESCE($4, notifications_enabled),
+         SET skin_tone = COALESCE(?, skin_tone),
+             favorite_colors = COALESCE(?, favorite_colors),
+             style_personality = COALESCE(?, style_personality),
+             notifications_enabled = COALESCE(?, notifications_enabled),
              updated_at = CURRENT_TIMESTAMP 
-         WHERE user_id = $5
-         RETURNING *`,
+         WHERE user_id = ?`,
         [skin_tone, JSON.stringify(favorite_colors), style_personality, notifications_enabled, userId]
+      );
+      
+      // Get updated preferences
+      result = await query(
+        'SELECT * FROM user_preferences WHERE user_id = ?',
+        [userId]
       );
     }
 
@@ -226,18 +241,23 @@ router.put('/settings', [
 
     // Check if user_preferences exists
     const existing = await query(
-      'SELECT id FROM user_preferences WHERE user_id = $1',
+      'SELECT id FROM user_preferences WHERE user_id = ?',
       [userId]
     );
 
     let result;
     if (existing.rows.length === 0) {
       // Create new preferences with settings
-      result = await query(
+      await query(
         `INSERT INTO user_preferences (user_id, notifications_enabled, share_usage_data)
-         VALUES (?, ?, ?)
-         RETURNING *`,
+         VALUES (?, ?, ?)`,
         [userId, notifications !== undefined ? notifications : true, share_usage !== undefined ? share_usage : false]
+      );
+      
+      // Get the newly created preferences
+      result = await query(
+        'SELECT * FROM user_preferences WHERE user_id = ?',
+        [userId]
       );
     } else {
       // Update existing preferences
@@ -246,12 +266,12 @@ router.put('/settings', [
       let paramCount = 1;
 
       if (notifications !== undefined) {
-        updates.push(`notifications_enabled = $${paramCount++}`);
+        updates.push(`notifications_enabled = ?`);
         values.push(notifications);
       }
 
       if (share_usage !== undefined) {
-        updates.push(`share_usage_data = $${paramCount++}`);
+        updates.push(`share_usage_data = ?`);
         values.push(share_usage);
       }
 
@@ -265,12 +285,17 @@ router.put('/settings', [
       updates.push('updated_at = CURRENT_TIMESTAMP');
       values.push(userId);
 
-      result = await query(
+      await query(
         `UPDATE user_preferences 
          SET ${updates.join(', ')}
-         WHERE user_id = $${paramCount}
-         RETURNING *`,
-        values
+         WHERE user_id = ?`,
+        [...values, userId]
+      );
+      
+      // Get updated preferences
+      result = await query(
+        'SELECT * FROM user_preferences WHERE user_id = ?',
+        [userId]
       );
     }
 

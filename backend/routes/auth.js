@@ -45,12 +45,18 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
     // Create new user
     const result = await query(
       `INSERT INTO users (email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW()) 
-       RETURNING id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [email, username, hashedPassword, location, birthday_month, birthday_day, birthday_year, gender]
     );
 
-    const user = result.rows[0];
+    // Get the newly created user data (MySQL returns insertId in result.rows.insertId)
+    const insertId = result.rows.insertId;
+    const userResult = await query(
+      'SELECT id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at FROM users WHERE id = ?',
+      [insertId]
+    );
+    
+    const user = userResult.rows[0];
 
     // Create default boards for new user
     await query(
@@ -77,7 +83,7 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
 
     // Save session
     await query(
-      'INSERT INTO user_sessions (user_id, session_token, expires_at) VALUES ($1, $2, $3)',
+      'INSERT INTO user_sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)',
       [user.id, token, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)] // 7 days
     );
 
@@ -157,7 +163,7 @@ router.post('/login', authLimiter, loginValidation, async (req, res) => {
 
     // Save session
     await query(
-      'INSERT INTO user_sessions (user_id, session_token, expires_at) VALUES ($1, $2, $3)',
+      'INSERT INTO user_sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)',
       [user.id, token, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)]
     );
 
@@ -211,7 +217,7 @@ router.post('/refresh', async (req, res) => {
     
     // Get user
     const result = await query(
-      'SELECT id, email, username FROM users WHERE id = $1 AND is_active = true',
+      'SELECT id, email, username FROM users WHERE id = ? AND is_active = true',
       [decoded.userId]
     );
     
@@ -255,7 +261,7 @@ router.get('/check-username/:username', usernameCheckLimiter, async (req, res) =
     const { username } = req.params;
 
     const result = await query(
-      'SELECT id FROM users WHERE username = $1',
+      'SELECT id FROM users WHERE username = ?',
       [username]
     );
 
@@ -281,19 +287,23 @@ router.post('/demo-login', authLimiter, async (req, res) => {
       ['demo@fashioncolorwheel.com']
     );
 
-    if (demoUser.rows.length === 0) {
+    if (demoUser.length === 0) {
       // Create demo user if it doesn't exist
       const hashedPassword = await bcrypt.hash('demo123', 12);
-      const result = await query(
+      await query(
         `INSERT INTO users (email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, email_verified, created_at) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()) 
-         RETURNING id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
         ['demo@fashioncolorwheel.com', 'demo_user', hashedPassword, 'United States', 'January', 1, 1990, 'Prefer not to say', true]
       );
-      demoUser = result;
+      
+      // Fetch the created user
+      demoUser = await query(
+        'SELECT * FROM users WHERE email = ?',
+        ['demo@fashioncolorwheel.com']
+      );
     }
 
-    const user = demoUser.rows[0];
+    const user = demoUser[0];
     
     // Generate JWT token
     const token = jwt.sign(
@@ -345,7 +355,7 @@ router.post('/logout', async (req, res) => {
     if (token) {
       // Remove session from database
       await query(
-        'DELETE FROM user_sessions WHERE session_token = $1',
+        'DELETE FROM user_sessions WHERE session_token = ?',
         [token]
       );
     }
@@ -417,7 +427,7 @@ router.post('/resend-verification', emailVerificationLimiter, async (req, res) =
 
     // Find user
     const result = await query(
-      'SELECT id, email, username, email_verified FROM users WHERE email = $1 AND is_active = true',
+      'SELECT id, email, username, email_verified FROM users WHERE email = ? AND is_active = true',
       [email.trim().toLowerCase()]
     );
 
@@ -468,7 +478,7 @@ router.post('/request-password-reset', passwordResetLimiter, async (req, res) =>
 
     // Find user
     const result = await query(
-      'SELECT id, email, username FROM users WHERE email = $1 AND is_active = true',
+      'SELECT id, email, username FROM users WHERE email = ? AND is_active = true',
       [email.trim().toLowerCase()]
     );
 
@@ -532,7 +542,7 @@ router.post('/reset-password', async (req, res) => {
 
     // Update user password
     await query(
-      'UPDATE users SET password_hash = $1 WHERE id = $2',
+      'UPDATE users SET password_hash = ? WHERE id = ?',
       [passwordHash, tokenResult.userId]
     );
 
@@ -541,7 +551,7 @@ router.post('/reset-password', async (req, res) => {
 
     // Invalidate all existing sessions for security
     await query(
-      'DELETE FROM user_sessions WHERE user_id = $1',
+      'DELETE FROM user_sessions WHERE user_id = ?',
       [tokenResult.userId]
     );
 

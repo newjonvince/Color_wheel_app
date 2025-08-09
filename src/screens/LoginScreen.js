@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ApiService from '../services/api';
@@ -120,8 +120,11 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
     >
       <View style={styles.header}>
         <View style={styles.logoContainer}>
-          <Text style={styles.logoText}>FCW</Text>
-          <Text style={styles.logoSubtext}>Fashion Color Wheel</Text>
+          <Image 
+            source={require('../../assets/icon.png')} 
+            style={styles.logoImage}
+            resizeMode="contain"
+          />
         </View>
         <Text style={styles.title}>Fashion Color Wheel</Text>
         <Text style={styles.subtitle}>Discover perfect color combinations</Text>
@@ -205,18 +208,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 20,
   },
-  logoText: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#e60023',
-    letterSpacing: 2,
-    marginBottom: 5,
-  },
-  logoSubtext: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '600',
-    letterSpacing: 1,
+  logoImage: {
+    width: 120,
+    height: 120,
+    marginBottom: 10,
   },
   title: { fontSize: 28, fontWeight: 'bold', color: '#333', marginBottom: 10, textAlign: 'center' },
   subtitle: { fontSize: 16, color: '#666', textAlign: 'center', marginBottom: 40 },

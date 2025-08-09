@@ -54,7 +54,7 @@ router.get('/', [
       SELECT cm.*, u.username 
       FROM color_matches cm 
       JOIN users u ON cm.user_id = u.id 
-      WHERE cm.user_id = $1
+      WHERE cm.user_id = ?
     `;
     const queryParams = [userId];
     let paramCount = 1;
@@ -168,7 +168,7 @@ router.post('/', [
 
     const result = await query(
       `INSERT INTO color_matches (user_id, base_color, scheme, colors, privacy, is_locked, locked_color)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        RETURNING *`,
       [userId, base_color, scheme, JSON.stringify(colors), privacy, is_locked, locked_color]
     );
@@ -199,7 +199,7 @@ router.put('/:id', [
 
     // Check if color match belongs to user
     const existingMatch = await query(
-      'SELECT id FROM color_matches WHERE id = $1 AND user_id = $2',
+      'SELECT id FROM color_matches WHERE id = ? AND user_id = ?',
       [id, userId]
     );
 
@@ -211,7 +211,7 @@ router.put('/:id', [
     }
 
     const result = await query(
-      'UPDATE color_matches SET privacy = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND user_id = $3 RETURNING *',
+      'UPDATE color_matches SET privacy = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?',
       [privacy, id, userId]
     );
 
@@ -236,7 +236,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
 
     const result = await query(
-      'DELETE FROM color_matches WHERE id = $1 AND user_id = $2 RETURNING id',
+      'DELETE FROM color_matches WHERE id = ? AND user_id = ?',
       [id, userId]
     );
 
@@ -268,21 +268,21 @@ router.post('/:id/like', authenticateToken, async (req, res) => {
 
     // Check if already liked
     const existingLike = await query(
-      'SELECT id FROM color_match_likes WHERE user_id = $1 AND color_match_id = $2',
+      'SELECT id FROM color_match_likes WHERE user_id = ? AND color_match_id = ?',
       [userId, id]
     );
 
     if (existingLike.rows.length > 0) {
       // Unlike
       await query(
-        'DELETE FROM color_match_likes WHERE user_id = $1 AND color_match_id = $2',
+        'DELETE FROM color_match_likes WHERE user_id = ? AND color_match_id = ?',
         [userId, id]
       );
       res.json({ message: 'Color match unliked', liked: false });
     } else {
       // Like
       await query(
-        'INSERT INTO color_match_likes (user_id, color_match_id) VALUES ($1, $2)',
+        'INSERT INTO color_match_likes (user_id, color_match_id) VALUES (?, ?)',
         [userId, id]
       );
       res.json({ message: 'Color match liked', liked: true });

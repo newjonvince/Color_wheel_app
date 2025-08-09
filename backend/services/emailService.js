@@ -86,9 +86,8 @@ class EmailService {
       // Store verification token in database
       await query(
         `INSERT INTO email_verifications (user_id, email, token, expires_at) 
-         VALUES ($1, $2, $3, $4) 
-         ON CONFLICT (user_id) 
-         DO UPDATE SET token = $3, expires_at = $4, created_at = NOW()`,
+         VALUES (?, ?, ?, ?) 
+         ON DUPLICATE KEY UPDATE token = VALUES(token), expires_at = VALUES(expires_at), created_at = NOW()`,
         [userId, email, verificationToken, expiresAt]
       );
 
@@ -151,9 +150,8 @@ class EmailService {
       // Store reset token in database
       await query(
         `INSERT INTO password_resets (user_id, email, token, expires_at) 
-         VALUES ($1, $2, $3, $4) 
-         ON CONFLICT (user_id) 
-         DO UPDATE SET token = $3, expires_at = $4, created_at = NOW()`,
+         VALUES (?, ?, ?, ?) 
+         ON DUPLICATE KEY UPDATE token = VALUES(token), expires_at = VALUES(expires_at), created_at = NOW()`,
         [userId, email, resetToken, expiresAt]
       );
 
@@ -206,7 +204,7 @@ class EmailService {
         `SELECT ev.*, u.email, u.username 
          FROM email_verifications ev 
          JOIN users u ON ev.user_id = u.id 
-         WHERE ev.token = $1 AND ev.expires_at > NOW() AND ev.verified_at IS NULL`,
+         WHERE ev.token = ? AND ev.expires_at > NOW() AND ev.verified_at IS NULL`,
         [token]
       );
 
@@ -218,13 +216,13 @@ class EmailService {
 
       // Mark email as verified
       await query(
-        'UPDATE email_verifications SET verified_at = NOW() WHERE token = $1',
+        'UPDATE email_verifications SET verified_at = NOW() WHERE token = ?',
         [token]
       );
 
       // Mark user as email verified
       await query(
-        'UPDATE users SET email_verified = true, email_verified_at = NOW() WHERE id = $1',
+        'UPDATE users SET email_verified = true, email_verified_at = NOW() WHERE id = ?',
         [verification.user_id]
       );
 
@@ -251,7 +249,7 @@ class EmailService {
         `SELECT pr.*, u.email, u.username 
          FROM password_resets pr 
          JOIN users u ON pr.user_id = u.id 
-         WHERE pr.token = $1 AND pr.expires_at > NOW() AND pr.used_at IS NULL`,
+         WHERE pr.token = ? AND pr.expires_at > NOW() AND pr.used_at IS NULL`,
         [token]
       );
 
@@ -279,7 +277,7 @@ class EmailService {
   async markResetTokenUsed(token) {
     try {
       await query(
-        'UPDATE password_resets SET used_at = NOW() WHERE token = $1',
+        'UPDATE password_resets SET used_at = NOW() WHERE token = ?',
         [token]
       );
     } catch (error) {

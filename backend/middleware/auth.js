@@ -19,7 +19,7 @@ const authenticateToken = async (req, res, next) => {
 
     // Check if session exists in database
     const sessionResult = await query(
-      'SELECT us.*, u.email, u.username FROM user_sessions us JOIN users u ON us.user_id = u.id WHERE us.session_token = $1 AND us.expires_at > NOW()',
+      'SELECT us.*, u.email, u.username FROM user_sessions us JOIN users u ON us.user_id = u.id WHERE us.session_token = ? AND us.expires_at > NOW()',
       [token]
     );
 
