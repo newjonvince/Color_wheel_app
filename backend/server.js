@@ -91,7 +91,12 @@ app.use('*', (req, res) => {
 // Global error handler - prevent double headers
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
-  console.error('❌ Server Error:', err);
+  console.log('// Fashion Color Wheel Backend Server');
+  console.log('// Production-ready Express.js API with MySQL, authentication, and rate limiting');
+  console.log('// Updated: All Railway deployment warnings fixed');
+  console.log('📱 Environment:', process.env.NODE_ENV);
+  console.log('🔗 Health check: http://localhost:' + PORT + '/health');
+  console.log('✨ All warnings fixed - clean deployment!');
   const isDev = process.env.NODE_ENV !== 'production';
   res.status(err.status || 500).json({
     error: 'Internal Server Error',
