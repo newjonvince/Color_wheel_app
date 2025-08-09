@@ -94,6 +94,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [showSignUp, setShowSignUp] = useState(false);
   const [savedColorMatches, setSavedColorMatches] = useState([]);
 
   // Safe initialization with multiple fallbacks
@@ -128,18 +129,32 @@ export default function App() {
       }
       
       if (token) {
-        console.log('📱 Token found, validating...');
+        console.log('📱 Token found, setting on ApiService and validating...');
         try {
-          // Validate token with shorter timeout for faster startup
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 5000);
+          // Set token on ApiService before making requests
+          if (ApiService.setToken && typeof ApiService.setToken === 'function') {
+            ApiService.setToken(token);
+            console.log('✅ Token set on ApiService');
+          } else {
+            console.warn('⚠️ ApiService.setToken method not available');
+          }
           
-          const profile = await ApiService.getUserProfile();
-          clearTimeout(timeoutId);
+          // Validate token with shorter timeout for faster startup
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
+          );
+          
+          const profile = await Promise.race([
+            ApiService.getUserProfile(),
+            timeoutPromise
+          ]);
           
           if (profile && profile.id) {
             console.log('✅ User authenticated:', profile.username);
             setUser(profile);
+            // Load saved color matches for the authenticated user
+            await loadSavedColorMatches(getMatchesKey(profile.id));
+            console.log('✅ User color matches loaded');
           } else {
             console.log('❌ Invalid profile response');
             await clearStoredToken();
@@ -200,6 +215,13 @@ export default function App() {
     return () => subscription?.remove();
   }, [isInitialized, initializeApp]);
 
+  // Load color matches when user changes
+  useEffect(() => {
+    if (user?.id) {
+      loadSavedColorMatches(getMatchesKey(user.id));
+    }
+  }, [user?.id, loadSavedColorMatches]);
+
   const loadSavedColorMatches = useCallback(async (key) => {
     try {
       const saved = await AsyncStorage.getItem(key);
@@ -228,22 +250,13 @@ export default function App() {
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
       await AsyncStorage.setItem('userData', JSON.stringify(user));
-
-      // migrate anon saved matches if user has none yet
-      const anonKey = getMatchesKey('anon');
-      const userKey = getMatchesKey(user?.id);
-      const [anon, existing] = await Promise.all([
-        AsyncStorage.getItem(anonKey),
-        AsyncStorage.getItem(userKey),
-      ]);
-      if (anon && !existing) {
-        await AsyncStorage.setItem(userKey, anon);
-      }
-      await loadSavedColorMatches(userKey);
+      console.log('✅ Login successful, user data saved');
+      // Color matches will be loaded by useEffect when user.id changes
     } catch (error) {
-      console.warn('Error storing user data in AsyncStorage:', error);
+      console.error('Error saving login state:', error);
+      // Continue anyway - user is logged in, just storage failed
     }
-  }, [loadSavedColorMatches]);
+  }, []);
 
   const handleSignUpComplete = useCallback(async (u) => {
     const user = pickUser(u);
@@ -298,16 +311,6 @@ export default function App() {
     }
   }, [user?.id, loadSavedColorMatches]);
 
-  const TabIcon = ({ name, focused }) => {
-    const icons = {
-      'Community': focused ? '🏠' : '🏘️',
-      'ColorWheel': focused ? '🎨' : '🎭',
-      'Boards': focused ? '📌' : '📋',
-      'Settings': focused ? '⚙️' : '🔧',
-    };
-    return icons[name] || '📱';
-  };
-
   // Show loading state with timeout protection
   if (loading || !isInitialized) {
     return (
@@ -329,10 +332,17 @@ export default function App() {
       <SafeAreaProvider>
         <SafeAreaView style={{ flex: 1 }}>
           <StatusBar style="auto" />
-          <LoginScreen
-            onLoginSuccess={handleLoginSuccess}
-            onSignUpPress={() => setShowSignUp(true)}
-          />
+          {showSignUp ? (
+            <SignUpScreen
+              onSignUpComplete={handleSignUpComplete}
+              onBack={() => setShowSignUp(false)}
+            />
+          ) : (
+            <LoginScreen
+              onLoginSuccess={handleLoginSuccess}
+              onSignUpPress={() => setShowSignUp(true)}
+            />
+          )}
         </SafeAreaView>
       </SafeAreaProvider>
     );
@@ -363,7 +373,7 @@ export default function App() {
                 {(props) => (
                   <CommunityFeedScreen 
                     {...props} 
-                    user={user}
+                    currentUser={user}
                     onSaveColorMatch={saveColorMatch}
                     onLogout={handleLogout}
                   />
@@ -377,7 +387,7 @@ export default function App() {
                 {(props) => (
                   <ColorWheelScreen 
                     {...props} 
-                    user={user}
+                    currentUser={user}
                     onSaveColorMatch={saveColorMatch}
                     onLogout={handleLogout}
                   />
@@ -391,7 +401,7 @@ export default function App() {
                 {(props) => (
                   <BoardsScreen 
                     {...props} 
-                    user={user}
+                    currentUser={user}
                     savedColorMatches={savedColorMatches}
                     onSaveColorMatch={saveColorMatch}
                     onLogout={handleLogout}
@@ -406,7 +416,7 @@ export default function App() {
                 {(props) => (
                   <UserSettingsScreen 
                     {...props} 
-                    user={user}
+                    currentUser={user}
                     onLogout={handleLogout}
                     onAccountDeleted={handleAccountDeleted}
                   />
