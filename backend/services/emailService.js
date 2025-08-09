@@ -45,9 +45,10 @@ class EmailService {
           }
         });
       } else {
-        // Development mode - use ethereal email for testing
-        if (process.env.NODE_ENV === 'development') {
-          console.log('📧 Using development email mode (no actual emails sent)');
+        // Development mode or no email provider configured
+        if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'production') {
+          console.log('📧 Email service disabled - no provider configured (emails will be logged only)');
+          this.transporter = null;
           return;
         }
         throw new Error('Email provider not configured');
@@ -73,11 +74,20 @@ class EmailService {
   async sendVerificationEmail(email, username, userId) {
     try {
       if (!this.transporter) {
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`📧 [DEV] Would send verification email to ${email}`);
-          return { success: true, token: 'dev-token' };
-        }
-        throw new Error('Email service not configured');
+        console.log(`📧 [DISABLED] Would send verification email to ${email} (email service not configured)`);
+        // Still generate and store the token for testing purposes
+        const verificationToken = this.generateVerificationToken();
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+        
+        // Store verification token in database even without email
+        await query(
+          `INSERT INTO email_verifications (user_id, email, token, expires_at) 
+           VALUES (?, ?, ?, ?) 
+           ON DUPLICATE KEY UPDATE token = VALUES(token), expires_at = VALUES(expires_at), created_at = NOW()`,
+          [userId, email, verificationToken, expiresAt]
+        );
+        
+        return { success: true, token: verificationToken };
       }
 
       const verificationToken = this.generateVerificationToken();
@@ -137,11 +147,20 @@ class EmailService {
   async sendPasswordResetEmail(email, username, userId) {
     try {
       if (!this.transporter) {
-        if (process.env.NODE_ENV === 'development') {
-          console.log(`📧 [DEV] Would send password reset email to ${email}`);
-          return { success: true, token: 'dev-reset-token' };
-        }
-        throw new Error('Email service not configured');
+        console.log(`📧 [DISABLED] Would send password reset email to ${email} (email service not configured)`);
+        // Still generate and store the token for testing purposes
+        const resetToken = this.generateVerificationToken();
+        const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+        
+        // Store reset token in database even without email
+        await query(
+          `INSERT INTO password_resets (user_id, email, token, expires_at) 
+           VALUES (?, ?, ?, ?) 
+           ON DUPLICATE KEY UPDATE token = VALUES(token), expires_at = VALUES(expires_at), created_at = NOW()`,
+          [userId, email, resetToken, expiresAt]
+        );
+        
+        return { success: true, token: resetToken };
       }
 
       const resetToken = this.generateVerificationToken();
