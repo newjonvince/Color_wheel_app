@@ -36,8 +36,8 @@ class EmailService {
           this.transporter = null; // don't throw
           return;
         }
-        // In production, either throw or continue "log-only"
-        console.warn('📧 No email provider configured; continuing without email send.');
+        // In production, continue without email (tokens still stored for manual verification)
+        console.log('📧 Email provider not configured - running in email-disabled mode');
         this.transporter = null; // keep app running; your code already logs + stores tokens
         return;
       }

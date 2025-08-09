@@ -36,6 +36,7 @@ const speedLimiter = slowDown({
   maxDelayMs: 20000, // maximum delay of 20 seconds
   skip: skipHealthAndPreflight,
   store,
+  validate: { delayMs: false }, // suppress delayMs warning for express-slow-down v2
 });
 
 const generalLimiter = rateLimit({

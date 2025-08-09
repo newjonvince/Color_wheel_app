@@ -29,7 +29,6 @@ const pool = mysql.createPool({
 
   // Timeouts (ms)
   connectTimeout: 10_000,
-  acquireTimeout: 10_000,
 
   // Quality-of-life
   namedPlaceholders: true, // allows :id, :limit, etc.
