@@ -8,8 +8,8 @@ ADD COLUMN email_verified_at TIMESTAMP NULL;
 
 -- Create email_verifications table
 CREATE TABLE IF NOT EXISTS email_verifications (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
+    id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+    user_id VARCHAR(36) NOT NULL,
     email VARCHAR(255) NOT NULL,
     token VARCHAR(64) NOT NULL UNIQUE,
     expires_at TIMESTAMP NOT NULL,
@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS email_verifications (
 
 -- Create password_resets table
 CREATE TABLE IF NOT EXISTS password_resets (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
+    id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+    user_id VARCHAR(36) NOT NULL,
     email VARCHAR(255) NOT NULL,
     token VARCHAR(64) NOT NULL UNIQUE,
     expires_at TIMESTAMP NOT NULL,
