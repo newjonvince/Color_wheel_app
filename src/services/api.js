@@ -261,6 +261,18 @@ class ApiService {
     return response;
   }
 
+  // User Profile Methods
+  async getUserProfile() {
+    return this.request('/users/profile');
+  }
+
+  async updateUserProfile(profileData) {
+    return this.request('/users/profile', {
+      method: 'PUT',
+      body: profileData,
+    });
+  }
+
   // User Settings Methods
   async updateSettings(settings) {
     return this.request('/users/settings', {
