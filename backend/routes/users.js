@@ -11,7 +11,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
 
     const result = await query(
       `SELECT id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at
-       FROM users WHERE id = $1`,
+       FROM users WHERE id = ?`,
       [userId]
     );
 
@@ -71,7 +71,7 @@ router.put('/profile', [
       `UPDATE users 
        SET location = COALESCE($1, location), 
            gender = COALESCE($2, gender),
-           updated_at = CURRENT_TIMESTAMP
+           updated_at = CURRENT_TIMESTAMP 
        WHERE id = $3
        RETURNING id, email, username, location, birthday_month, birthday_day, birthday_year, gender, updated_at`,
       [location, gender, userId]
@@ -111,7 +111,7 @@ router.get('/preferences', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
 
     const result = await query(
-      'SELECT * FROM user_preferences WHERE user_id = $1',
+      'SELECT * FROM user_preferences WHERE user_id = ?',
       [userId]
     );
 
@@ -119,7 +119,7 @@ router.get('/preferences', authenticateToken, async (req, res) => {
       // Create default preferences
       const defaultPrefs = await query(
         `INSERT INTO user_preferences (user_id, notifications_enabled)
-         VALUES ($1, true)
+         VALUES (?, true)
          RETURNING *`,
         [userId]
       );
@@ -173,7 +173,7 @@ router.put('/preferences', [
       // Create new preferences
       result = await query(
         `INSERT INTO user_preferences (user_id, skin_tone, favorite_colors, style_personality, notifications_enabled)
-         VALUES ($1, $2, $3, $4, $5)
+         VALUES (?, ?, ?, ?, ?)
          RETURNING *`,
         [userId, skin_tone, JSON.stringify(favorite_colors), style_personality, notifications_enabled]
       );
@@ -185,7 +185,7 @@ router.put('/preferences', [
              favorite_colors = COALESCE($2, favorite_colors),
              style_personality = COALESCE($3, style_personality),
              notifications_enabled = COALESCE($4, notifications_enabled),
-             updated_at = CURRENT_TIMESTAMP
+             updated_at = CURRENT_TIMESTAMP 
          WHERE user_id = $5
          RETURNING *`,
         [skin_tone, JSON.stringify(favorite_colors), style_personality, notifications_enabled, userId]
@@ -235,7 +235,7 @@ router.put('/settings', [
       // Create new preferences with settings
       result = await query(
         `INSERT INTO user_preferences (user_id, notifications_enabled, share_usage_data)
-         VALUES ($1, $2, $3)
+         VALUES (?, ?, ?)
          RETURNING *`,
         [userId, notifications !== undefined ? notifications : true, share_usage !== undefined ? share_usage : false]
       );
@@ -298,7 +298,7 @@ router.post('/export-data', authenticateToken, async (req, res) => {
 
     // Get user info for email
     const userResult = await query(
-      'SELECT email, username FROM users WHERE id = $1',
+      'SELECT email, username FROM users WHERE id = ?',
       [userId]
     );
 

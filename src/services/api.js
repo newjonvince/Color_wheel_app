@@ -235,16 +235,17 @@ class ApiService {
   }
 
   async login(email, password) {
-    const response = await this.request('/auth/login', {
+    return this.request('/auth/login', {
       method: 'POST',
       body: { email, password },
     });
-    
-    if (response.token) {
-      await this.setToken(response.token, response.refreshToken);
-    }
-    
-    return response;
+  }
+
+  async demoLogin() {
+    return this.request('/auth/demo-login', {
+      method: 'POST',
+      body: {},
+    });
   }
 
   async checkUsername(username) {

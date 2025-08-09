@@ -63,14 +63,21 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
     if (loading) return;
     setLoading(true);
     try {
-      // Prefer server-controlled demo login; avoid baking creds into app
-      const response = await ApiService.demoLogin?.();
-      if (response?.success && response?.user) {
-        await saveSession({ user: response.user, token: response.token });
-        onLoginSuccess?.(response.user);
-        return;
+      // Try server-controlled demo login first
+      try {
+        if (ApiService.demoLogin && typeof ApiService.demoLogin === 'function') {
+          const response = await ApiService.demoLogin();
+          if (response?.success && response?.user) {
+            await saveSession({ user: response.user, token: response.token });
+            onLoginSuccess?.(response.user);
+            return;
+          }
+        }
+      } catch (serverError) {
+        console.log('Server demo login failed, using local fallback:', serverError.message);
       }
-      // Local fallback (no token stored)
+      
+      // Local demo user fallback
       const demoUser = {
         id: 'demo-user',
         email: 'demo@fashioncolorwheel.com',
@@ -112,7 +119,10 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.header}>
-        <Text style={styles.logo}>🎨</Text>
+        <View style={styles.logoContainer}>
+          <Text style={styles.logoText}>FCW</Text>
+          <Text style={styles.logoSubtext}>Fashion Color Wheel</Text>
+        </View>
         <Text style={styles.title}>Fashion Color Wheel</Text>
         <Text style={styles.subtitle}>Discover perfect color combinations</Text>
       </View>
@@ -191,7 +201,23 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff', paddingHorizontal: 20 },
   header: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60 },
-  logo: { fontSize: 80, marginBottom: 20 },
+  logoContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  logoText: {
+    fontSize: 48,
+    fontWeight: 'bold',
+    color: '#e60023',
+    letterSpacing: 2,
+    marginBottom: 5,
+  },
+  logoSubtext: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '600',
+    letterSpacing: 1,
+  },
   title: { fontSize: 28, fontWeight: 'bold', color: '#333', marginBottom: 10, textAlign: 'center' },
   subtitle: { fontSize: 16, color: '#666', textAlign: 'center', marginBottom: 40 },
   form: { flex: 1, justifyContent: 'center' },

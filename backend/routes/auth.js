@@ -10,19 +10,24 @@ const {
   passwordResetLimiter, 
   emailVerificationLimiter 
 } = require('../middleware/rateLimiting');
-const { verifyCaptcha, optionalCaptcha } = require('../middleware/captcha');
+// CAPTCHA verification removed for testing
 const emailService = require('../services/emailService');
 const router = express.Router();
 
 // Register new user
-router.post('/register', registrationLimiter, verifyCaptcha, registerValidation, async (req, res) => {
+router.post('/register', registrationLimiter, registerValidation, async (req, res) => {
   try {
 
-    const { email, username, password, location, birthday_month, birthday_day, birthday_year, gender } = req.body;
+    const { email, username, password, location, birthday, gender } = req.body;
+    
+    // Extract birthday fields from object (frontend sends birthday as object)
+    const birthday_month = birthday?.month || null;
+    const birthday_day = birthday?.day || null;
+    const birthday_year = birthday?.year || null;
 
     // Check if user already exists
     const existingUser = await query(
-      'SELECT id FROM users WHERE email = $1 OR username = $2',
+      'SELECT id FROM users WHERE email = ? OR username = ?',
       [email, username]
     );
 
@@ -35,14 +40,14 @@ router.post('/register', registrationLimiter, verifyCaptcha, registerValidation,
 
     // Hash password
     const saltRounds = 12;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-    // Create user
+    // Create new user
     const result = await query(
-      `INSERT INTO users (email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO users (email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW()) 
        RETURNING id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at`,
-      [email, username, passwordHash, location, birthday_month, birthday_day, birthday_year, gender]
+      [email, username, hashedPassword, location, birthday_month, birthday_day, birthday_year, gender]
     );
 
     const user = result.rows[0];
@@ -50,16 +55,16 @@ router.post('/register', registrationLimiter, verifyCaptcha, registerValidation,
     // Create default boards for new user
     await query(
       `INSERT INTO boards (user_id, name, type, scheme) VALUES
-       ($1, 'Private Complementary', 'private', 'complementary'),
-       ($1, 'Private Analogous', 'private', 'analogous'),
-       ($1, 'Private Triadic', 'private', 'triadic'),
-       ($1, 'Private Tetradic', 'private', 'tetradic'),
-       ($1, 'Private Monochromatic', 'private', 'monochromatic'),
-       ($1, 'Public Complementary', 'public', 'complementary'),
-       ($1, 'Public Analogous', 'public', 'analogous'),
-       ($1, 'Public Triadic', 'public', 'triadic'),
-       ($1, 'Public Tetradic', 'public', 'tetradic'),
-       ($1, 'Public Monochromatic', 'public', 'monochromatic')`,
+       (?, 'Private Complementary', 'private', 'complementary'),
+       (?, 'Private Analogous', 'private', 'analogous'),
+       (?, 'Private Triadic', 'private', 'triadic'),
+       (?, 'Private Tetradic', 'private', 'tetradic'),
+       (?, 'Private Monochromatic', 'private', 'monochromatic'),
+       (?, 'Public Complementary', 'public', 'complementary'),
+       (?, 'Public Analogous', 'public', 'analogous'),
+       (?, 'Public Triadic', 'public', 'triadic'),
+       (?, 'Public Tetradic', 'public', 'tetradic'),
+       (?, 'Public Monochromatic', 'public', 'monochromatic')`,
       [user.id]
     );
 
@@ -114,14 +119,14 @@ router.post('/register', registrationLimiter, verifyCaptcha, registerValidation,
 });
 
 // Login user
-router.post('/login', authLimiter, optionalCaptcha, loginValidation, async (req, res) => {
+router.post('/login', authLimiter, loginValidation, async (req, res) => {
   try {
 
     const { email, password } = req.body;
 
     // Find user
     const result = await query(
-      'SELECT id, email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at, email_verified FROM users WHERE email = $1 AND is_active = true',
+      'SELECT id, email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at, email_verified FROM users WHERE email = ? AND is_active = true',
       [email]
     );
 
@@ -263,7 +268,71 @@ router.get('/check-username/:username', usernameCheckLimiter, async (req, res) =
     console.error('Username check error:', error);
     res.status(500).json({
       error: 'Username check failed',
-      message: 'Internal server error'
+    });
+  }
+});
+
+// Demo login endpoint for testing
+router.post('/demo-login', authLimiter, async (req, res) => {
+  try {
+    // Create or get demo user
+    let demoUser = await query(
+      'SELECT * FROM users WHERE email = ?',
+      ['demo@fashioncolorwheel.com']
+    );
+
+    if (demoUser.rows.length === 0) {
+      // Create demo user if it doesn't exist
+      const hashedPassword = await bcrypt.hash('demo123', 12);
+      const result = await query(
+        `INSERT INTO users (email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, email_verified, created_at) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW()) 
+         RETURNING id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at`,
+        ['demo@fashioncolorwheel.com', 'demo_user', hashedPassword, 'United States', 'January', 1, 1990, 'Prefer not to say', true]
+      );
+      demoUser = result;
+    }
+
+    const user = demoUser.rows[0];
+    
+    // Generate JWT token
+    const token = jwt.sign(
+      { 
+        userId: user.id, 
+        email: user.email,
+        username: user.username 
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // Return user data and token
+    res.json({
+      success: true,
+      message: 'Demo login successful',
+      user: {
+        id: user.id,
+        email: user.email,
+        username: user.username,
+        location: user.location,
+        birthday: {
+          month: user.birthday_month,
+          day: user.birthday_day,
+          year: user.birthday_year
+        },
+        gender: user.gender,
+        createdAt: user.created_at,
+        demo: true
+      },
+      token
+    });
+
+  } catch (error) {
+    console.error('Demo login error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Demo login failed',
+      message: 'Unable to create demo session. Please try again.'
     });
   }
 });
@@ -386,7 +455,7 @@ router.post('/resend-verification', emailVerificationLimiter, async (req, res) =
 });
 
 // Request password reset
-router.post('/forgot-password', passwordResetLimiter, async (req, res) => {
+router.post('/request-password-reset', passwordResetLimiter, async (req, res) => {
   try {
     const { email } = req.body;
 

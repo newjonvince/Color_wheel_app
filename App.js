@@ -9,54 +9,58 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import ApiService from './src/services/api';
 
-// Global error handler for unhandled promise rejections and crashes
+// Enhanced error handling for React Native
 let isErrorHandlerActive = false;
-const originalHandler = ErrorUtils?.getGlobalHandler?.();
 
-const safeErrorHandler = (error, isFatal) => {
-  if (isErrorHandlerActive) return; // Prevent recursive errors
-  isErrorHandlerActive = true;
-  
+// Guard ErrorUtils access carefully
+const setupErrorHandling = () => {
   try {
-    console.error('🚨 Global error handler:', error?.message || error, 'isFatal:', isFatal);
-    
-    // For fatal errors, prevent app termination
-    if (isFatal) {
-      console.error('🚨 Fatal error prevented:', error?.stack || error);
-      // Don't show alert during initialization to prevent crashes
-      setTimeout(() => {
-        Alert.alert(
-          'App Error',
-          'An error occurred. Please restart the app if issues persist.',
-          [{ text: 'OK' }]
-        );
-      }, 1000);
-      return; // Prevent calling original handler for fatal errors
+    // Only set up JS error handling if ErrorUtils is available
+    if (typeof ErrorUtils !== 'undefined' && ErrorUtils.setGlobalHandler) {
+      const originalHandler = ErrorUtils.getGlobalHandler();
+      
+      const jsErrorHandler = (error, isFatal) => {
+        if (isErrorHandlerActive) return;
+        isErrorHandlerActive = true;
+        
+        try {
+          console.error('🚨 JS Error:', error?.message || error, 'isFatal:', isFatal);
+          console.error('Stack:', error?.stack);
+          
+          // Log error for debugging but don't try to "prevent termination"
+          // iOS privacy kills, Hermes crashes, and native module errors will still terminate
+          if (isFatal) {
+            console.error('🚨 Fatal JS error - app may terminate');
+          }
+          
+          // Call original handler to maintain React Native's error reporting
+          if (originalHandler && typeof originalHandler === 'function') {
+            originalHandler(error, isFatal);
+          }
+        } catch (handlerError) {
+          console.error('Error in JS error handler:', handlerError);
+        } finally {
+          isErrorHandlerActive = false;
+        }
+      };
+      
+      ErrorUtils.setGlobalHandler(jsErrorHandler);
+      console.log('✅ JS error handler configured');
+    } else {
+      console.warn('⚠️ ErrorUtils not available - JS error handling disabled');
     }
-    
-    // Call original handler for non-fatal errors only
-    if (originalHandler && typeof originalHandler === 'function') {
-      originalHandler(error, false); // Force non-fatal
-    }
-  } catch (handlerError) {
-    console.error('Error in error handler:', handlerError);
-  } finally {
-    isErrorHandlerActive = false;
+  } catch (setupError) {
+    console.error('Failed to setup error handling:', setupError);
   }
 };
 
-// Set global error handler with safety checks
-if (ErrorUtils && typeof ErrorUtils.setGlobalHandler === 'function') {
-  ErrorUtils.setGlobalHandler(safeErrorHandler);
-}
+// Setup error handling
+setupErrorHandling();
 
-// Handle unhandled promise rejections
-if (typeof global !== 'undefined') {
-  global.addEventListener?.('unhandledRejection', (event) => {
-    console.error('🚨 Unhandled promise rejection:', event.reason);
-    event.preventDefault(); // Prevent crash
-  });
-}
+// Note: For production apps, consider using:
+// - react-native-exception-handler for comprehensive error handling
+// - Sentry React Native SDK for error reporting and crash analytics
+// - These handle both JS and native crashes more effectively
 
 // Screens
 import ColorWheelScreen from './src/screens/ColorWheelScreen';
