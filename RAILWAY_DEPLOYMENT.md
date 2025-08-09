@@ -41,7 +41,7 @@ In Railway dashboard → your service → Variables tab, add:
 ```
 NODE_ENV=production
 JWT_SECRET=your-secure-random-string-here
-ALLOWED_ORIGINS=https://your-app-domain.com
+ALLOWED_ORIGINS=https://fashioncolorwheel.app
 RATE_LIMIT_WINDOW_MS=900000
 RATE_LIMIT_MAX_REQUESTS=100
 MAX_FILE_SIZE=5242880
@@ -54,7 +54,7 @@ UPLOAD_PATH=./uploads
 3. Or use Railway's database management tools
 
 ### 6. Get Your Production URL
-- Railway provides a public HTTPS URL like: `https://your-app-name.up.railway.app`
+- Railway provides a public HTTPS URL like: `https://colorwheelapp-production.up.railway.app`
 - Use this as your API_URL in the mobile app configs
 
 ### 7. Update Mobile App Configs
