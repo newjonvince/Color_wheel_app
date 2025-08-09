@@ -120,7 +120,7 @@ router.post('/login', authLimiter, loginValidation, async (req, res) => {
   try {
     const { email, password } = req.body;
     const result = await query(
-      'SELECT id, email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at, email_verified FROM users WHERE email = ? AND is_active = true',
+      'SELECT id, email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at, email_verified FROM users WHERE email = ?',
       [email]
     );
     if (result.rows.length === 0) {
