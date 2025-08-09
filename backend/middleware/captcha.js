@@ -1,80 +1,77 @@
+// middleware/captcha.js
 const { verify } = require('hcaptcha');
 
-/**
- * Middleware to verify hCaptcha token
- * Requires HCAPTCHA_SECRET_KEY environment variable
- */
-const verifyCaptcha = async (req, res, next) => {
+const isCaptchaEnabled = () =>
+  process.env.ENABLE_CAPTCHA === 'true' && !!process.env.HCAPTCHA_SECRET_KEY;
+
+function extractCaptchaToken(req) {
+  // Primary: JSON body (requires express.json())
+  if (req.body?.captchaToken) return req.body.captchaToken;
+  // Fallbacks if you prefer:
+  if (req.headers['x-captcha-token']) return req.headers['x-captcha-token'];
+  if (req.query?.captchaToken) return req.query.captchaToken;
+  return null;
+}
+
+async function verifyCaptcha(req, res, next) {
   try {
-    // CAPTCHA verification completely disabled for testing
-    console.log('⚠️  CAPTCHA verification disabled for testing');
-    return next();
-    
-    // Original CAPTCHA code commented out
-    /*
-    const { captchaToken } = req.body;
-    
-    // Skip CAPTCHA verification in development mode if no secret key is provided
-    if (process.env.NODE_ENV === 'development' && !process.env.HCAPTCHA_SECRET_KEY) {
-      console.log('⚠️  CAPTCHA verification skipped in development mode');
+    if (!isCaptchaEnabled()) {
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('⚠️  CAPTCHA disabled (ENABLE_CAPTCHA!="true" or missing secret)');
+      }
       return next();
     }
-    
+
+    const captchaToken = extractCaptchaToken(req);
     if (!captchaToken) {
       return res.status(400).json({
         error: 'CAPTCHA verification required',
-        message: 'Please complete the CAPTCHA verification.'
+        message: 'Missing captchaToken.',
       });
     }
-    */
-    
-    if (!process.env.HCAPTCHA_SECRET_KEY) {
-      console.error('❌ HCAPTCHA_SECRET_KEY not configured');
-      return res.status(500).json({
-        error: 'Server configuration error',
-        message: 'CAPTCHA verification is not properly configured.'
-      });
-    }
-    
-    // Verify the CAPTCHA token with hCaptcha
-    const captchaResult = await verify(process.env.HCAPTCHA_SECRET_KEY, captchaToken);
-    
-    if (!captchaResult.success) {
+
+    const secret = process.env.HCAPTCHA_SECRET_KEY;
+    // Pass client IP if available (needs app.set('trust proxy', 1) in production)
+    const remoteip = req.ip;
+
+    const result = await verify(secret, captchaToken, remoteip);
+
+    if (!result.success) {
+      // Optionally expose error codes in non-production
       return res.status(400).json({
         error: 'CAPTCHA verification failed',
-        message: 'Please complete the CAPTCHA verification correctly.',
-        details: process.env.NODE_ENV === 'development' ? captchaResult['error-codes'] : undefined
+        message: 'Please complete CAPTCHA correctly.',
+        ...(process.env.NODE_ENV !== 'production' && {
+          details: result['error-codes'],
+        }),
       });
     }
-    
-    // CAPTCHA verified successfully
-    console.log('✅ CAPTCHA verification successful');
-    next();
-    
-  } catch (error) {
-    console.error('❌ CAPTCHA verification error:', error);
-    res.status(500).json({
+
+    // Optional: lock verification to your domain if you use web flows
+    const expectedHost = process.env.HCAPTCHA_EXPECTED_HOSTNAME;
+    if (expectedHost && result.hostname && result.hostname !== expectedHost) {
+      return res.status(400).json({
+        error: 'CAPTCHA hostname mismatch',
+        message: 'Invalid CAPTCHA host.',
+      });
+    }
+
+    // You could attach result to req for telemetry
+    // req.captcha = result;
+    return next();
+  } catch (err) {
+    console.error('❌ CAPTCHA verification error:', err?.message || err);
+    return res.status(502).json({
       error: 'CAPTCHA verification error',
-      message: 'Unable to verify CAPTCHA. Please try again.'
+      message: 'Unable to verify CAPTCHA. Please try again.',
     });
   }
-};
+}
 
-/**
- * Optional CAPTCHA middleware - only applies CAPTCHA if enabled
- * Useful for endpoints where CAPTCHA is optional based on configuration
- */
-const optionalCaptcha = async (req, res, next) => {
-  // Only apply CAPTCHA if explicitly enabled and secret key is configured
-  if (process.env.ENABLE_CAPTCHA === 'true' && process.env.HCAPTCHA_SECRET_KEY) {
-    return verifyCaptcha(req, res, next);
-  }
-  
-  // Skip CAPTCHA verification
-  next();
-};
+// Optional wrapper: only apply CAPTCHA if enabled
+async function optionalCaptcha(req, res, next) {
+  if (isCaptchaEnabled()) return verifyCaptcha(req, res, next);
+  return next();
+}
 
-module.exports = {
-  verifyCaptcha,
-  optionalCaptcha
-};
+module.exports = { verifyCaptcha, optionalCaptcha };

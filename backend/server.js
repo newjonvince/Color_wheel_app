@@ -14,28 +14,54 @@ const imageRoutes = require('./routes/images');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// CRITICAL: Trust proxy for Railway deployment
+// Without this, req.ip will be the proxy's IP and all users share limits
+app.set('trust proxy', 1);
+
 // Security middleware
 app.use(helmet());
 
-// CORS configuration
+// CORS configuration - safe parsing + TestFlight/Expo web support
+const parseOrigins = (raw) =>
+  (raw || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+const allowlist = parseOrigins(process.env.ALLOWED_ORIGINS);
+// Sensible defaults for local + Expo + RN web preview
+if (allowlist.length === 0) {
+  allowlist.push('http://localhost:19006', 'http://localhost:8081'); // Expo dev servers
+}
+
 const corsOptions = {
-  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:19006'],
+  origin(origin, cb) {
+    // Allow mobile apps (no origin), health checks, and allowlisted web origins
+    if (!origin || allowlist.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS blocked: ${origin}`));
+  },
   credentials: true,
-  optionsSuccessStatus: 200
+  optionsSuccessStatus: 200,
 };
 app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // handle preflight everywhere
 
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000, // 15 minutes
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS) || 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+// Rate limiting middleware (apply speedLimiter before generalLimiter)
+const { speedLimiter, generalLimiter } = require('./middleware/rateLimiting');
+app.use(speedLimiter); // Progressive delay first
+app.use(generalLimiter); // Hard limits second
+
+// Body parsing middleware - tightened limits + error handling
+app.use(express.json({ limit: '2mb' }));             // 2mb is plenty for JSON
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+
+// Handle malformed JSON gracefully
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({ error: 'Invalid JSON', message: 'Malformed JSON body.' });
+  }
+  return next(err);
 });
-app.use(limiter);
-
-// Body parsing middleware
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -52,7 +78,7 @@ app.use('/api/colors', colorRoutes);
 app.use('/api/boards', boardRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/images', imageRoutes);
-app.use('/api', communityRoutes);
+app.use('/api/community', communityRoutes); // Dedicated prefix to avoid collisions
 
 // 404 handler
 app.use('*', (req, res) => {
@@ -62,25 +88,30 @@ app.use('*', (req, res) => {
   });
 });
 
-// Global error handler
+// Global error handler - prevent double headers
 app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
   console.error('❌ Server Error:', err);
-  
-  // Don't leak error details in production
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  
+  const isDev = process.env.NODE_ENV !== 'production';
   res.status(err.status || 500).json({
     error: 'Internal Server Error',
-    message: isDevelopment ? err.message : 'Something went wrong!',
-    ...(isDevelopment && { stack: err.stack })
+    message: isDev ? err.message : 'Something went wrong!',
+    ...(isDev && { stack: err.stack }),
+    requestId: req.id, // if you add request IDs later
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Fashion Color Wheel API server running on port ${PORT}`);
-  console.log(`📱 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+// Start server with graceful shutdown (Railway)
+const server = app.listen(PORT, () => {
+  console.log(`🚀 API up on ${PORT}`);
 });
+
+const shutdown = () => {
+  console.log('⏳ Shutting down gracefully...');
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(1), 10000).unref();
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 module.exports = app;
