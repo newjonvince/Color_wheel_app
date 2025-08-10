@@ -1,260 +1,199 @@
 const express = require('express');
+const { query } = require('../config/database');
+const { authMiddleware } = require('../middleware/auth');
+const { communityLimiter } = require('../middleware/rateLimiting');
+
 const router = express.Router();
-const mysql = require('mysql2/promise');
-const jwt = require('jsonwebtoken');
 
-// Database connection
-const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 3306,
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'fashion_color_wheel',
-  charset: 'utf8mb4'
-};
+/**
+ * Community API Routes
+ * - GET /users/suggested - Get suggested users to follow
+ * - GET /users/following - Get users the current user is following
+ * - GET /users/followers - Get users following the current user
+ * - POST /users/:id/follow - Follow a user
+ * - DELETE /users/:id/follow - Unfollow a user
+ * - GET /posts/community - Get community posts feed
+ */
 
-// Middleware to verify JWT token
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: 'Access token required' });
-  }
-
-  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-    if (err) {
-      return res.status(403).json({ error: 'Invalid token' });
-    }
-    req.user = user;
-    next();
-  });
-};
-
-// Get community posts (public posts from all users)
-router.get('/posts/community', authenticateToken, async (req, res) => {
+// GET /users/suggested - Get suggested users to follow
+router.get('/users/suggested', authMiddleware, communityLimiter, async (req, res) => {
   try {
-    const connection = await mysql.createConnection(dbConfig);
+    const { limit = 20, offset = 0 } = req.query;
+    const userId = req.user.userId;
     
-    const [posts] = await connection.execute(`
-      SELECT 
-        p.*,
-        u.username,
-        u.profile_image_url,
-        (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id) as likes_count,
-        (SELECT COUNT(*) FROM post_comments pc WHERE pc.post_id = p.id) as comments_count,
-        (SELECT COUNT(*) > 0 FROM post_likes pl WHERE pl.post_id = p.id AND pl.user_id = ?) as is_liked,
-        (SELECT COUNT(*) > 0 FROM user_follows uf WHERE uf.following_id = p.user_id AND uf.follower_id = ?) as is_following
-      FROM posts p
-      JOIN users u ON p.user_id = u.id
-      WHERE p.is_public = 1
-      ORDER BY p.created_at DESC
-      LIMIT 50
-    `, [req.user.id, req.user.id]);
-
-    // Parse colors JSON for each post
-    const postsWithColors = posts.map(post => ({
-      ...post,
-      colors: post.colors ? JSON.parse(post.colors) : []
-    }));
-
-    await connection.end();
-    res.json({ data: postsWithColors });
-  } catch (error) {
-    console.error('Error fetching community posts:', error);
-    res.status(500).json({ error: 'Failed to fetch community posts' });
-  }
-});
-
-// Get suggested users to follow
-router.get('/users/suggested', authenticateToken, async (req, res) => {
-  try {
-    const connection = await mysql.createConnection(dbConfig);
-    
-    const [users] = await connection.execute(`
+    const suggestedUsers = await query(`
       SELECT 
         u.id,
         u.username,
-        u.profile_image_url,
-        u.created_at,
-        (SELECT COUNT(*) FROM posts p WHERE p.user_id = u.id AND p.is_public = 1) as posts_count,
-        (SELECT COUNT(*) > 0 FROM user_follows uf WHERE uf.following_id = u.id AND uf.follower_id = ?) as is_following
+        u.email,
+        COALESCE(u.first_name, u.username) as name,
+        u.avatar_color,
+        CASE WHEN f.follower_id IS NOT NULL THEN 1 ELSE 0 END as is_following
       FROM users u
+      LEFT JOIN follows f ON u.id = f.following_id AND f.follower_id = ?
       WHERE u.id != ?
-      AND u.id NOT IN (
-        SELECT following_id FROM user_follows WHERE follower_id = ?
-      )
-      ORDER BY posts_count DESC, u.created_at DESC
-      LIMIT 10
-    `, [req.user.id, req.user.id, req.user.id]);
-
-    await connection.end();
-    res.json({ data: users });
+        AND u.id NOT IN (
+          SELECT following_id FROM follows WHERE follower_id = ?
+        )
+      ORDER BY u.created_at DESC
+      LIMIT ? OFFSET ?
+    `, [userId, userId, userId, parseInt(limit), parseInt(offset)]);
+    
+    res.json({ success: true, data: suggestedUsers });
   } catch (error) {
-    console.error('Error fetching suggested users:', error);
-    res.status(500).json({ error: 'Failed to fetch suggested users' });
+    console.error('Get suggested users error:', error);
+    res.status(500).json({ error: 'Failed to get suggested users' });
   }
 });
 
-// Get users that current user is following
-router.get('/users/following', authenticateToken, async (req, res) => {
+// GET /users/following - Get users the current user is following
+router.get('/users/following', authMiddleware, communityLimiter, async (req, res) => {
   try {
-    const connection = await mysql.createConnection(dbConfig);
+    const { limit = 20, offset = 0 } = req.query;
+    const userId = req.user.userId;
     
-    const [users] = await connection.execute(`
+    const followingUsers = await query(`
       SELECT 
         u.id,
         u.username,
-        u.profile_image_url,
-        uf.created_at as followed_at
-      FROM user_follows uf
-      JOIN users u ON uf.following_id = u.id
-      WHERE uf.follower_id = ?
-      ORDER BY uf.created_at DESC
-    `, [req.user.id]);
-
-    await connection.end();
-    res.json({ data: users });
+        u.email,
+        COALESCE(u.first_name, u.username) as name,
+        u.avatar_color,
+        1 as is_following,
+        f.created_at as followed_at
+      FROM users u
+      INNER JOIN follows f ON u.id = f.following_id
+      WHERE f.follower_id = ?
+      ORDER BY f.created_at DESC
+      LIMIT ? OFFSET ?
+    `, [userId, parseInt(limit), parseInt(offset)]);
+    
+    res.json({ success: true, data: followingUsers });
   } catch (error) {
-    console.error('Error fetching following users:', error);
-    res.status(500).json({ error: 'Failed to fetch following users' });
+    console.error('Get following users error:', error);
+    res.status(500).json({ error: 'Failed to get following users' });
   }
 });
 
-// Get users that follow current user
-router.get('/users/followers', authenticateToken, async (req, res) => {
+// GET /users/followers - Get users following the current user
+router.get('/users/followers', authMiddleware, communityLimiter, async (req, res) => {
   try {
-    const connection = await mysql.createConnection(dbConfig);
+    const { limit = 20, offset = 0 } = req.query;
+    const userId = req.user.userId;
     
-    const [users] = await connection.execute(`
+    const followers = await query(`
       SELECT 
         u.id,
         u.username,
-        u.profile_image_url,
-        uf.created_at as followed_at,
-        (SELECT COUNT(*) > 0 FROM user_follows uf2 WHERE uf2.following_id = u.id AND uf2.follower_id = ?) as is_following
-      FROM user_follows uf
-      JOIN users u ON uf.follower_id = u.id
-      WHERE uf.following_id = ?
-      ORDER BY uf.created_at DESC
-    `, [req.user.id, req.user.id]);
-
-    await connection.end();
-    res.json({ data: users });
+        u.email,
+        COALESCE(u.first_name, u.username) as name,
+        u.avatar_color,
+        CASE WHEN f2.follower_id IS NOT NULL THEN 1 ELSE 0 END as is_following,
+        f.created_at as followed_at
+      FROM users u
+      INNER JOIN follows f ON u.id = f.follower_id
+      LEFT JOIN follows f2 ON u.id = f2.following_id AND f2.follower_id = ?
+      WHERE f.following_id = ?
+      ORDER BY f.created_at DESC
+      LIMIT ? OFFSET ?
+    `, [userId, userId, parseInt(limit), parseInt(offset)]);
+    
+    res.json({ success: true, data: followers });
   } catch (error) {
-    console.error('Error fetching followers:', error);
-    res.status(500).json({ error: 'Failed to fetch followers' });
+    console.error('Get followers error:', error);
+    res.status(500).json({ error: 'Failed to get followers' });
   }
 });
 
-// Follow a user
-router.post('/users/:userId/follow', authenticateToken, async (req, res) => {
+// GET /posts/community - Get community posts feed
+router.get('/posts/community', authMiddleware, communityLimiter, async (req, res) => {
   try {
-    const { userId } = req.params;
+    const { cursor, limit = 20 } = req.query;
+    const userId = req.user.userId;
     
-    if (userId == req.user.id) {
-      return res.status(400).json({ error: 'Cannot follow yourself' });
+    // For now, return mock data until posts table is implemented
+    const mockPosts = [
+      {
+        id: '1',
+        user_id: userId,
+        username: 'demo_user',
+        user_avatar_color: '#8B5CF6',
+        image_url: null,
+        colors: JSON.stringify(['#FF6B6B', '#4ECDC4', '#45B7D1']),
+        description: 'Beautiful color palette from nature!',
+        likes_count: 12,
+        comments_count: 3,
+        is_liked: false,
+        created_at: new Date().toISOString()
+      }
+    ];
+    
+    res.json({ 
+      success: true, 
+      data: mockPosts,
+      nextCursor: null // No more pages for mock data
+    });
+  } catch (error) {
+    console.error('Get community posts error:', error);
+    res.status(500).json({ error: 'Failed to get community posts' });
+  }
+});
+
+// POST /users/:id/follow - Follow a user
+router.post('/users/:id/follow', authMiddleware, communityLimiter, async (req, res) => {
+  try {
+    const followingId = req.params.id;
+    const followerId = req.user.userId;
+    
+    // Check if user exists
+    const userExists = await query('SELECT id FROM users WHERE id = ?', [followingId]);
+    if (userExists.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
     }
-
-    const connection = await mysql.createConnection(dbConfig);
     
     // Check if already following
-    const [existing] = await connection.execute(
-      'SELECT id FROM user_follows WHERE follower_id = ? AND following_id = ?',
-      [req.user.id, userId]
+    const existingFollow = await query(
+      'SELECT id FROM follows WHERE follower_id = ? AND following_id = ?',
+      [followerId, followingId]
     );
-
-    if (existing.length > 0) {
-      await connection.end();
+    
+    if (existingFollow.length > 0) {
       return res.status(400).json({ error: 'Already following this user' });
     }
-
-    // Add follow relationship
-    await connection.execute(
-      'INSERT INTO user_follows (follower_id, following_id) VALUES (?, ?)',
-      [req.user.id, userId]
+    
+    // Create follow relationship
+    await query(
+      'INSERT INTO follows (follower_id, following_id, created_at) VALUES (?, ?, NOW())',
+      [followerId, followingId]
     );
-
-    await connection.end();
-    res.json({ message: 'User followed successfully' });
+    
+    res.json({ success: true, message: 'Successfully followed user' });
   } catch (error) {
-    console.error('Error following user:', error);
+    console.error('Follow user error:', error);
     res.status(500).json({ error: 'Failed to follow user' });
   }
 });
 
-// Unfollow a user
-router.delete('/users/:userId/follow', authenticateToken, async (req, res) => {
+// DELETE /users/:id/follow - Unfollow a user
+router.delete('/users/:id/follow', authMiddleware, communityLimiter, async (req, res) => {
   try {
-    const { userId } = req.params;
-    const connection = await mysql.createConnection(dbConfig);
+    const followingId = req.params.id;
+    const followerId = req.user.userId;
     
-    await connection.execute(
-      'DELETE FROM user_follows WHERE follower_id = ? AND following_id = ?',
-      [req.user.id, userId]
+    // Remove follow relationship
+    const result = await query(
+      'DELETE FROM follows WHERE follower_id = ? AND following_id = ?',
+      [followerId, followingId]
     );
-
-    await connection.end();
-    res.json({ message: 'User unfollowed successfully' });
-  } catch (error) {
-    console.error('Error unfollowing user:', error);
-    res.status(500).json({ error: 'Failed to unfollow user' });
-  }
-});
-
-// Like a post
-router.post('/posts/:postId/like', authenticateToken, async (req, res) => {
-  try {
-    const { postId } = req.params;
-    const connection = await mysql.createConnection(dbConfig);
     
-    // Check if already liked
-    const [existing] = await connection.execute(
-      'SELECT id FROM post_likes WHERE user_id = ? AND post_id = ?',
-      [req.user.id, postId]
-    );
-
-    if (existing.length > 0) {
-      // Unlike the post
-      await connection.execute(
-        'DELETE FROM post_likes WHERE user_id = ? AND post_id = ?',
-        [req.user.id, postId]
-      );
-    } else {
-      // Like the post
-      await connection.execute(
-        'INSERT INTO post_likes (user_id, post_id) VALUES (?, ?)',
-        [req.user.id, postId]
-      );
+    if (result.affectedRows === 0) {
+      return res.status(400).json({ error: 'Not following this user' });
     }
-
-    await connection.end();
-    res.json({ message: 'Post like toggled successfully' });
-  } catch (error) {
-    console.error('Error toggling post like:', error);
-    res.status(500).json({ error: 'Failed to toggle post like' });
-  }
-});
-
-// Create a new post
-router.post('/posts', authenticateToken, async (req, res) => {
-  try {
-    const { colors, image_url, description, is_public = true } = req.body;
-    const connection = await mysql.createConnection(dbConfig);
     
-    const [result] = await connection.execute(
-      'INSERT INTO posts (user_id, colors, image_url, description, is_public) VALUES (?, ?, ?, ?, ?)',
-      [req.user.id, JSON.stringify(colors), image_url, description, is_public]
-    );
-
-    await connection.end();
-    res.json({ 
-      message: 'Post created successfully',
-      postId: result.insertId
-    });
+    res.json({ success: true, message: 'Successfully unfollowed user' });
   } catch (error) {
-    console.error('Error creating post:', error);
-    res.status(500).json({ error: 'Failed to create post' });
+    console.error('Unfollow user error:', error);
+    res.status(500).json({ error: 'Failed to unfollow user' });
   }
 });
 
