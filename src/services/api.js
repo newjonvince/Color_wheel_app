@@ -109,4 +109,46 @@ export const createColorMatch = async (colorData) => {
   return response.data;
 };
 
-export default api;
+// Create ApiService object with all methods for default export
+const ApiService = {
+  // Token management methods
+  setToken,
+  getToken,
+  clearToken,
+  
+  // Auth methods
+  login,
+  register,
+  demoLogin,
+  
+  // User methods
+  getUserProfile,
+  updateUserProfile,
+  
+  // Color methods
+  getColorMatches,
+  createColorMatch,
+  
+  // Direct axios methods for generic requests
+  get: (url, config) => api.get(url, config),
+  post: (url, data, config) => api.post(url, data, config),
+  put: (url, data, config) => api.put(url, data, config),
+  delete: (url, config) => api.delete(url, config),
+  patch: (url, data, config) => api.patch(url, data, config),
+};
+
+export default ApiService;
+
+// Also export individual functions for flexibility
+export {
+  setToken,
+  getToken,
+  clearToken,
+  login,
+  register,
+  demoLogin,
+  getUserProfile,
+  updateUserProfile,
+  getColorMatches,
+  createColorMatch,
+};
