@@ -141,6 +141,23 @@ const emailVerificationLimiter = rateLimit({
   store,
 });
 
+// Community features rate limiting
+const communityLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 200, // allow more requests for community browsing
+  keyGenerator: (req) => `community:${req.ip}`,
+  handler: (req, res) => {
+    res.status(429).json({
+      error: 'Too many community requests',
+      message: 'Too many community requests, please slow down.',
+      retryAfter: Math.ceil(15 * 60)
+    });
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  store,
+});
+
 module.exports = {
   generalLimiter,
   authLimiter,
@@ -148,5 +165,6 @@ module.exports = {
   usernameCheckLimiter,
   speedLimiter,
   passwordResetLimiter,
-  emailVerificationLimiter
+  emailVerificationLimiter,
+  communityLimiter
 };

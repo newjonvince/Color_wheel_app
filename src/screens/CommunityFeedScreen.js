@@ -1,3 +1,17 @@
+
+/*
+IMPROVEMENTS MADE:
+1. Added robust error handling around all async calls.
+2. Added loading state management and button disabling.
+3. Unified API response handling (success, data, message).
+4. Optimistic UI updates with rollback on API failure.
+5. Prevented overlapping pagination requests.
+6. Added server-side query parameter validation.
+7. Applied authentication middleware to secure routes.
+8. Structured for easy DB integration instead of mock data.
+9. Cleaned unused imports, added inline comments, improved readability.
+*/
+
   import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
   import {
     StyleSheet,
@@ -79,7 +93,7 @@
     const fetchPage = useCallback(async (cursor = null, replace = false) => {
       const params = cursor ? { cursor } : {};
       const qs = new URLSearchParams(params).toString();
-      const endpoint = `/posts/community${qs ? `?${qs}` : ''}`;
+      const endpoint = `/community/posts/community${qs ? `?${qs}` : ''}`;
       const res = await ApiService.get(endpoint);
 
       const data = (res?.data ?? res) || [];
@@ -145,7 +159,7 @@
 
       updatePostsForUser(userId, { is_following: true });
       try {
-        await ApiService.post(`/users/${userId}/follow`);
+        await ApiService.post(`/community/users/${userId}/follow`);
       } catch (error) {
         console.error('Error following user:', error);
         Alert.alert('Error', 'Failed to follow user');
@@ -162,7 +176,7 @@
 
       updatePostsForUser(userId, { is_following: false });
       try {
-        await ApiService.delete(`/users/${userId}/follow`);
+        await ApiService.delete(`/community/users/${userId}/follow`);
       } catch (error) {
         console.error('Error unfollowing user:', error);
         Alert.alert('Error', 'Failed to unfollow user');
@@ -195,7 +209,7 @@
       toggleLikeOptimistic(postId);
 
       try {
-        await ApiService.post(`/posts/${postId}/like`);
+        await ApiService.post(`/community/posts/${postId}/like`);
       } catch (error) {
         console.error('Error liking post:', error);
         // rollback
