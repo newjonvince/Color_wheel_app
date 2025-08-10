@@ -138,6 +138,10 @@ async function initializeTables() {
   try {
     console.log('🔧 Initializing database tables...');
     
+    // Test database connection first
+    await query('SELECT 1 as test');
+    console.log('✅ Database connection verified');
+    
     // Create follows table for community features
     await query(`
       CREATE TABLE IF NOT EXISTS follows (
@@ -155,8 +159,16 @@ async function initializeTables() {
     
     console.log('✅ Database tables initialized successfully');
   } catch (error) {
-    console.error('❌ Database table initialization error:', error);
+    console.error('❌ Database table initialization error:', error.message);
+    console.error('❌ Stack:', error.stack);
+    
+    // Check if it's a connection issue
+    if (error.code === 'ECONNREFUSED' || error.code === 'ER_ACCESS_DENIED_ERROR') {
+      console.error('❌ Database connection failed - check Railway MySQL service and environment variables');
+    }
+    
     // Don't throw - let the app continue even if table creation fails
+    // The app should still serve API requests even without the follows table
   }
 }
 

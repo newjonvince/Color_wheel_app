@@ -133,7 +133,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server with graceful shutdown (Railway)
-const server = app.listen(PORT, async () => {
+const server = app.listen(PORT, () => {
   console.log('// Fashion Color Wheel Backend Server');
   console.log('// Production-ready Express.js API with MySQL, authentication, and rate limiting');
   console.log('// Updated: All Railway deployment warnings fixed');
@@ -142,8 +142,20 @@ const server = app.listen(PORT, async () => {
   console.log('✨ All warnings fixed - clean deployment!');
   console.log(`🚀 API up on ${PORT}`);
   
-  // Initialize database tables
-  await initializeTables();
+  // Initialize database tables asynchronously (non-blocking with timeout)
+  const dbInitTimeout = setTimeout(() => {
+    console.warn('⚠️ Database initialization taking too long, continuing without it');
+  }, 30000); // 30 second timeout
+  
+  initializeTables()
+    .then(() => {
+      clearTimeout(dbInitTimeout);
+      console.log('✅ Database initialization completed');
+    })
+    .catch((error) => {
+      clearTimeout(dbInitTimeout);
+      console.error('⚠️ Database initialization failed, but server continues:', error.message);
+    });
 });
 
 const shutdown = () => {
