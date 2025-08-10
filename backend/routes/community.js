@@ -14,7 +14,7 @@ IMPROVEMENTS MADE:
 
 const express = require('express');
 const { query } = require('../config/database');
-const { authMiddleware } = require('../middleware/auth');
+const { authenticateToken: authMiddleware } = require('../middleware/auth');
 const { communityLimiter } = require('../middleware/rateLimiting');
 
 const router = express.Router();
