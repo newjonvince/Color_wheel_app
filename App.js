@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, View, Text, Alert, AppState, Platform } from 'react-native';
+import { StyleSheet, View, Text, AppState, Platform, LogBox } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -7,43 +7,52 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
+import * as Updates from 'expo-updates';
 import ApiService from './src/services/api';
 
-// Enhanced error handling for React Native
-let isErrorHandlerActive = false;
+// --- Optional crash/error reporting (Sentry) -------------------------------
+let sentryReady = false;
+try {
+  // Only attempt to load Sentry when DSN is set (Expo: app.json -> expo.extra.public.SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN)
+  const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
+  if (SENTRY_DSN) {
+    // Lazy require so local dev without the dep won't crash
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Sentry = require('sentry-expo');
+    Sentry.init({
+      dsn: SENTRY_DSN,
+      enableInExpoDevelopment: true,
+      debug: __DEV__,
+      tracesSampleRate: 0.1,
+    });
+    sentryReady = true;
+    console.log('✅ Sentry initialized');
+  }
+} catch (e) {
+  console.warn('Sentry init skipped:', e?.message);
+}
 
-// Guard ErrorUtils access carefully
+// --- Global JS error + unhandled rejection handling -----------------------
+let isErrorHandlerActive = false;
 const setupErrorHandling = () => {
   try {
-    // Only set up JS error handling if ErrorUtils is available
+    // Guard ErrorUtils access carefully (Hermes + RN versions can vary)
     if (typeof ErrorUtils !== 'undefined' && ErrorUtils.setGlobalHandler) {
       const originalHandler = ErrorUtils.getGlobalHandler();
-      
       const jsErrorHandler = (error, isFatal) => {
         if (isErrorHandlerActive) return;
         isErrorHandlerActive = true;
-        
         try {
           console.error('🚨 JS Error:', error?.message || error, 'isFatal:', isFatal);
           console.error('Stack:', error?.stack);
-          
-          // Log error for debugging but don't try to "prevent termination"
-          // iOS privacy kills, Hermes crashes, and native module errors will still terminate
-          if (isFatal) {
-            console.error('🚨 Fatal JS error - app may terminate');
-          }
-          
-          // Call original handler to maintain React Native's error reporting
-          if (originalHandler && typeof originalHandler === 'function') {
-            originalHandler(error, isFatal);
-          }
+          // pass through to RN's default
+          if (typeof originalHandler === 'function') originalHandler(error, isFatal);
         } catch (handlerError) {
           console.error('Error in JS error handler:', handlerError);
         } finally {
           isErrorHandlerActive = false;
         }
       };
-      
       ErrorUtils.setGlobalHandler(jsErrorHandler);
       console.log('✅ JS error handler configured');
     } else {
@@ -52,17 +61,29 @@ const setupErrorHandling = () => {
   } catch (setupError) {
     console.error('Failed to setup error handling:', setupError);
   }
+
+  // Unhandled promise rejections (helps catch silent network/auth errors)
+  try {
+    const onUnhandledRejection = (event) => {
+      const reason = event?.reason || event;
+      const msg = (reason && (reason.message || reason.toString?.())) || 'Unknown rejection';
+      console.error('🚨 Unhandled promise rejection:', msg);
+    };
+    // @ts-ignore - RN ships a DOM-like event API for globalThis in Hermes
+    globalThis.addEventListener?.('unhandledrejection', onUnhandledRejection);
+  } catch (e) {
+    console.warn('Unhandled rejection handler not installed:', e?.message);
+  }
 };
 
-// Setup error handling
 setupErrorHandling();
 
-// Note: For production apps, consider using:
-// - react-native-exception-handler for comprehensive error handling
-// - Sentry React Native SDK for error reporting and crash analytics
-// - These handle both JS and native crashes more effectively
+// Tidy logs in production / TestFlight
+if (!__DEV__) {
+  LogBox.ignoreAllLogs(true);
+}
 
-// Screens
+// --- Screens ---------------------------------------------------------------
 import ColorWheelScreen from './src/screens/ColorWheelScreen';
 import BoardsScreen from './src/screens/BoardsScreen';
 import DiscoverScreen from './src/screens/DiscoverScreen';
@@ -106,103 +127,72 @@ export default function App() {
     let initTimeout;
     try {
       console.log('🚀 Starting app initialization...');
-      
-      // Set initialization timeout
+
+      // Protect against hanging init on TestFlight
       initTimeout = setTimeout(() => {
         console.error('⏰ App initialization timeout');
         setLoading(false);
         setIsInitialized(true);
       }, 10000);
 
-      // Wait for native modules to be ready
+      // Give native modules a tick to be ready
       await new Promise(resolve => setTimeout(resolve, 100));
-      
-      // Check if SecureStore is available
+
+      // Read token from SecureStore first, fallback to AsyncStorage
       let token = null;
       try {
-        if (SecureStore && typeof SecureStore.getItemAsync === 'function') {
+        if (SecureStore?.getItemAsync) {
           token = await SecureStore.getItemAsync('authToken');
-          console.log('📱 SecureStore token check:', token ? 'found' : 'not found');
-        } else {
-          console.log('📱 SecureStore not available, checking AsyncStorage...');
+        }
+        if (!token) {
           token = await AsyncStorage.getItem('authToken');
         }
       } catch (storageError) {
-        console.error('📱 Storage access error:', storageError.message);
+        console.error('📱 Storage access error:', storageError?.message);
         // Continue without token
       }
-      
+
       if (token) {
-        console.log('📱 Token found, setting on ApiService and validating...');
         try {
-          // Set token on ApiService before making requests
-          if (ApiService.setToken && typeof ApiService.setToken === 'function') {
-            ApiService.setToken(token);
-            console.log('✅ Token set on ApiService');
+          ApiService?.setToken?.(token);
+          // Validate token quickly
+          const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
+          );
+
+          let profile = null;
+          if (ApiService?.getUserProfile) {
+            profile = await Promise.race([ApiService.getUserProfile(), timeoutPromise]);
           } else {
-            console.warn('⚠️ ApiService.setToken method not available');
-          }
-          
-          // Validate token with shorter timeout for faster startup
-          try {
-            const timeoutPromise = new Promise((_, reject) => 
-              setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
-            );
-            
-            // Check if getUserProfile method exists before calling
-            if (ApiService.getUserProfile && typeof ApiService.getUserProfile === 'function') {
-              const profile = await Promise.race([
-                ApiService.getUserProfile(),
-                timeoutPromise
-              ]);
-              
-              if (profile && profile.id) {
-                console.log('✅ User authenticated:', profile.username);
-                setUser(profile);
-                // Load saved color matches for the authenticated user
-                await loadSavedColorMatches(getMatchesKey(profile.id));
-                console.log('✅ User color matches loaded');
-              } else {
-                console.log('❌ Invalid profile response');
-                await clearStoredToken();
-              }
-            } else {
-              console.log('⚠️ getUserProfile method not available, skipping profile load');
-              // Use stored user data from AsyncStorage as fallback
-              const storedUserData = await AsyncStorage.getItem('userData');
-              if (storedUserData) {
-                const userData = JSON.parse(storedUserData);
-                console.log('✅ Using stored user data:', userData.username);
-                setUser(userData);
-                await loadSavedColorMatches(getMatchesKey(userData.id));
-              }
-            }
-          } catch (profileError) {
-            console.log('⚠️ Profile fetch failed, using stored data fallback');
-            // Use stored user data as fallback
+            // fallback to stored userData
             const storedUserData = await AsyncStorage.getItem('userData');
-            if (storedUserData) {
-              const userData = JSON.parse(storedUserData);
-              console.log('✅ Using stored user data fallback:', userData.username);
-              setUser(userData);
-              await loadSavedColorMatches(getMatchesKey(userData.id));
-            } else {
-              await clearStoredToken();
-            }
+            if (storedUserData) profile = JSON.parse(storedUserData);
+          }
+
+          if (profile?.id) {
+            setUser(profile);
+            await loadSavedColorMatches(getMatchesKey(profile.id));
+          } else {
+            await clearStoredToken();
           }
         } catch (profileError) {
-          console.error('❌ Profile validation error:', profileError.message);
-          await clearStoredToken();
+          console.warn('Profile validation failed, falling back:', profileError?.message);
+          // Fallback to stored userData
+          const storedUserData = await AsyncStorage.getItem('userData');
+          if (storedUserData) {
+            const userData = JSON.parse(storedUserData);
+            setUser(userData);
+            await loadSavedColorMatches(getMatchesKey(userData.id));
+          } else {
+            await clearStoredToken();
+          }
         }
-      } else {
-        console.log('📱 No stored token found');
       }
-      
+
       clearTimeout(initTimeout);
       setIsInitialized(true);
-      
-    } catch (error) {
-      console.error('❌ App initialization error:', error.message);
+    } catch (e) {
+      console.error('❌ App initialization error:', e?.message);
       if (initTimeout) clearTimeout(initTimeout);
       setError('Failed to initialize app');
       setIsInitialized(true);
@@ -214,22 +204,18 @@ export default function App() {
   // Safe token clearing helper
   const clearStoredToken = async () => {
     try {
-      if (SecureStore && typeof SecureStore.deleteItemAsync === 'function') {
-        await SecureStore.deleteItemAsync('authToken');
-      }
+      await SecureStore?.deleteItemAsync?.('authToken');
       await AsyncStorage.removeItem('authToken');
       console.log('🗑️ Stored token cleared');
     } catch (error) {
-      console.error('Failed to clear token:', error.message);
+      console.error('Failed to clear token:', error?.message);
     }
   };
 
   useEffect(() => {
-    // Delay initialization slightly to ensure native modules are ready
     const initTimer = setTimeout(() => {
       initializeApp();
     }, 50);
-    
     return () => clearTimeout(initTimer);
   }, [initializeApp]);
 
@@ -241,17 +227,9 @@ export default function App() {
         initializeApp();
       }
     };
-
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription?.remove();
   }, [isInitialized, initializeApp]);
-
-  // Load color matches when user changes
-  useEffect(() => {
-    if (user?.id) {
-      loadSavedColorMatches(getMatchesKey(user.id));
-    }
-  }, [user?.id, loadSavedColorMatches]);
 
   const loadSavedColorMatches = useCallback(async (key) => {
     try {
@@ -262,6 +240,13 @@ export default function App() {
       setSavedColorMatches([]);
     }
   }, []);
+
+  // Load color matches when user changes
+  useEffect(() => {
+    if (user?.id) {
+      loadSavedColorMatches(getMatchesKey(user.id));
+    }
+  }, [user?.id, loadSavedColorMatches]);
 
   const saveColorMatch = useCallback(async (colorMatch) => {
     try {
@@ -275,28 +260,23 @@ export default function App() {
   }, [user?.id, savedColorMatches]);
 
   const handleLoginSuccess = useCallback(async (u) => {
-    const user = pickUser(u);
-    setUser(user);
-
+    const nextUser = pickUser(u);
+    setUser(nextUser);
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
-      await AsyncStorage.setItem('userData', JSON.stringify(user));
-      console.log('✅ Login successful, user data saved');
-      // Color matches will be loaded by useEffect when user.id changes
+      await AsyncStorage.setItem('userData', JSON.stringify(nextUser));
     } catch (error) {
       console.error('Error saving login state:', error);
-      // Continue anyway - user is logged in, just storage failed
     }
   }, []);
 
   const handleSignUpComplete = useCallback(async (u) => {
-    const user = pickUser(u);
-    setUser(user);
-
+    const nextUser = pickUser(u);
+    setUser(nextUser);
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
-      await AsyncStorage.setItem('userData', JSON.stringify(user));
-      await loadSavedColorMatches(getMatchesKey(user?.id));
+      await AsyncStorage.setItem('userData', JSON.stringify(nextUser));
+      await loadSavedColorMatches(getMatchesKey(nextUser?.id));
     } catch (error) {
       console.warn('Error storing user data in AsyncStorage:', error);
     }
@@ -305,14 +285,10 @@ export default function App() {
   const handleLogout = useCallback(async () => {
     try {
       await ApiService.logout?.();
-      await ApiService.clearToken?.(); // ensure secure token is wiped
-
+      await ApiService.clearToken?.();
       await AsyncStorage.removeItem('isLoggedIn');
       await AsyncStorage.removeItem('userData');
-
       setUser(null);
-
-      // Load anon saved data for post-logout state
       await loadSavedColorMatches(getMatchesKey(null));
     } catch (error) {
       console.error('Error logging out:', error);
@@ -323,17 +299,11 @@ export default function App() {
 
   const handleAccountDeleted = useCallback(async () => {
     try {
-      // Clear secure token too
       await ApiService.clearToken?.();
-
-      // Remove known keys; avoid blind clear unless you want to wipe all app data
       const keysToRemove = ['isLoggedIn', 'userData', getMatchesKey(user?.id)];
       await AsyncStorage.multiRemove(keysToRemove);
-
       setSavedColorMatches([]);
       setUser(null);
-
-      // After delete, load anon scope (should be empty unless you keep demo state)
       await loadSavedColorMatches(getMatchesKey(null));
     } catch (error) {
       console.error('Error clearing data after account deletion:', error);
@@ -342,16 +312,30 @@ export default function App() {
     }
   }, [user?.id, loadSavedColorMatches]);
 
-  // Show loading state with timeout protection
+  // Optional: Auto-reload on OTA update (helps TestFlight sessions)
+  useEffect(() => {
+    const checkUpdates = async () => {
+      try {
+        const update = await Updates.checkForUpdateAsync();
+        if (update.isAvailable) {
+          await Updates.fetchUpdateAsync();
+          await Updates.reloadAsync();
+        }
+      } catch {
+        // ignore
+      }
+    };
+    if (!__DEV__) checkUpdates();
+  }, []);
+
+  // --- Render ----------------------------------------------------------------
   if (loading || !isInitialized) {
     return (
       <SafeAreaProvider>
         <SafeAreaView style={styles.container}>
           <View style={styles.loadingContainer}>
             <Text style={styles.loadingText}>Loading...</Text>
-            {error && (
-              <Text style={styles.errorText}>{error}</Text>
-            )}
+            {error && <Text style={styles.errorText}>{error}</Text>}
           </View>
         </SafeAreaView>
       </SafeAreaProvider>
@@ -362,7 +346,7 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <SafeAreaView style={{ flex: 1 }}>
-          <StatusBar style="auto" />
+          <StatusBar style={Platform.OS === 'ios' ? 'dark' : 'auto'} />
           {showSignUp ? (
             <SignUpScreen
               onSignUpComplete={handleSignUpComplete}
@@ -384,12 +368,10 @@ export default function App() {
       <SafeAreaProvider>
         <ErrorBoundary>
           <NavigationContainer>
-            <StatusBar style="auto" />
+            <StatusBar style={Platform.OS === 'ios' ? 'dark' : 'auto'} />
             <Tab.Navigator
               screenOptions={({ route }) => ({
-                tabBarIcon: ({ focused }) => (
-                  <EmojiTabIcon focused={focused} name={route.name} />
-                ),
+                tabBarIcon: ({ focused }) => <EmojiTabIcon focused={focused} name={route.name} />,
                 tabBarActiveTintColor: '#e74c3c',
                 tabBarInactiveTintColor: '#7f8c8d',
                 tabBarStyle: styles.tabBar,
@@ -397,41 +379,32 @@ export default function App() {
                 headerShown: false,
               })}
             >
-              <Tab.Screen 
-                name="Community" 
-                options={{ title: 'Community' }}
-              >
+              <Tab.Screen name="Community" options={{ title: 'Community' }}>
                 {(props) => (
-                  <CommunityFeedScreen 
-                    {...props} 
+                  <CommunityFeedScreen
+                    {...props}
                     currentUser={user}
                     onSaveColorMatch={saveColorMatch}
                     onLogout={handleLogout}
                   />
                 )}
               </Tab.Screen>
-              
-              <Tab.Screen 
-                name="ColorWheel" 
-                options={{ title: 'Wheel' }}
-              >
+
+              <Tab.Screen name="ColorWheel" options={{ title: 'Wheel' }}>
                 {(props) => (
-                  <ColorWheelScreen 
-                    {...props} 
+                  <ColorWheelScreen
+                    {...props}
                     currentUser={user}
                     onSaveColorMatch={saveColorMatch}
                     onLogout={handleLogout}
                   />
                 )}
               </Tab.Screen>
-              
-              <Tab.Screen 
-                name="Boards" 
-                options={{ title: 'My Boards' }}
-              >
+
+              <Tab.Screen name="Boards" options={{ title: 'My Boards' }}>
                 {(props) => (
-                  <BoardsScreen 
-                    {...props} 
+                  <BoardsScreen
+                    {...props}
                     currentUser={user}
                     savedColorMatches={savedColorMatches}
                     onSaveColorMatch={saveColorMatch}
@@ -439,14 +412,11 @@ export default function App() {
                   />
                 )}
               </Tab.Screen>
-              
-              <Tab.Screen 
-                name="Settings" 
-                options={{ title: 'Settings' }}
-              >
+
+              <Tab.Screen name="Settings" options={{ title: 'Settings' }}>
                 {(props) => (
-                  <UserSettingsScreen 
-                    {...props} 
+                  <UserSettingsScreen
+                    {...props}
                     currentUser={user}
                     onLogout={handleLogout}
                     onAccountDeleted={handleAccountDeleted}
