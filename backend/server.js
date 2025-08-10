@@ -82,12 +82,18 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check endpoint
+// Health check endpoint - enhanced for Railway debugging
 app.get('/health', (req, res) => {
+  console.log('🏥 Health check requested from:', req.ip);
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    service: 'Fashion Color Wheel API'
+    service: 'Fashion Color Wheel API',
+    version: '1.0.0',
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    port: PORT,
+    host: HOST || '0.0.0.0'
   });
 });
 
@@ -133,14 +139,16 @@ app.use((err, req, res, next) => {
 });
 
 // Start server with graceful shutdown (Railway)
-const server = app.listen(PORT, () => {
+// CRITICAL: Bind to 0.0.0.0 for Railway health checks to work
+const HOST = process.env.HOST || '0.0.0.0';
+const server = app.listen(PORT, HOST, () => {
   console.log('// Fashion Color Wheel Backend Server');
   console.log('// Production-ready Express.js API with MySQL, authentication, and rate limiting');
   console.log('// Updated: All Railway deployment warnings fixed');
   console.log('📱 Environment:', process.env.NODE_ENV);
-  console.log('🔗 Health check: http://localhost:' + PORT + '/health');
+  console.log('🔗 Health check: http://' + HOST + ':' + PORT + '/health');
   console.log('✨ All warnings fixed - clean deployment!');
-  console.log(`🚀 API up on ${PORT}`);
+  console.log(`🚀 API up on ${HOST}:${PORT}`);
   
   // Initialize database tables asynchronously (non-blocking with timeout)
   const dbInitTimeout = setTimeout(() => {
