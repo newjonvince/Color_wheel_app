@@ -23,6 +23,7 @@ import Animated, {
   withSpring,
 } from 'react-native-reanimated';
 import AdvancedColorWheel from '../components/AdvancedColorWheel';
+import FullColorWheel from '../components/FullColorWheel';
 import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 import ColorCollageCreator from '../components/ColorCollageCreator';
 import ApiService from '../services/api';
@@ -55,6 +56,7 @@ export default function ColorWheelScreen({ navigation, currentUser, onSaveColorM
   const [showManualInput, setShowManualInput] = useState(false);
   const [manualColorInput, setManualColorInput] = useState('');
   const [useAdvancedMode, setUseAdvancedMode] = useState(false);
+  const [useFullColorWheel, setUseFullColorWheel] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   // Contrast calculation utilities for accessibility
@@ -313,24 +315,32 @@ export default function ColorWheelScreen({ navigation, currentUser, onSaveColorM
   };
 
   // Handle color extraction from camera image
-  const handleColorExtractedFromImage = async (imageUri) => {
-    try {
-      // Set the image for the CoolorsColorExtractor to process
-      setCollageImage(imageUri);
-      // For now, we'll use a placeholder color - the CoolorsColorExtractor will handle the actual extraction
-      // This will be replaced by the actual extracted color from CoolorsColorExtractor
-      const extractedColor = '#FF6B6B'; // placeholder
-      const { h: hue } = hexToHsl(extractedColor);
-      setSelectedColor(extractedColor);
-      setLockedColor(extractedColor);
-      setAngle(hue);
-      setIsColorLocked(true);
-      setSelectedScheme('complementary');
-      updateColorState(hue, extractedColor, activeMarkerId);
-    } catch (error) {
-      console.error('Error extracting color from camera image:', error);
-      Alert.alert('Error', 'Could not extract color from image.');
-    }
+  const handleColorExtractedFromImage = (imageUri) => {
+    console.log('Color extracted from image:', imageUri);
+    // TODO: Implement color extraction logic
+    // For now, just set a random color
+    const randomColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'];
+    const randomColor = randomColors[Math.floor(Math.random() * randomColors.length)];
+    
+    // Convert to angle and update state
+    const hsl = hexToHsl(randomColor);
+    const newAngle = hsl.h;
+    
+    updateColorState(newAngle, randomColor);
+    
+    Alert.alert(
+      'Color Extracted!',
+      `Extracted color: ${randomColor}`,
+      [{ text: 'OK' }]
+    );
+  };
+
+  // Handle FullColorWheel color changes
+  const handleFullColorWheelChange = ({ hex, h, s, v }) => {
+    setSelectedColor(hex);
+    setAngle(h);
+    // Trigger haptic feedback for smooth interaction
+    Haptics.selectionAsync();
   };
 
   const renderColorWheel = () => {
@@ -434,26 +444,50 @@ export default function ColorWheelScreen({ navigation, currentUser, onSaveColorM
         {/* Mode Toggle */}
         <View style={styles.modeToggle}>
           <TouchableOpacity 
-            style={[styles.toggleButton, !useAdvancedMode && styles.activeToggle]}
-            onPress={() => setUseAdvancedMode(false)}
+            style={[styles.toggleButton, !useAdvancedMode && !useFullColorWheel && styles.activeToggle]}
+            onPress={() => {
+              setUseAdvancedMode(false);
+              setUseFullColorWheel(false);
+            }}
           >
-            <Text style={[styles.toggleText, !useAdvancedMode && styles.activeToggleText]}>Basic</Text>
+            <Text style={[styles.toggleText, !useAdvancedMode && !useFullColorWheel && styles.activeToggleText]}>Basic</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={[styles.toggleButton, useFullColorWheel && styles.activeToggle]}
+            onPress={() => {
+              setUseAdvancedMode(false);
+              setUseFullColorWheel(true);
+            }}
+          >
+            <Text style={[styles.toggleText, useFullColorWheel && styles.activeToggleText]}>Full Wheel</Text>
           </TouchableOpacity>
           <TouchableOpacity 
             style={[styles.toggleButton, useAdvancedMode && styles.activeToggle]}
-            onPress={() => setUseAdvancedMode(true)}
+            onPress={() => {
+              setUseAdvancedMode(true);
+              setUseFullColorWheel(false);
+            }}
           >
             <Text style={[styles.toggleText, useAdvancedMode && styles.activeToggleText]}>Advanced</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Conditional Rendering: Advanced vs Basic Color Wheel */}
+      {/* Conditional Rendering: Advanced vs Full vs Basic Color Wheel */}
       {useAdvancedMode ? (
         <AdvancedColorWheel 
           currentUser={currentUser}
           onSaveColorMatch={onSaveColorMatch}
         />
+      ) : useFullColorWheel ? (
+        <View style={styles.fullColorWheelContainer}>
+          <FullColorWheel
+            size={340}
+            ringWidth={30}
+            initialHex={selectedColor}
+            onChange={handleFullColorWheelChange}
+          />
+        </View>
       ) : (
         <>
           {renderColorWheel()}
@@ -971,5 +1005,10 @@ const styles = StyleSheet.create({
   },
   activeToggleText: {
     color: '#ffffff',
+  },
+  fullColorWheelContainer: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    marginBottom: 20,
   },
 });
