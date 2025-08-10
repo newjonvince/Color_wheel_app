@@ -81,19 +81,7 @@
       "expo-secure-store",
       "expo-mail-composer",
       "expo-font",
-      [
-        "expo-build-properties",
-        {
-          "ios": {
-            "deploymentTarget": "13.0"
-          },
-          "android": {
-            "compileSdkVersion": 34,
-            "targetSdkVersion": 34,
-            "minSdkVersion": 23
-          }
-        }
-      ]
+      "expo-build-properties"
     ],
     "runtimeVersion": {
       "policy": "sdkVersion"
