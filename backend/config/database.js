@@ -131,9 +131,39 @@ pool.on('connection', async (conn) => {
   }
 });
 
+/**
+ * Initialize database tables - creates missing tables automatically
+ */
+async function initializeTables() {
+  try {
+    console.log('🔧 Initializing database tables...');
+    
+    // Create follows table for community features
+    await query(`
+      CREATE TABLE IF NOT EXISTS follows (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        follower_id VARCHAR(36) NOT NULL,
+        following_id VARCHAR(36) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (following_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_follow (follower_id, following_id),
+        INDEX idx_follower (follower_id),
+        INDEX idx_following (following_id)
+      )
+    `);
+    
+    console.log('✅ Database tables initialized successfully');
+  } catch (error) {
+    console.error('❌ Database table initialization error:', error);
+    // Don't throw - let the app continue even if table creation fails
+  }
+}
+
 module.exports = {
   pool,
   query,
   timedQuery,
   inTransaction,
+  initializeTables,
 };

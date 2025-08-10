@@ -10,6 +10,7 @@ const boardRoutes = require('./routes/boards');
 const userRoutes = require('./routes/users');
 const communityRoutes = require('./routes/community');
 const imageRoutes = require('./routes/images');
+const { initializeTables } = require('./config/database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -132,7 +133,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server with graceful shutdown (Railway)
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, async () => {
   console.log('// Fashion Color Wheel Backend Server');
   console.log('// Production-ready Express.js API with MySQL, authentication, and rate limiting');
   console.log('// Updated: All Railway deployment warnings fixed');
@@ -140,6 +141,9 @@ const server = app.listen(PORT, () => {
   console.log('🔗 Health check: http://localhost:' + PORT + '/health');
   console.log('✨ All warnings fixed - clean deployment!');
   console.log(`🚀 API up on ${PORT}`);
+  
+  // Initialize database tables
+  await initializeTables();
 });
 
 const shutdown = () => {
