@@ -35,6 +35,10 @@
     "jest": "^29.6.2",
     "nodemon": "^3.0.1"
   },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
   "keywords": [
     "fashion",
     "color",
