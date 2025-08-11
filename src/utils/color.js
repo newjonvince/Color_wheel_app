@@ -222,7 +222,7 @@ const SCHEME_OFFSETS_OKLCH = {
   monochromatic: [0],
 };
 
-export const generateOklchScheme = (baseHex, type = 'analogous') => {
+const generateOklchScheme = (baseHex, type = 'analogous') => {
   const { L, C, h } = hexToOklch(baseHex);
   const deltas = SCHEME_OFFSETS_OKLCH[type] || SCHEME_OFFSETS_OKLCH.analogous;
   const hues = deltas.map(d => (h + d + 360) % 360);
