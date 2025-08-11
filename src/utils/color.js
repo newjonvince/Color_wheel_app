@@ -360,3 +360,38 @@ export const blendColors = (color1, color2, ratio) => {
 
   return `#${toHex(r)}${toHex(g)}${toHex(bb)}`;
 };
+
+// Export all functions needed by ColorWheelScreen and FullColorWheel
+export {
+  // Basic color utilities
+  normalizeHex,
+  hslToHex,
+  hexToRgb,
+  rgbToHex,
+  hexToHsl,
+  normalizeAngle,
+  angleToPosition,
+  positionToAngle,
+  calculateDistance,
+  relativeLuminance,
+  contrastRatio,
+  getContrastingTextColor,
+  
+  // OKLCH utilities
+  hexToOklch,
+  oklchToHexClamped,
+  nearestAccessible,
+  generateOklchScheme,
+  
+  // Color scheme utilities
+  getColorScheme,
+  calculateMarkerPositions,
+  updateMarkerPositions,
+  isPointInColorWheelRing,
+  generateColorWheelPath,
+  
+  // Validation and blending
+  isValidHexColor,
+  validateHexColor,
+  blendColors
+};
