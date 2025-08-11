@@ -168,6 +168,52 @@ export const register = async (user) => (await api.post('/auth/register', user))
 export const getUserProfile = async () => (await api.get('/users/profile')).data;
 
 /** -----------------------------------------------------------------------
+ * Community API Methods
+ * --------------------------------------------------------------------- */
+export const getCommunityPosts = async (cursor, limit = 20) => {
+  const params = new URLSearchParams();
+  if (cursor) params.append('cursor', cursor);
+  params.append('limit', limit.toString());
+  const { data } = await api.get(`/community/posts/community?${params}`, withAuthHeaders());
+  return data;
+};
+
+export const getSuggestedUsers = async (limit = 20, offset = 0) => {
+  const { data } = await api.get(`/community/users/suggested?limit=${limit}&offset=${offset}`, withAuthHeaders());
+  return data;
+};
+
+export const getFollowing = async (limit = 20, offset = 0) => {
+  const { data } = await api.get(`/community/users/following?limit=${limit}&offset=${offset}`, withAuthHeaders());
+  return data;
+};
+
+export const getFollowers = async (limit = 20, offset = 0) => {
+  const { data } = await api.get(`/community/users/followers?limit=${limit}&offset=${offset}`, withAuthHeaders());
+  return data;
+};
+
+export const followUser = async (userId) => {
+  const { data } = await api.post(`/community/users/${userId}/follow`, {}, withAuthHeaders());
+  return data;
+};
+
+export const unfollowUser = async (userId) => {
+  const { data } = await api.delete(`/community/users/${userId}/follow`, withAuthHeaders());
+  return data;
+};
+
+export const likePost = async (postId) => {
+  const { data } = await api.post(`/community/posts/${postId}/like`, {}, withAuthHeaders());
+  return data;
+};
+
+export const unlikePost = async (postId) => {
+  const { data } = await api.delete(`/community/posts/${postId}/like`, withAuthHeaders());
+  return data;
+};
+
+/** -----------------------------------------------------------------------
  * Low-level passthrough
  * --------------------------------------------------------------------- */
 const ApiService = {
@@ -181,6 +227,9 @@ const ApiService = {
   startImageExtractSession, sampleImageColor, closeImageExtractSession,
   // auth
   login, register, getUserProfile,
+  // community
+  getCommunityPosts, getSuggestedUsers, getFollowing, getFollowers,
+  followUser, unfollowUser, likePost, unlikePost,
   // generic
   get: (url, cfg) => api.get(url, cfg),
   post: (url, body, cfg) => api.post(url, body, !isFormData(body) ? cfg : { ...(cfg||{}), headers: { ...(cfg?.headers||{}), 'Content-Type': 'multipart/form-data' } }),
