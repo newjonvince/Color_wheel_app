@@ -20,7 +20,7 @@ function srgbToLinear(c){ c/=255; return c<=0.04045? c/12.92: Math.pow((c+0.055)
 function linearToSrgb(c){ const v=c<=0.0031308?12.92*c:1.055*Math.pow(c,1/2.4)-0.055; return Math.max(0,Math.min(255,Math.round(v*255))); }
 function hexToRgbS(hex){ let c=hex.replace('#',''); if(c.length===3) c=c.split('').map(ch=>ch+ch).join(''); const n=parseInt(c,16); return {r:(n>>16)&255,g:(n>>8)&255,b:n&255}; }
 function rgbToHexS(r,g,b){ const h=n=>n.toString(16).padStart(2,'0'); return ('#'+h(r)+h(g)+h(b)).toUpperCase(); }
-function rgbToOklabS(r,g,b){ const R=srgbToLinear(r), G=srgbToLinear(g), B=srgbToLinear(b);
+function rgbToOklabS(r,g,bInput){ const R=srgbToLinear(r), G=srgbToLinear(g), B=srgbToLinear(bInput);
   const l=0.4122214708*R+0.5363325363*G+0.0514459929*B;
   const m=0.2119034982*R+0.6806995451*G+0.1073969566*B;
   const s=0.0883024619*R+0.2817188376*G+0.6299787005*B;
@@ -29,14 +29,14 @@ function rgbToOklabS(r,g,b){ const R=srgbToLinear(r), G=srgbToLinear(g), B=srgbT
   const a=1.9779984951*l_-2.4285922050*m_+0.4505937099*s_;
   const b=0.0259040371*l_+0.7827717662*m_-0.8086757660*s_;
   return {L,a,b}; }
-function oklabToRgbS(L,a,b){ const l_=Math.pow(L+0.3963377774*a+0.2158037573*b,3);
-  const m_=Math.pow(L-0.1055613458*a-0.0638541728*b,3);
-  const s_=Math.pow(L-0.0894841775*a-1.2914855480*b,3);
+function oklabToRgbS(L,a,bInput){ const l_=Math.pow(L+0.3963377774*a+0.2158037573*bInput,3);
+  const m_=Math.pow(L-0.1055613458*a-0.0638541728*bInput,3);
+  const s_=Math.pow(L-0.0894841775*a-1.2914855480*bInput,3);
   const R=+4.0767416621*l_-3.3077115913*m_+0.2309699292*s_;
   const G=-1.2684380046*l_+2.6097574011*m_-0.3413193965*s_;
   const B=-0.0041960863*l_-0.7034186147*m_+1.7076147010*s_;
   return {r:linearToSrgb(R), g:linearToSrgb(G), b:linearToSrgb(B)}; }
-function oklabToOklchS(L,a,b){ const C=Math.sqrt(a*a+b*b); let h=Math.atan2(b,a)*180/Math.PI; if(h<0) h+=360; return {L,C,h}; }
+function oklabToOklchS(L,a,bInput){ const C=Math.sqrt(a*a+bInput*bInput); let h=Math.atan2(bInput,a)*180/Math.PI; if(h<0) h+=360; return {L,C,h}; }
 function oklchToOklabS(L,C,h){ const hr=h*Math.PI/180; return {L, a:C*Math.cos(hr), b:C*Math.sin(hr)}; }
 function hexToOklchS(hex){ const {r,g,b}=hexToRgbS(hex); const {L,a,b:bVal}=rgbToOklabS(r,g,b); return oklabToOklchS(L,a,bVal); }
 function oklchToHexClampedS(L,C,h,iter=20){ let lo=0,hi=C,best=null;
