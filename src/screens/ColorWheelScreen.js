@@ -337,32 +337,7 @@ export default function ColorWheelScreen({ navigation, currentUser, onSaveColorM
     if (!result.canceled && result.assets?.[0]) { setSelectedImageUri(result.assets[0].uri); setShowExtractor(true); }
   }, []);
 
-  // Save color match using new palette state
-  const handleSaveColorMatch = async () => {
-    if (!palette || palette.length === 0) {
-      Alert.alert('Error', 'No colors to save');
-      return;
-    }
 
-    setIsSaving(true);
-    try {
-      await ApiService.createColorMatch({
-        base_color: selectedColor,
-        scheme: selectedScheme,
-        colors: palette, // Use your new palette state from FullColorWheel
-        title: `${selectedScheme} palette`,
-        description: '',
-        is_public: false
-      });
-      
-      Alert.alert('Success', 'Color match saved!');
-    } catch (error) {
-      console.error('Save error:', error);
-      Alert.alert('Error', 'Failed to save color match');
-    } finally {
-      setIsSaving(false);
-    }
-  };
 
   const renderColorWheel = () => {
     // Render multiple markers for different schemes
