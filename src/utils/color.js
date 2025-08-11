@@ -13,7 +13,7 @@ const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
 const toHex = (n) => n.toString(16).padStart(2, '0').toUpperCase();
 
 /** Normalize any input to #RRGGBB (uppercase). Accepts #RGB and 0xRRGGBB. */
-export const normalizeHex = (hex) => {
+const normalizeHex = (hex) => {
   if (typeof hex !== 'string') return '#000000';
   let h = hex.trim().replace(/^0x/i, '');
   if (!h.startsWith('#')) h = `#${h}`;
@@ -343,10 +343,10 @@ export const generateColorWheelPath = (radius, strokeWidth) => {
 };
 
 // ---------------------------- validation/blending ----------------------------
-export const isValidHexColor = (hex) => /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(String(hex).trim());
-export const validateHexColor = isValidHexColor; // alias for back-compat
+const isValidHexColor = (hex) => /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(String(hex).trim());
+const validateHexColor = isValidHexColor; // alias for back-compat
 
-export const blendColors = (color1, color2, ratio) => {
+const blendColors = (color1, color2, ratio) => {
   const a = normalizeHex(color1);
   const b = normalizeHex(color2);
   const t = clamp(Number.isFinite(ratio) ? ratio : 0.5, 0, 1);
