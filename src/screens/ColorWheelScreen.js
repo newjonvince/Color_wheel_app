@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, Modal, TextInput, Alert } from 'react-native';
-import FullColorWheel from './FullColorWheel';
+import FullColorWheel from '../components/FullColorWheel';
 import ApiService from '../services/api';
 
 const { width } = Dimensions.get('window');
@@ -19,9 +19,28 @@ export default function ColorWheelScreen() {
   const [saveDescription, setSaveDescription] = useState('');
   const [isPublic, setIsPublic] = useState(false);
   const [saving, setSaving] = useState(false);
+  
+  // Scheme dropdown state
+  const [showSchemeDropdown, setShowSchemeDropdown] = useState(false);
 
   const onColorsChange = useCallback((colors) => setPalette(colors), []);
   const onHexChange = useCallback((hex) => setBaseHex(hex), []);
+
+  // Handle manual hex input changes
+  const handleHexInputChange = useCallback((text) => {
+    // Clean and validate hex input
+    let cleanHex = text.toUpperCase().replace(/[^0-9A-F#]/g, '');
+    if (!cleanHex.startsWith('#')) {
+      cleanHex = '#' + cleanHex;
+    }
+    if (cleanHex.length <= 7) {
+      setBaseHex(cleanHex);
+      // If it's a valid 7-character hex, update the wheel
+      if (cleanHex.length === 7 && /^#[0-9A-F]{6}$/.test(cleanHex)) {
+        // The FullColorWheel will automatically update when baseHex changes
+      }
+    }
+  }, []);
 
   // Save palette to backend
   const handleSavePalette = useCallback(async () => {
@@ -86,12 +105,71 @@ export default function ColorWheelScreen() {
         />
       </View>
 
-      <View style={styles.inputRow}>
-        <View style={[styles.dot, { backgroundColor: baseHex }]} />
-        <Text style={styles.code}>{baseHex}</Text>
+      {/* Live Color Picker Field */}
+      <View style={styles.colorPickerSection}>
+        <Text style={styles.pickerLabel}>1. Pick a color</Text>
+        <View style={styles.colorPickerRow}>
+          <View style={[styles.colorDot, { backgroundColor: baseHex }]} />
+          <TextInput
+            style={styles.hexInput}
+            value={baseHex}
+            onChangeText={handleHexInputChange}
+            placeholder="#000000"
+            maxLength={7}
+            autoCapitalize="characters"
+          />
+        </View>
       </View>
 
-      <Text style={styles.subtitle}>Choose a color combination</Text>
+      {/* Color Scheme Selector */}
+      <View style={styles.schemeSection}>
+        <Text style={styles.schemeLabel}>2. Choose a color combination</Text>
+        <View style={styles.schemeDropdown}>
+          <TouchableOpacity 
+            style={styles.dropdownButton}
+            onPress={() => setShowSchemeDropdown(!showSchemeDropdown)}
+          >
+            <Text style={styles.dropdownText}>{scheme.charAt(0).toUpperCase() + scheme.slice(1)}</Text>
+            <Text style={[styles.dropdownArrow, showSchemeDropdown && styles.dropdownArrowUp]}>▼</Text>
+          </TouchableOpacity>
+          
+          {/* Dropdown Options */}
+          {showSchemeDropdown && (
+            <View style={styles.dropdownOptions}>
+              {SCHEMES.map(s => (
+                <TouchableOpacity
+                  key={s}
+                  style={[styles.dropdownOption, scheme === s && styles.dropdownOptionActive]}
+                  onPress={() => {
+                    setScheme(s);
+                    setShowSchemeDropdown(false);
+                  }}
+                >
+                  <Text style={[styles.dropdownOptionText, scheme === s && styles.dropdownOptionTextActive]}>
+                    {s.charAt(0).toUpperCase() + s.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </View>
+      </View>
+
+      {/* Live Palette Preview */}
+      <View style={styles.palettePreview}>
+        {palette.map((c, i) => (
+          <View key={i} style={[styles.paletteColor, { backgroundColor: c }]} />
+        ))}
+      </View>
+
+      {/* Hex Values Display */}
+      <View style={styles.hexValuesRow}>
+        {palette.map((c, i) => (
+          <Text key={`hex-${i}`} style={styles.hexValue}>{c}</Text>
+        ))}
+      </View>
+
+      {/* Scheme Selection Buttons (Hidden for now, can be toggled) */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.schemeRow}>
         {SCHEMES.map(s => (
           <TouchableOpacity
@@ -105,19 +183,6 @@ export default function ColorWheelScreen() {
           </TouchableOpacity>
         ))}
       </ScrollView>
-
-      {/* Palette preview */}
-      <View style={styles.paletteBar}>
-        {palette.map((c, i) => (
-          <View key={i} style={[styles.swatch, { backgroundColor: c }]} />
-        ))}
-      </View>
-
-      <View style={styles.hexRow}>
-        {palette.map((c, i) => (
-          <Text key={`t-${i}`} style={styles.hexText}>{c}</Text>
-        ))}
-      </View>
 
       {/* Save Button */}
       <TouchableOpacity style={styles.saveButton} onPress={openSaveModal}>
@@ -199,19 +264,58 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fafafa' },
   title: { fontSize: 28, fontWeight: '800', textAlign: 'center', marginTop: 20, color: '#222' },
   wheelWrap: { alignItems: 'center', marginTop: 20 },
-  inputRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 16 },
-  dot: { width: 36, height: 36, borderRadius: 18, marginRight: 10, borderWidth: 2, borderColor: '#fff' },
-  code: { fontFamily: 'Menlo', fontSize: 16, color: '#333' },
-  subtitle: { marginHorizontal: 20, marginTop: 20, fontSize: 16, fontWeight: '700', color: '#333' },
-  schemeRow: { paddingHorizontal: 16, marginTop: 10 },
+  
+  // Live Color Picker Styles
+  colorPickerSection: { marginHorizontal: 20, marginTop: 20 },
+  pickerLabel: { fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 12 },
+  colorPickerRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 8, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderColor: '#e0e0e0' },
+  colorDot: { width: 32, height: 32, borderRadius: 16, marginRight: 12, borderWidth: 2, borderColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.2, shadowRadius: 2, elevation: 2 },
+  hexInput: { flex: 1, fontSize: 16, fontFamily: 'Menlo', color: '#333', fontWeight: '500' },
+  
+  // Scheme Selector Styles
+  schemeSection: { marginHorizontal: 20, marginTop: 20, zIndex: 1000 },
+  schemeLabel: { fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 12 },
+  schemeDropdown: { backgroundColor: '#fff', borderRadius: 8, borderWidth: 1, borderColor: '#e0e0e0', position: 'relative' },
+  dropdownButton: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
+  dropdownText: { fontSize: 16, color: '#333', fontWeight: '500' },
+  dropdownArrow: { fontSize: 12, color: '#666', transform: [{ rotate: '0deg' }] },
+  dropdownArrowUp: { transform: [{ rotate: '180deg' }] },
+  dropdownOptions: { 
+    position: 'absolute', 
+    top: '100%', 
+    left: 0, 
+    right: 0, 
+    backgroundColor: '#fff', 
+    borderRadius: 8, 
+    borderWidth: 1, 
+    borderColor: '#e0e0e0', 
+    marginTop: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 5,
+    zIndex: 1001
+  },
+  dropdownOption: { paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  dropdownOptionActive: { backgroundColor: '#f8f9ff' },
+  dropdownOptionText: { fontSize: 16, color: '#333', fontWeight: '500' },
+  dropdownOptionTextActive: { color: '#5b5ce2', fontWeight: '600' },
+  
+  // Live Palette Preview Styles
+  palettePreview: { flexDirection: 'row', marginHorizontal: 20, marginTop: 20, height: 60, borderRadius: 8, overflow: 'hidden', backgroundColor: '#fff', borderWidth: 1, borderColor: '#e0e0e0' },
+  paletteColor: { flex: 1 },
+  
+  // Hex Values Display
+  hexValuesRow: { flexDirection: 'row', justifyContent: 'space-around', marginHorizontal: 20, marginTop: 8 },
+  hexValue: { fontFamily: 'Menlo', fontSize: 12, color: '#666', fontWeight: '500' },
+  
+  // Legacy scheme selection (hidden by default)
+  schemeRow: { paddingHorizontal: 16, marginTop: 10, display: 'none' },
   schemeBtn: { backgroundColor: '#fff', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18, marginRight: 10, borderWidth: 1.5, borderColor: '#e7e7e7' },
   schemeBtnActive: { backgroundColor: '#5b5ce2', borderColor: '#5b5ce2' },
   schemeText: { color: '#666', fontWeight: '700' },
   schemeTextActive: { color: '#fff' },
-  paletteBar: { flexDirection: 'row', height: 56, borderRadius: 8, overflow: 'hidden', margin: 20, backgroundColor: '#eee' },
-  swatch: { flex: 1 },
-  hexRow: { flexDirection: 'row', justifyContent: 'space-around', paddingHorizontal: 10 },
-  hexText: { fontFamily: 'Menlo', fontSize: 12, color: '#666', marginTop: 6 },
   
   // Save Button
   saveButton: {
