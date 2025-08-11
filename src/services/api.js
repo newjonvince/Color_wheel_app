@@ -62,7 +62,7 @@ export const blend = async (color1, color2, weight = 0.5) => {
 
 export const createColorMatch = async ({ base_color, scheme, colors, title, description, is_public }) => {
   const body = { base_color, scheme, colors, title, description, is_public };
-  const { data } = await api.post('/colors', body);
+  const { data } = await api.post('/colors/matches', body);
   return data; // { success, data: {...} }
 };
 

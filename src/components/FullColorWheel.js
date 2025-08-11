@@ -1,6 +1,7 @@
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
-import { View, PanResponder, StyleSheet } from 'react-native';
+import { View, PanResponder, StyleSheet, TouchableOpacity, Text, Alert } from 'react-native';
 import Svg, { Defs, RadialGradient, Stop, Path, Circle } from 'react-native-svg';
+import * as ImagePicker from 'expo-image-picker';
 
 /**
  * FullColorWheel
@@ -67,12 +68,62 @@ export default function FullColorWheel({
   initialHex = '#1ECB E1'.replace(' ', ''),
   onColorsChange,
   onHexChange,
+  onImageSelected, // New prop for image selection callback
 }) {
   const radius = size / 2;
   const innerR = radius - strokeWidth;
   const [baseAngle, setBaseAngle] = useState(() => hexToHsl(initialHex).h || 180);
   const [activeMarker, setActiveMarker] = useState(0);
   const layoutRef = useRef({ x: 0, y: 0 }); // top-left of wheel in screen coords
+
+  // Camera/Gallery functions
+  const openCamera = useCallback(async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Camera permission is required to take photos');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        onImageSelected && onImageSelected(result.assets[0]);
+      }
+    } catch (error) {
+      console.error('Camera error:', error);
+      Alert.alert('Error', 'Failed to open camera');
+    }
+  }, [onImageSelected]);
+
+  const openGallery = useCallback(async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Gallery permission is required to select photos');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        onImageSelected && onImageSelected(result.assets[0]);
+      }
+    } catch (error) {
+      console.error('Gallery error:', error);
+      Alert.alert('Error', 'Failed to open gallery');
+    }
+  }, [onImageSelected]);
 
   // markers are derived from baseAngle + scheme offsets
   const markers = useMemo(() => {
@@ -92,13 +143,19 @@ export default function FullColorWheel({
     });
   }, [baseAngle, scheme, radius, innerR, strokeWidth]);
 
-  // current palette from markers
+  // current palette from markers - memoized for performance
   const palette = useMemo(() => markers.map(m => m.color), [markers]);
+  const baseColor = useMemo(() => markers[0]?.color || initialHex, [markers, initialHex]);
 
+  // Throttled callbacks to reduce lag
   useEffect(() => {
-    onColorsChange && onColorsChange(palette);
-    onHexChange && onHexChange(markers[0]?.color || initialHex);
-  }, [palette]); // eslint-disable-line
+    const timeoutId = setTimeout(() => {
+      onColorsChange && onColorsChange(palette);
+      onHexChange && onHexChange(baseColor);
+    }, 16); // ~60fps throttling
+    
+    return () => clearTimeout(timeoutId);
+  }, [palette, baseColor, onColorsChange, onHexChange]);
 
   const pointToAngle = useCallback((px, py) => {
     const cx = radius;
@@ -211,8 +268,49 @@ export default function FullColorWheel({
           />
         ))}
       </Svg>
+
+      {/* Center Camera/Gallery Buttons */}
+      <View style={[styles.centerButtons, { 
+        left: radius - 40, 
+        top: radius - 40,
+        width: 80,
+        height: 80 
+      }]}>
+        <TouchableOpacity style={styles.centerButton} onPress={openCamera}>
+          <Text style={styles.centerButtonIcon}>📷</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.centerButton} onPress={openGallery}>
+          <Text style={styles.centerButtonIcon}>🖼️</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({});
+const styles = StyleSheet.create({
+  centerButtons: {
+    position: 'absolute',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  centerButton: {
+    width: 35,
+    height: 35,
+    borderRadius: 17.5,
+    backgroundColor: '#FFFFFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+    borderWidth: 2,
+    borderColor: '#f0f0f0',
+  },
+  centerButtonIcon: {
+    fontSize: 16,
+  },
+});

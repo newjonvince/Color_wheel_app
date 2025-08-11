@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions, ScrollView, Modal, TextInput, Alert } from 'react-native';
 import FullColorWheel from '../components/FullColorWheel';
+import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 import ApiService from '../services/api';
 
 const { width } = Dimensions.get('window');
@@ -22,6 +23,10 @@ export default function ColorWheelScreen() {
   
   // Scheme dropdown state
   const [showSchemeDropdown, setShowSchemeDropdown] = useState(false);
+  
+  // Image extractor state
+  const [showExtractor, setShowExtractor] = useState(false);
+  const [selectedImageUri, setSelectedImageUri] = useState(null);
 
   const onColorsChange = useCallback((colors) => setPalette(colors), []);
   const onHexChange = useCallback((hex) => setBaseHex(hex), []);
@@ -40,6 +45,31 @@ export default function ColorWheelScreen() {
         // The FullColorWheel will automatically update when baseHex changes
       }
     }
+  }, []);
+
+  // Handle image selection from camera/gallery
+  const handleImageSelected = useCallback((imageAsset) => {
+    console.log('Image selected:', imageAsset);
+    setSelectedImageUri(imageAsset.uri);
+    setShowExtractor(true);
+  }, []);
+
+  // Handle color extraction completion
+  const handleExtractorComplete = useCallback((result) => {
+    console.log('Extractor complete:', result);
+    if (result?.slots && result.slots.length > 0) {
+      // Update the palette with extracted colors
+      setPalette(result.slots);
+      setBaseHex(result.slots[0]);
+    }
+    setShowExtractor(false);
+    setSelectedImageUri(null);
+  }, []);
+
+  // Handle extractor close
+  const handleExtractorClose = useCallback(() => {
+    setShowExtractor(false);
+    setSelectedImageUri(null);
   }, []);
 
   // Save palette to backend
@@ -97,11 +127,11 @@ export default function ColorWheelScreen() {
       <View style={styles.wheelWrap}>
         <FullColorWheel
           size={WHEEL_SIZE}
-          strokeWidth={32}
           scheme={scheme}
           initialHex={baseHex}
           onColorsChange={onColorsChange}
           onHexChange={onHexChange}
+          onImageSelected={handleImageSelected}
         />
       </View>
 
@@ -184,9 +214,27 @@ export default function ColorWheelScreen() {
         ))}
       </ScrollView>
 
-      {/* Save Button */}
-      <TouchableOpacity style={styles.saveButton} onPress={openSaveModal}>
-        <Text style={styles.saveButtonText}>💾 Save Palette</Text>
+      {/* Current Palette Section - Matching your screenshot */}
+      <View style={styles.currentPaletteSection}>
+        <View style={styles.currentPaletteHeader}>
+          <Text style={styles.currentPaletteTitle}>Current Palette</Text>
+          <Text style={styles.currentPaletteCount}>{palette.length} colors</Text>
+        </View>
+        
+        <View style={styles.currentPaletteColors}>
+          {palette.map((color, index) => (
+            <View key={`current-${index}`} style={styles.currentColorItem}>
+              <View style={[styles.currentColorSwatch, { backgroundColor: color }]} />
+              <Text style={styles.currentColorHex}>{color}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+
+      {/* Floating Save Button - Lower Right */}
+      <TouchableOpacity style={styles.floatingSaveButton} onPress={openSaveModal}>
+        <Text style={styles.floatingSaveIcon}>💾</Text>
+        <Text style={styles.floatingSaveText}>Save</Text>
       </TouchableOpacity>
 
       {/* Save Modal */}
@@ -256,6 +304,18 @@ export default function ColorWheelScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Color Extractor Modal */}
+      {showExtractor && selectedImageUri && (
+        <Modal visible={showExtractor} animationType="slide" presentationStyle="fullScreen">
+          <CoolorsColorExtractor
+            initialImageUri={selectedImageUri}
+            initialSlots={5}
+            onComplete={handleExtractorComplete}
+            onClose={handleExtractorClose}
+          />
+        </Modal>
+      )}
     </ScrollView>
   );
 }
@@ -317,8 +377,96 @@ const styles = StyleSheet.create({
   schemeText: { color: '#666', fontWeight: '700' },
   schemeTextActive: { color: '#fff' },
   
-  // Save Button
+  // Current Palette Section - Matching screenshot
+  currentPaletteSection: { 
+    marginHorizontal: 20, 
+    marginTop: 30, 
+    marginBottom: 100, // Space for floating button
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  currentPaletteHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 16 
+  },
+  currentPaletteTitle: { 
+    fontSize: 18, 
+    fontWeight: '600', 
+    color: '#333' 
+  },
+  currentPaletteCount: { 
+    fontSize: 14, 
+    color: '#666', 
+    fontWeight: '500' 
+  },
+  currentPaletteColors: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    gap: 12 
+  },
+  currentColorItem: { 
+    alignItems: 'center', 
+    minWidth: 80 
+  },
+  currentColorSwatch: { 
+    width: 60, 
+    height: 60, 
+    borderRadius: 8, 
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  currentColorHex: { 
+    fontSize: 12, 
+    fontFamily: 'Menlo', 
+    color: '#666', 
+    fontWeight: '500' 
+  },
+  
+  // Floating Save Button - Lower Right
+  floatingSaveButton: {
+    position: 'absolute',
+    bottom: 30,
+    right: 20,
+    backgroundColor: '#007AFF',
+    borderRadius: 25,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    zIndex: 1000,
+  },
+  floatingSaveIcon: {
+    fontSize: 16,
+    marginRight: 6,
+  },
+  floatingSaveText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  
+  // Legacy Save Button (hidden)
   saveButton: {
+    display: 'none',
     backgroundColor: '#5b5ce2',
     marginHorizontal: 20,
     marginTop: 20,
