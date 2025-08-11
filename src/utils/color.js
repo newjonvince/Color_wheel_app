@@ -222,7 +222,7 @@ const SCHEME_OFFSETS_OKLCH = {
   monochromatic: [0],
 };
 
-const generateOklchScheme = (baseHex, type = 'analogous') => {
+export const generateOklchScheme = (baseHex, type = 'analogous') => {
   const { L, C, h } = hexToOklch(baseHex);
   const deltas = SCHEME_OFFSETS_OKLCH[type] || SCHEME_OFFSETS_OKLCH.analogous;
   const hues = deltas.map(d => (h + d + 360) % 360);
@@ -360,6 +360,3 @@ export const blendColors = (color1, color2, ratio) => {
 
   return `#${toHex(r)}${toHex(g)}${toHex(bb)}`;
 };
-
-// Export all needed functions for FullColorWheel and ColorWheelScreen
-export { generateOklchScheme, hexToOklch, oklchToHexClamped, contrastRatio, nearestAccessible };
