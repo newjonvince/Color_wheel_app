@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, FlatList, Dimensions, Alert, Modal, TextInput, ScrollView } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 import ApiService from '../services/api';
 import { getColorScheme as computeScheme } from '../utils/color';
 
@@ -31,6 +32,11 @@ export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch,
   const [colorMatches, setColorMatches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // New state for color extractor integration
+  const [showExtractor, setShowExtractor] = useState(false);
+  const [selectedImageUri, setSelectedImageUri] = useState(null);
+  const [extractedPalette, setExtractedPalette] = useState(null);
 
   // Load boards and color matches from database
   useEffect(() => {
@@ -102,19 +108,55 @@ export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch,
 
     if (result.canceled) return;
 
-    try {
-      // Placeholder dominant color selection — replace with your extractor when ready
-      const fallbackPalette = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'];
-      const baseColor = fallbackPalette[Math.floor(Math.random() * fallbackPalette.length)];
+    // NEW IDEAL FLOW: Open CoolorsColorExtractor for real color extraction
+    setSelectedImageUri(result.assets[0].uri);
+    setShowExtractor(true);
+    setShowUploadModal(false); // Close upload modal to show extractor
+  }, [currentUser]);
 
+  // Handle color extraction completion from CoolorsColorExtractor
+  const handleExtractorComplete = useCallback((result) => {
+    console.log('Extractor complete:', result);
+    if (result?.slots && result.slots.length > 0) {
+      // Store extracted palette for saving
+      setExtractedPalette(result.slots);
+      
+      // Reopen upload modal with extracted colors for final save
+      setShowExtractor(false);
+      setSelectedImageUri(null);
+      setShowUploadModal(true);
+    }
+  }, []);
+
+  // Handle extractor close without saving
+  const handleExtractorClose = useCallback(() => {
+    setShowExtractor(false);
+    setSelectedImageUri(null);
+    setExtractedPalette(null);
+  }, []);
+
+  // Save the extracted palette to the selected board/folder
+  const handleSaveExtractedPalette = useCallback(async () => {
+    if (!extractedPalette || extractedPalette.length === 0) {
+      Alert.alert('No Colors', 'Please extract colors from an image first.');
+      return;
+    }
+
+    try {
+      const baseColor = extractedPalette[0]; // Use first extracted color as base
       const colorMatch = {
         baseColor,
         scheme: uploadScheme,
         isPublic: uploadPrivacy === 'public',
-        colors: getColorScheme(baseColor, uploadScheme),
-        title: uploadTitle || 'Uploaded Color Match',
-        image: result.assets?.[0]?.uri,
-        metadata: { extractionMethod: 'upload', originalImage: result.assets?.[0]?.uri, uploadTitle },
+        colors: extractedPalette, // Use actual extracted colors
+        title: uploadTitle || 'Extracted Color Match',
+        image: selectedImageUri,
+        metadata: { 
+          extractionMethod: 'coolors_extractor', 
+          originalImage: selectedImageUri, 
+          uploadTitle,
+          extractedColors: extractedPalette.length
+        },
       };
 
       const response = await ApiService.createColorMatch(colorMatch);
@@ -129,14 +171,23 @@ export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch,
         privacy: uploadPrivacy,
       }, uploadScheme);
 
+      // Navigate to the specific board/folder after saving
+      if (uploadPrivacy === 'public') {
+        setSelectedMainFolder('public');
+      } else {
+        setSelectedMainFolder('private');
+      }
+      setSelectedSchemeFolder(uploadScheme);
+
       setShowUploadModal(false);
       setUploadTitle('');
+      setExtractedPalette(null);
       Alert.alert('Success!', `Color match saved to your ${uploadScheme} board!`);
     } catch (e) {
-      console.error('Error uploading color match:', e);
-      Alert.alert('Upload Failed', e?.message || 'Failed to save color match. Please try again.');
+      console.error('Error saving extracted palette:', e);
+      Alert.alert('Save Failed', e?.message || 'Failed to save color match. Please try again.');
     }
-  }, [currentUser, uploadScheme, uploadPrivacy, uploadTitle, getColorScheme, onSaveColorMatch]);
+  }, [extractedPalette, uploadScheme, uploadPrivacy, uploadTitle, selectedImageUri, onSaveColorMatch]);
 
   const renderBoardGrid = () => {
     // Show specific scheme folder content
@@ -345,7 +396,24 @@ export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch,
       <Modal visible={showUploadModal} transparent={true} animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Upload Color Match</Text>
+            <Text style={styles.modalTitle}>
+              {extractedPalette ? 'Save Extracted Palette' : 'Upload Color Match'}
+            </Text>
+            
+            {/* Show extracted colors preview */}
+            {extractedPalette && (
+              <View style={styles.extractedColorsPreview}>
+                <Text style={styles.extractedColorsLabel}>Extracted Colors:</Text>
+                <View style={styles.extractedColorsRow}>
+                  {extractedPalette.map((color, index) => (
+                    <View
+                      key={index}
+                      style={[styles.extractedColorSwatch, { backgroundColor: color }]}
+                    />
+                  ))}
+                </View>
+              </View>
+            )}
             
             <TextInput
               style={styles.titleInput}
@@ -413,14 +481,28 @@ export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch,
               </TouchableOpacity>
               <TouchableOpacity 
                 style={styles.uploadButton}
-                onPress={handleUploadImage}
+                onPress={extractedPalette ? handleSaveExtractedPalette : handleUploadImage}
               >
-                <Text style={styles.uploadButtonText}>📷 Upload Image</Text>
+                <Text style={styles.uploadButtonText}>
+                  {extractedPalette ? '💾 Save Palette' : '📷 Upload Image'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
+
+      {/* Color Extractor Modal */}
+      {showExtractor && selectedImageUri && (
+        <Modal visible={showExtractor} animationType="slide" presentationStyle="fullScreen">
+          <CoolorsColorExtractor
+            initialImageUri={selectedImageUri}
+            initialSlots={5}
+            onComplete={handleExtractorComplete}
+            onClose={handleExtractorClose}
+          />
+        </Modal>
+      )}
     </>
   );
 }
@@ -736,5 +818,38 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  // Extracted colors preview styles
+  extractedColorsPreview: {
+    marginBottom: 20,
+    padding: 15,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  extractedColorsLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 10,
+  },
+  extractedColorsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  extractedColorSwatch: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    marginHorizontal: 3,
+    borderWidth: 2,
+    borderColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
 });
