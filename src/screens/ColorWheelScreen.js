@@ -251,7 +251,7 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
     setAngle(hue);
     setIsColorLocked(true);
     setSelectedScheme('complementary'); // Default to complementary
-    setShowCoolorsExtractor(false);
+    setShowExtractor(false); // Fixed: was setShowCoolorsExtractor
     
     // Update markers with the new color
     updateColorMarkers(hue, extractedColor, activeMarkerId);
@@ -260,7 +260,7 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
   const handleCreateCollage = (image, baseColor) => {
     setCollageImage(image);
     setCollageBaseColor(baseColor);
-    setShowCoolorsExtractor(false);
+    setShowExtractor(false); // Fixed: was setShowCoolorsExtractor
     setShowCollageCreator(true);
   };
 

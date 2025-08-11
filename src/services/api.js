@@ -172,8 +172,14 @@ export const sampleImageColor = async (sessionToken, {
     const { data } = await api.post('/images/extract-sample', body, withAuthHeaders());
     return data;
   } catch (error) {
-    // Fallback to backend endpoint with normalized coordinates
-    const { data } = await api.post('/images/sample-color', body, withAuthHeaders());
+    // Fallback to backend endpoint with correct payload format
+    const backendBody = {
+      imageId: sessionToken, // Backend expects imageId instead of sessionToken
+      x: body.x,
+      y: body.y,
+      units: body.normalized ? 'normalized' : 'px'
+    };
+    const { data } = await api.post('/images/sample-color', backendBody, withAuthHeaders());
     return data;
   }
 };
@@ -186,8 +192,8 @@ export const closeImageExtractSession = async (sessionId) => {
     const { data } = await api.post(`/images/extract-session/${encodeURIComponent(sessionId)}/close`, {}, withAuthHeaders());
     return data;
   } catch (error) {
-    // Fallback to backend endpoint
-    const { data } = await api.post('/images/close-session', { sessionId }, withAuthHeaders());
+    // Fallback to backend endpoint with correct payload format
+    const { data } = await api.post('/images/close-session', { imageId: sessionId }, withAuthHeaders());
     return data;
   }
 };

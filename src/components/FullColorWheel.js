@@ -4,7 +4,26 @@ import * as ImagePicker from 'expo-image-picker';
 import { View, StyleSheet } from 'react-native';
 import Animated, { useSharedValue, useDerivedValue, useAnimatedStyle, withTiming, runOnJS, useAnimatedReaction } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { Canvas, Circle as SkiaCircle, SweepGradient, vec, Paint, Path } from '@shopify/react-native-skia';
+// Safe Skia import with fallback
+let Canvas, SkiaCircle, SweepGradient, vec, Paint, Path;
+try {
+  const SkiaModule = require('@shopify/react-native-skia');
+  Canvas = SkiaModule.Canvas;
+  SkiaCircle = SkiaModule.Circle;
+  SweepGradient = SkiaModule.SweepGradient;
+  vec = SkiaModule.vec;
+  Paint = SkiaModule.Paint;
+  Path = SkiaModule.Path;
+} catch (error) {
+  console.warn('Skia not available, using fallback rendering');
+  // Fallback components
+  Canvas = View;
+  SkiaCircle = () => null;
+  SweepGradient = () => null;
+  vec = () => null;
+  Paint = () => null;
+  Path = () => null;
+}
 import Svg, { Circle, Path as SvgPath } from 'react-native-svg';
 import { generateOklchScheme, hexToOklch, oklchToHexClamped } from '../utils/color';
 
