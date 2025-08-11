@@ -93,7 +93,7 @@
       "eas": {
         "projectId": "6e03a055-6c53-4d35-b62f-8472a8cae381"
       },
-      "API_URL": "https://colorwheelapp-production.up.railway.app"
+      "EXPO_PUBLIC_API_BASE_URL": "https://colorwheelapp-production.up.railway.app/api"
     }
   }
 }

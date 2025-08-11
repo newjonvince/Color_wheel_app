@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import ApiService, { login as directLogin } from '../services/api';
+import ApiService from '../services/api';
 
 export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
   const [email, setEmail] = useState('');
@@ -10,11 +10,16 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
   const [loading, setLoading] = useState(false);
 
   const saveSession = useCallback(async ({ user, token }) => {
-    // Persist only non-sensitive user profile in AsyncStorage
-    await AsyncStorage.setItem('userData', JSON.stringify(user));
-    await AsyncStorage.setItem('isLoggedIn', 'true');
-    // Store token securely
-    if (token) await SecureStore.setItemAsync('authToken', token, { keychainService: 'fashioncolorwheel.auth' });
+    try {
+      await AsyncStorage.setItem('userData', JSON.stringify(user));
+      await AsyncStorage.setItem('isLoggedIn', 'true');
+      if (token) {
+        await SecureStore.setItemAsync('authToken', token, { keychainService: 'fashioncolorwheel.auth' });
+        ApiService.setToken(token); // keep axios authorized for subsequent calls
+      }
+    } catch (e) {
+      console.warn('Failed to persist session:', e?.message);
+    }
   }, []);
 
   const validate = () => {
@@ -35,47 +40,30 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
   };
 
   const handleLogin = useCallback(async () => {
-    if (!validate()) return;
-    if (loading) return; // guard against rapid taps
+    if (!validate() || loading) return;
     setLoading(true);
-    
-    // Debug logging to identify the issue
-    console.log('🔍 Debug - ApiService:', ApiService);
-    console.log('🔍 Debug - ApiService.login:', ApiService.login);
-    console.log('🔍 Debug - typeof ApiService.login:', typeof ApiService.login);
-    
+
     try {
-      let response;
-      
-      // Try ApiService.login first, fallback to direct import
-      if (typeof ApiService.login === 'function') {
-        console.log('✅ Using ApiService.login');
-        response = await ApiService.login(email.trim(), password);
-      } else if (typeof directLogin === 'function') {
-        console.log('⚠️ ApiService.login not available, using direct import');
-        response = await directLogin(email.trim(), password);
-      } else {
-        throw new Error('No login function available. Both ApiService.login and directLogin are undefined.');
-      }
-      if (response?.success && response?.user) {
-        await saveSession({ user: response.user, token: response.token });
-        onLoginSuccess?.(response.user);
-      } else {
-        const msg = response?.message || 'Invalid email or password.';
+      const response = await ApiService.login(email.trim(), password);
+
+      // Accept common backend shapes
+      const user = response?.user || response?.data?.user;
+      const token = response?.token || response?.data?.token || response?.accessToken;
+
+      if (!user || !token) {
+        const msg = response?.message || 'Server did not return user/token.';
         Alert.alert('Login Failed', msg);
+        return;
       }
+
+      await saveSession({ user, token });
+      onLoginSuccess?.(user);
     } catch (err) {
       console.error('Login error:', err);
-      console.error('Error details:', {
-        name: err?.name,
-        message: err?.message,
-        stack: err?.stack
-      });
-      
       const msg =
-        (err?.name === 'TypeError' && /Network/i.test(String(err))) ? 
-          'Unable to reach the server. Check your internet connection and try again.' :
-        err?.message || 'Something went wrong. Please try again.';
+        err?.response?.data?.message ||
+        err?.message ||
+        'Something went wrong. Please try again.';
       Alert.alert('Login Error', msg);
     } finally {
       setLoading(false);
@@ -86,51 +74,52 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
     if (loading) return;
     setLoading(true);
     try {
-      // Try server-controlled demo login first
-      try {
-        if (ApiService.demoLogin && typeof ApiService.demoLogin === 'function') {
-          const response = await ApiService.demoLogin();
-          if (response?.success && response?.user) {
-            await saveSession({ user: response.user, token: response.token });
-            onLoginSuccess?.(response.user);
-            return;
-          }
-        }
-      } catch (serverError) {
-        console.log('Server demo login failed, using local fallback:', serverError.message);
-      }
+      const response = await ApiService.demoLogin();
+      const user = response?.user;
+      const token = response?.token;
       
-      // Local demo user fallback
-      const demoUser = {
-        id: 'demo-user',
-        email: 'demo@fashioncolorwheel.com',
-        username: 'demo_user',
-        location: 'United States',
-        birthday: { month: 'January', day: '1', year: '1990' },
-        gender: 'Prefer not to say',
-        isLoggedIn: true,
-        createdAt: new Date().toISOString(),
-        demo: true,
-      };
-      await AsyncStorage.setItem('userData', JSON.stringify(demoUser));
-      await AsyncStorage.setItem('isLoggedIn', 'true');
-      onLoginSuccess?.(demoUser);
+      if (user && token) {
+        await saveSession({ user, token });
+        onLoginSuccess?.(user);
+      } else {
+        // Local fallback if backend demo login fails
+        const demoUser = {
+          id: 'demo-user',
+          email: 'demo@fashioncolorwheel.com',
+          username: 'demo_user',
+          location: 'United States',
+          birthday: { month: 'January', day: '1', year: '1990' },
+          gender: 'Prefer not to say',
+          isLoggedIn: true,
+          createdAt: new Date().toISOString(),
+          demo: true,
+        };
+        await AsyncStorage.setItem('userData', JSON.stringify(demoUser));
+        await AsyncStorage.setItem('isLoggedIn', 'true');
+        onLoginSuccess?.(demoUser);
+      }
     } catch (err) {
       console.error('Demo login error:', err);
-      const demoUser = {
-        id: 'demo-user',
-        email: 'demo@fashioncolorwheel.com',
-        username: 'demo_user',
-        location: 'United States',
-        birthday: { month: 'January', day: '1', year: '1990' },
-        gender: 'Prefer not to say',
-        isLoggedIn: true,
-        createdAt: new Date().toISOString(),
-        demo: true,
-      };
-      await AsyncStorage.setItem('userData', JSON.stringify(demoUser));
-      await AsyncStorage.setItem('isLoggedIn', 'true');
-      onLoginSuccess?.(demoUser);
+      // Fallback to local demo if backend fails
+      try {
+        const demoUser = {
+          id: 'demo-user',
+          email: 'demo@fashioncolorwheel.com',
+          username: 'demo_user',
+          location: 'United States',
+          birthday: { month: 'January', day: '1', year: '1990' },
+          gender: 'Prefer not to say',
+          isLoggedIn: true,
+          createdAt: new Date().toISOString(),
+          demo: true,
+        };
+        await AsyncStorage.setItem('userData', JSON.stringify(demoUser));
+        await AsyncStorage.setItem('isLoggedIn', 'true');
+        onLoginSuccess?.(demoUser);
+      } catch (fallbackErr) {
+        console.error('Demo fallback error:', fallbackErr);
+        Alert.alert('Demo Login Error', 'Failed to start demo. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -165,7 +154,6 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
           textContentType="emailAddress"
           autoComplete="email"
           returnKeyType="next"
-          onSubmitEditing={() => { /* focus password input via ref if desired */ }}
           accessibilityLabel="Email input"
           testID="email-input"
         />
@@ -227,22 +215,12 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#D8C7DD', paddingHorizontal: 20 },
   header: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60 },
-  logoContainer: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  logoImage: {
-    width: 120,
-    height: 120,
-    marginBottom: 10,
-  },
+  logoContainer: { alignItems: 'center', marginBottom: 20 },
+  logoImage: { width: 120, height: 120, marginBottom: 10 },
   title: { fontSize: 28, fontWeight: 'bold', color: '#333', marginBottom: 10, textAlign: 'center' },
   subtitle: { fontSize: 16, color: '#666', textAlign: 'center', marginBottom: 40 },
   form: { flex: 1, justifyContent: 'center' },
-  input: {
-    borderWidth: 1, borderColor: '#ddd', borderRadius: 25, paddingHorizontal: 20, paddingVertical: 15,
-    fontSize: 16, backgroundColor: '#f9f9f9', marginBottom: 15,
-  },
+  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 25, paddingHorizontal: 20, paddingVertical: 15, fontSize: 16, backgroundColor: '#f9f9f9', marginBottom: 15 },
   loginButton: { backgroundColor: '#e60023', paddingVertical: 18, borderRadius: 25, alignItems: 'center', marginTop: 10 },
   loginButtonDisabled: { opacity: 0.6 },
   loginButtonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },

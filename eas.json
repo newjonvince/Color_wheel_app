@@ -8,7 +8,7 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "API_URL": "http://192.168.1.209:3000"
+        "EXPO_PUBLIC_API_BASE_URL": "https://colorwheelapp-production.up.railway.app/api"
       }
     },
     "preview": {
@@ -17,14 +17,14 @@
         "simulator": true
       },
       "env": {
-        "API_URL": "http://192.168.1.209:3000"
+        "EXPO_PUBLIC_API_BASE_URL": "https://colorwheelapp-production.up.railway.app/api"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
         "NODE_ENV": "production",
-        "API_URL": "https://colorwheelapp-production.up.railway.app"
+        "EXPO_PUBLIC_API_BASE_URL": "https://colorwheelapp-production.up.railway.app/api"
       }
     }
   },
