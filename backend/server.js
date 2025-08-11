@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
+const logger = require('./utils/logger');
 const authRoutes = require('./routes/auth');
 const { router: colorRoutes } = require('./routes/colors');
 const boardRoutes = require('./routes/boards');
@@ -97,12 +98,14 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Request logging middleware for debugging
+// Request logging middleware - production-safe
 app.use('/api', (req, res, next) => {
-  console.log(`🔍 API Request: ${req.method} ${req.originalUrl} from ${req.ip}`);
-  console.log(`🔍 Headers:`, JSON.stringify(req.headers, null, 2));
-  if (req.body && Object.keys(req.body).length > 0) {
-    console.log(`🔍 Body:`, JSON.stringify(req.body, null, 2));
+  // Only log in development or rate-limited in production
+  if (process.env.NODE_ENV === 'development') {
+    logger.debug(`API Request: ${req.method} ${req.originalUrl} from ${req.ip}`);
+  } else {
+    // Rate-limited logging in production to prevent Railway 500 logs/sec limit
+    logger.rateLimited('api-requests', `${req.method} ${req.originalUrl}`);
   }
   next();
 });
