@@ -38,12 +38,12 @@ function oklabToRgbS(L,a,b){ const l_=Math.pow(L+0.3963377774*a+0.2158037573*b,3
   return {r:linearToSrgb(R), g:linearToSrgb(G), b:linearToSrgb(B)}; }
 function oklabToOklchS(L,a,b){ const C=Math.sqrt(a*a+b*b); let h=Math.atan2(b,a)*180/Math.PI; if(h<0) h+=360; return {L,C,h}; }
 function oklchToOklabS(L,C,h){ const hr=h*Math.PI/180; return {L, a:C*Math.cos(hr), b:C*Math.sin(hr)}; }
-function hexToOklchS(hex){ const {r,g,b}=hexToRgbS(hex); const {L,a,b:bb}=rgbToOklabS(r,g,b); return oklabToOklchS(L,a,bb); }
+function hexToOklchS(hex){ const {r,g,b}=hexToRgbS(hex); const {L,a,b:bVal}=rgbToOklabS(r,g,b); return oklabToOklchS(L,a,bVal); }
 function oklchToHexClampedS(L,C,h,iter=20){ let lo=0,hi=C,best=null;
-  for(let i=0;i<iter;i++){ const mid=(lo+hi)/2; const {a,b}=oklchToOklabS(L,mid,h); const {r,g,b:bb}=oklabToRgbS(L,a,b);
-    const ok=r>=0&&r<=255&&g>=0&&g<=255&&bb>=0&&bb<=255;
-    if(ok){ best={r,g,b:bb}; lo=mid; } else { hi=mid; } }
-  if(!best){ const {a,b}=oklchToOklabS(L,0,h); const {r,g,b:bb}=oklabToRgbS(L,a,b); return rgbToHexS(r,g,bb); }
+  for(let i=0;i<iter;i++){ const mid=(lo+hi)/2; const {a,b:bLab}=oklchToOklabS(L,mid,h); const {r,g,b:bRgb}=oklabToRgbS(L,a,bLab);
+    const ok=r>=0&&r<=255&&g>=0&&g<=255&&bRgb>=0&&bRgb<=255;
+    if(ok){ best={r,g,b:bRgb}; lo=mid; } else { hi=mid; } }
+  if(!best){ const {a,b:bLab2}=oklchToOklabS(L,0,h); const {r,g,b:bRgb2}=oklabToRgbS(L,a,bLab2); return rgbToHexS(r,g,bRgb2); }
   return rgbToHexS(best.r,best.g,best.b); }
 const OFFSETS_OKLCH_S = { analogous:[0,30,-30], complementary:[0,180], triadic:[0,120,240], tetradic:[0,90,180,270], 'split-complementary':[0,150,-150], monochromatic:[0] };
 function generateOklchSchemeS(baseHex, type='analogous'){ const {L,C,h}=hexToOklchS(baseHex);
