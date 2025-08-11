@@ -1,13 +1,11 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
-const logger = require('./utils/logger');
 const authRoutes = require('./routes/auth');
-const { router: colorRoutes } = require('./routes/colors');
+const colorRoutes = require('./routes/colors');
 const boardRoutes = require('./routes/boards');
 const userRoutes = require('./routes/users');
 const communityRoutes = require('./routes/community');
@@ -23,9 +21,6 @@ app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet());
-
-// Response compression for better performance
-app.use(compression());
 
 // CORS configuration - safe parsing + TestFlight/Expo web support
 const parseOrigins = (raw) =>
@@ -48,9 +43,6 @@ const corsOptions = {
   },
   credentials: true,
   optionsSuccessStatus: 200,
-  // Explicitly allow headers needed for image uploads
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions)); // handle preflight everywhere
@@ -90,29 +82,21 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health check endpoint - enhanced for Railway debugging
+// Health check endpoint
 app.get('/health', (req, res) => {
-  console.log('🏥 Health check requested from:', req.ip);
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
-    service: 'Fashion Color Wheel API',
-    version: '1.0.0',
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV || 'development',
-    port: PORT,
-    host: HOST || '0.0.0.0'
+    service: 'Fashion Color Wheel API'
   });
 });
 
-// Request logging middleware - production-safe
+// Request logging middleware for debugging
 app.use('/api', (req, res, next) => {
-  // Only log in development or rate-limited in production
-  if (process.env.NODE_ENV === 'development') {
-    logger.debug(`API Request: ${req.method} ${req.originalUrl} from ${req.ip}`);
-  } else {
-    // Rate-limited logging in production to prevent Railway 500 logs/sec limit
-    logger.rateLimited('api-requests', `${req.method} ${req.originalUrl}`);
+  console.log(`🔍 API Request: ${req.method} ${req.originalUrl} from ${req.ip}`);
+  console.log(`🔍 Headers:`, JSON.stringify(req.headers, null, 2));
+  if (req.body && Object.keys(req.body).length > 0) {
+    console.log(`🔍 Body:`, JSON.stringify(req.body, null, 2));
   }
   next();
 });
@@ -149,16 +133,14 @@ app.use((err, req, res, next) => {
 });
 
 // Start server with graceful shutdown (Railway)
-// CRITICAL: Bind to 0.0.0.0 for Railway health checks to work
-const HOST = process.env.HOST || '0.0.0.0';
-const server = app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, () => {
   console.log('// Fashion Color Wheel Backend Server');
   console.log('// Production-ready Express.js API with MySQL, authentication, and rate limiting');
   console.log('// Updated: All Railway deployment warnings fixed');
   console.log('📱 Environment:', process.env.NODE_ENV);
-  console.log('🔗 Health check: http://' + HOST + ':' + PORT + '/health');
+  console.log('🔗 Health check: http://localhost:' + PORT + '/health');
   console.log('✨ All warnings fixed - clean deployment!');
-  console.log(`🚀 API up on ${HOST}:${PORT}`);
+  console.log(`🚀 API up on ${PORT}`);
   
   // Initialize database tables asynchronously (non-blocking with timeout)
   const dbInitTimeout = setTimeout(() => {

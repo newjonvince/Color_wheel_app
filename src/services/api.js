@@ -10,10 +10,9 @@ import axios from 'axios';
  * --------------------------------------------------------------------- */
 const RAW_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || '').replace(/\/$/, '');
 const API_BASE_URL = RAW_BASE || 'https://colorwheelapp-production.up.railway.app';
-const API_PREFIX = (process.env.EXPO_PUBLIC_API_PREFIX || '/api').replace(/\/$/, '');
 
 const api = axios.create({
-  baseURL: `${API_BASE_URL}${API_PREFIX}`,
+  baseURL: `${API_BASE_URL}/api`,
   timeout: 25000,
   headers: { 'Content-Type': 'application/json' },
   withCredentials: false,
