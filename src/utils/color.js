@@ -26,7 +26,7 @@ const normalizeHex = (hex) => {
 };
 
 // -------------------------------- conversions --------------------------------
-export const hslToHex = (h, s, l) => {
+const hslToHex = (h, s, l) => {
   h = ((h % 360) + 360) % 360;
   s = clamp(s, 0, 100);
   l = clamp(l, 0, 100);
@@ -41,7 +41,7 @@ export const hslToHex = (h, s, l) => {
   return `#${f(0)}${f(8)}${f(4)}`;
 };
 
-export const hexToRgb = (hex) => {
+const hexToRgb = (hex) => {
   const h = normalizeHex(hex);
   const r = parseInt(h.slice(1, 3), 16);
   const g = parseInt(h.slice(3, 5), 16);
@@ -49,10 +49,10 @@ export const hexToRgb = (hex) => {
   return { r, g, b };
 };
 
-export const rgbToHex = ({ r, g, b }) =>
+const rgbToHex = ({ r, g, b }) =>
   `#${toHex(clamp(r, 0, 255))}${toHex(clamp(g, 0, 255))}${toHex(clamp(b, 0, 255))}`;
 
-export const hexToHsl = (hex) => {
+const hexToHsl = (hex) => {
   const { r, g, b } = hexToRgb(hex);
   const rn = r / 255, gn = g / 255, bn = b / 255;
 
@@ -76,28 +76,28 @@ export const hexToHsl = (hex) => {
 };
 
 // --------------------------------- geometry ----------------------------------
-export const normalizeAngle = (angle) => {
+const normalizeAngle = (angle) => {
   let a = angle;
   while (a < 0) a += 360;
   while (a >= 360) a -= 360;
   return a;
 };
 
-export const angleToPosition = (angle, radius, centerX, centerY) => {
+const angleToPosition = (angle, radius, centerX, centerY) => {
   const radians = (angle - 90) * (Math.PI / 180);
   return { x: centerX + radius * Math.cos(radians), y: centerY + radius * Math.sin(radians) };
 };
 
-export const positionToAngle = (x, y, centerX, centerY) => {
+const positionToAngle = (x, y, centerX, centerY) => {
   let angle = Math.atan2(y - centerY, x - centerX) * (180 / Math.PI);
   angle += 90;
   return normalizeAngle(angle);
 };
 
-export const calculateDistance = (x1, y1, x2, y2) => Math.hypot(x2 - x1, y2 - y1);
+const calculateDistance = (x1, y1, x2, y2) => Math.hypot(x2 - x1, y2 - y1);
 
 // --------------------------- WCAG luminance/contrast -------------------------
-export const relativeLuminance = (hex) => {
+const relativeLuminance = (hex) => {
   const { r, g, b } = hexToRgb(hex);
   const srgb = [r, g, b].map(v => v / 255).map(c =>
     c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
@@ -105,14 +105,14 @@ export const relativeLuminance = (hex) => {
   return 0.2126 * srgb[0] + 0.7152 * srgb[1] + 0.0722 * srgb[2];
 };
 
-export const contrastRatio = (hex1, hex2) => {
+const contrastRatio = (hex1, hex2) => {
   const L1 = relativeLuminance(hex1);
   const L2 = relativeLuminance(hex2);
   const [bright, dark] = L1 > L2 ? [L1, L2] : [L2, L1];
   return (bright + 0.05) / (dark + 0.05);
 };
 
-export const getContrastingTextColor = (hexColor) =>
+const getContrastingTextColor = (hexColor) =>
   contrastRatio(normalizeHex(hexColor), '#000000') >= 4.5 ? '#000000' : '#FFFFFF';
 
 
@@ -127,7 +127,7 @@ const _linearToSrgb = (c) => {
   return Math.min(255, Math.max(0, Math.round(v * 255)));
 };
 
-export const rgbToOklab = (r, g, b) => {
+const rgbToOklab = (r, g, b) => {
   const R = _srgbToLinear(r);
   const G = _srgbToLinear(g);
   const B = _srgbToLinear(b);
@@ -143,7 +143,7 @@ export const rgbToOklab = (r, g, b) => {
   return { L, a, b: b2 };
 };
 
-export const oklabToRgb = (L, a, b2) => {
+const oklabToRgb = (L, a, b2) => {
   const l_ = Math.pow(L + 0.3963377774 * a + 0.2158037573 * b2, 3);
   const m_ = Math.pow(L - 0.1055613458 * a - 0.0638541728 * b2, 3);
   const s_ = Math.pow(L - 0.0894841775 * a - 1.2914855480 * b2, 3);
@@ -153,26 +153,26 @@ export const oklabToRgb = (L, a, b2) => {
   return { r: _linearToSrgb(R), g: _linearToSrgb(G), b: _linearToSrgb(B) };
 };
 
-export const oklabToOklch = (L, a, b) => {
+const oklabToOklch = (L, a, b) => {
   const C = Math.sqrt(a*a + b*b);
   let h = Math.atan2(b, a) * 180 / Math.PI;
   if (h < 0) h += 360;
   return { L, C, h };
 };
-export const oklchToOklab = (L, C, h) => {
+const oklchToOklab = (L, C, h) => {
   const hr = (h * Math.PI) / 180;
   const a = C * Math.cos(hr);
   const b = C * Math.sin(hr);
   return { L, a, b };
 };
 
-export const hexToOklch = (hex) => {
+const hexToOklch = (hex) => {
   const { r,g,b } = hexToRgb(hex);
   const { L,a,b:bb } = rgbToOklab(r,g,b);
   return oklabToOklch(L,a,bb);
 };
 
-export const oklchToHexClamped = (L, C, h, maxIterations = 20) => {
+const oklchToHexClamped = (L, C, h, maxIterations = 20) => {
   let lo = 0, hi = C, best = null;
   for (let i=0;i<maxIterations;i++) {
     const mid = (lo + hi) / 2;
@@ -189,7 +189,7 @@ export const oklchToHexClamped = (L, C, h, maxIterations = 20) => {
   return rgbToHex(best);
 };
 
-export const nearestAccessible = (hexBg, hexFg, target = 4.5) => {
+const nearestAccessible = (hexBg, hexFg, target = 4.5) => {
   const fg = hexToOklch(hexFg);
   let L = fg.L;
   const step = 0.01;
@@ -222,7 +222,7 @@ const SCHEME_OFFSETS_OKLCH = {
   monochromatic: [0],
 };
 
-export const generateOklchScheme = (baseHex, type = 'analogous') => {
+const generateOklchScheme = (baseHex, type = 'analogous') => {
   const { L, C, h } = hexToOklch(baseHex);
   const deltas = SCHEME_OFFSETS_OKLCH[type] || SCHEME_OFFSETS_OKLCH.analogous;
   const hues = deltas.map(d => (h + d + 360) % 360);
@@ -231,7 +231,7 @@ export const generateOklchScheme = (baseHex, type = 'analogous') => {
 };
 // ======================= end OKLab / OKLCH + WCAG upgrades =====================
 // ----------------------------- schemes/markers -------------------------------
-export const getColorScheme = (baseColor, scheme, baseAngle) => {
+const getColorScheme = (baseColor, scheme, baseAngle) => {
   const baseHex = normalizeHex(baseColor);
   const { L, C, h } = hexToOklch(baseHex);
   const angle = typeof baseAngle === 'number' ? baseAngle : h;
@@ -266,7 +266,7 @@ export const getColorScheme = (baseColor, scheme, baseAngle) => {
 /**
  * Calculate marker positions for multi-marker color schemes
  */
-export const calculateMarkerPositions = (scheme, baseAngle, activeMarkerId = 1) => {
+const calculateMarkerPositions = (scheme, baseAngle, activeMarkerId = 1) => {
   const a = normalizeAngle(baseAngle);
   const mk = (id, ang, s = 100, l = 50) => ({
     id, angle: normalizeAngle(ang), color: hslToHex(normalizeAngle(ang), s, l), isActive: activeMarkerId === id
@@ -291,7 +291,7 @@ export const calculateMarkerPositions = (scheme, baseAngle, activeMarkerId = 1) 
 /**
  * Update marker positions when one marker is moved
  */
-export const updateMarkerPositions = (currentMarkers, activeMarkerId, newAngle, scheme) => {
+const updateMarkerPositions = (currentMarkers, activeMarkerId, newAngle, scheme) => {
   if (scheme === 'freestyle') {
     return currentMarkers.map(m =>
       m.id === activeMarkerId ? { ...m, angle: newAngle, color: hslToHex(newAngle, 100, 50) } : m
@@ -325,12 +325,12 @@ export const updateMarkerPositions = (currentMarkers, activeMarkerId, newAngle, 
 /**
  * Check if a point is within the color wheel ring
  */
-export const isPointInColorWheelRing = (x, y, centerX, centerY, outerRadius, innerRadius) => {
+const isPointInColorWheelRing = (x, y, centerX, centerY, outerRadius, innerRadius) => {
   const d = calculateDistance(x, y, centerX, centerY);
   return d >= innerRadius && d <= outerRadius;
 };
 
-export const generateColorWheelPath = (radius, strokeWidth) => {
+const generateColorWheelPath = (radius, strokeWidth) => {
   const outer = radius;
   const inner = radius - strokeWidth;
   return `
