@@ -41,8 +41,10 @@ const speedLimiter = slowDown({
 
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  skip: skipHealthAndPreflight,
+  max: 500, // Increased limit: 500 requests per windowMs for better UX
+  skip: (req) => {
+    return skipHealthAndPreflight(req) || (process.env.NODE_ENV === 'development' && req.user);
+  },
   handler: (req, res) => {
     res.status(429).json({
       error: 'Too many requests',
