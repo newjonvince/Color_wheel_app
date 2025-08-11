@@ -24,7 +24,6 @@ import Animated, {
   runOnJS,
   withSpring,
 } from 'react-native-reanimated';
-import AdvancedColorWheel from '../components/AdvancedColorWheel';
 import FullColorWheel from '../components/FullColorWheel';
 import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 import ColorCollageCreator from '../components/ColorCollageCreator';
