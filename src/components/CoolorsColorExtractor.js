@@ -79,11 +79,14 @@ export default function CoolorsColorExtractor({ initialImageUri, onColorExtracte
   const processImage = useCallback(async (asset) => {
     setIsLoading(true);
     try {
+      console.log('CoolorsColorExtractor: Setting selected image:', asset);
       setSelectedImage(asset);
       const { dominant, palette: srvPalette } = await callServerExtract(asset.uri);
       setPalette(Array.isArray(srvPalette) && srvPalette.length ? srvPalette : fallbackPalette);
       setExtractedColor(dominant || fallbackPalette[0]);
+      console.log('CoolorsColorExtractor: Image processed successfully, palette:', srvPalette?.length || 0, 'colors');
     } catch (e) {
+      console.error('CoolorsColorExtractor: Error processing image:', e);
       setPalette(fallbackPalette);
       setExtractedColor(fallbackPalette[0]);
     } finally {
@@ -114,6 +117,8 @@ export default function CoolorsColorExtractor({ initialImageUri, onColorExtracte
     mounted.current = true;
     (async () => {
       if (initialImageUri) {
+        // Ensure we process the initial image properly
+        console.log('CoolorsColorExtractor: Processing initial image:', initialImageUri);
         await processImage({ uri: initialImageUri });
       } else {
         await pickImage();
@@ -230,6 +235,13 @@ export default function CoolorsColorExtractor({ initialImageUri, onColorExtracte
                 style={styles.image}
                 resizeMode="contain"
                 onLayout={onImageLayout}
+                onError={(error) => {
+                  console.error('CoolorsColorExtractor: Image load error:', error);
+                  Alert.alert('Image Error', 'Failed to load the selected image. Please try again.');
+                }}
+                onLoad={() => {
+                  console.log('CoolorsColorExtractor: Image loaded successfully');
+                }}
               />
               {/* magnifier stays positioned in image coordinates */}
               <View

@@ -213,6 +213,8 @@ export default function SignUpScreen({ onSignUpComplete, onBack }) {
         
         if (response.token) {
           await saveToken(response.token);
+          // Set token in ApiService for authenticated requests
+          ApiService.setToken(response.token);
         }  
         setCurrentStep(SIGNUP_STEPS.COMPLETE);
         

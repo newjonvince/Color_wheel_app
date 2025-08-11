@@ -97,8 +97,15 @@ const getColorMatches = async () => {
 };
 
 const createColorMatch = async (colorData) => {
-  const { data } = await api.post('/colors', colorData);
-  return data;
+  const { data } = await api.post('/colors/matches', colorData);
+  return data.data; // Return the actual color match data
+};
+
+const getUserColorMatches = async (limit = 50, offset = 0) => {
+  const { data } = await api.get('/colors/matches', { 
+    params: { limit, offset } 
+  });
+  return data.data; // Return the array of color matches
 };
 
 // ---- Community ------------------------------------------------------------
@@ -147,7 +154,7 @@ const ApiService = {
   // user
   getUserProfile, updateUserProfile,
   // colors
-  getColorMatches, createColorMatch,
+  getColorMatches, createColorMatch, getUserColorMatches,
   // community
   getCommunityPosts, followUser, unfollowUser, likePost, unlikePost,
   // images
@@ -174,6 +181,7 @@ export {
   updateUserProfile,
   getColorMatches,
   createColorMatch,
+  getUserColorMatches,
   getCommunityPosts,
   followUser,
   unfollowUser,

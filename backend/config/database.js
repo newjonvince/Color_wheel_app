@@ -151,12 +151,29 @@ async function initializeTables() {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (following_id) REFERENCES users(id) ON DELETE CASCADE,
-        UNIQUE KEY unique_follow (follower_id, following_id),
-        INDEX idx_follower (follower_id),
-        INDEX idx_following (following_id)
+        UNIQUE KEY unique_follow (follower_id, following_id)
       )
     `);
-    
+
+    // Create color_matches table for saving palettes
+    await query(`
+      CREATE TABLE IF NOT EXISTS color_matches (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id VARCHAR(36) NOT NULL,
+        base_color VARCHAR(7) NOT NULL,
+        scheme VARCHAR(50) NOT NULL,
+        colors JSON NOT NULL,
+        title VARCHAR(255),
+        description TEXT,
+        is_public BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_user_created (user_id, created_at),
+        INDEX idx_public_created (is_public, created_at)
+      )
+    `);
+
     console.log('✅ Database tables initialized successfully');
   } catch (error) {
     console.error('❌ Database table initialization error:', error.message);

@@ -233,8 +233,30 @@ export default function App() {
 
   const loadSavedColorMatches = useCallback(async (key) => {
     try {
+      console.log('App: Loading saved color matches for user');
+      
+      // Try to load from backend first
+      try {
+        const backendMatches = await ApiService.getUserColorMatches();
+        console.log('App: Loaded', backendMatches?.length || 0, 'color matches from backend');
+        setSavedColorMatches(backendMatches || []);
+        
+        // Also save to local storage as backup
+        if (backendMatches?.length > 0) {
+          await AsyncStorage.setItem(key, JSON.stringify(backendMatches));
+        }
+        
+        return;
+      } catch (backendError) {
+        console.warn('Backend load failed, falling back to local storage:', backendError);
+      }
+      
+      // Fallback to local storage
       const saved = await AsyncStorage.getItem(key);
-      setSavedColorMatches(saved ? JSON.parse(saved) : []);
+      const localMatches = saved ? JSON.parse(saved) : [];
+      console.log('App: Loaded', localMatches.length, 'color matches from local storage');
+      setSavedColorMatches(localMatches);
+      
     } catch (error) {
       console.error('Error loading saved color matches:', error);
       setSavedColorMatches([]);
@@ -250,12 +272,44 @@ export default function App() {
 
   const saveColorMatch = useCallback(async (colorMatch) => {
     try {
-      const key = getMatchesKey(user?.id);
-      const updated = [...savedColorMatches, colorMatch];
-      setSavedColorMatches(updated);
-      await AsyncStorage.setItem(key, JSON.stringify(updated));
+      console.log('App: Saving color match:', colorMatch);
+      
+      // Save to backend first
+      try {
+        const savedMatch = await ApiService.createColorMatch({
+          base_color: colorMatch.base_color,
+          scheme: colorMatch.scheme,
+          colors: colorMatch.colors,
+          title: colorMatch.title || `${colorMatch.scheme} palette`,
+          description: colorMatch.description || '',
+          is_public: colorMatch.is_public || false
+        });
+        console.log('App: Color match saved to backend:', savedMatch);
+        
+        // Update local state with backend response (includes ID)
+        const updated = [...savedColorMatches, savedMatch];
+        setSavedColorMatches(updated);
+        
+        // Also save to local storage as backup
+        const key = getMatchesKey(user?.id);
+        await AsyncStorage.setItem(key, JSON.stringify(updated));
+        
+        return savedMatch;
+      } catch (backendError) {
+        console.error('Backend save failed, saving locally only:', backendError);
+        
+        // Fallback to local storage only
+        const key = getMatchesKey(user?.id);
+        const localMatch = { ...colorMatch, id: Date.now().toString(), created_at: new Date().toISOString() };
+        const updated = [...savedColorMatches, localMatch];
+        setSavedColorMatches(updated);
+        await AsyncStorage.setItem(key, JSON.stringify(updated));
+        
+        return localMatch;
+      }
     } catch (error) {
       console.error('Error saving color match:', error);
+      throw error;
     }
   }, [user?.id, savedColorMatches]);
 

@@ -1,5 +1,7 @@
 // backend/routes/colors.js
 const express = require('express');
+const { query } = require('../config/database');
+const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
 
 function hslToHex(h, s, l) {
@@ -135,6 +137,110 @@ router.post('/blend', (req, res) => {
     res.json({ color1, color2, weight, result: blended });
   } catch (error) {
     res.status(500).json({ error: 'Failed to blend colors' });
+  }
+});
+
+// Save color match/palette endpoint
+router.post('/matches', authenticateToken, async (req, res) => {
+  try {
+    const { base_color, scheme, colors, title, description, is_public = false } = req.body;
+    const userId = req.user.userId;
+    
+    // Validate required fields
+    if (!base_color || !scheme || !colors || !Array.isArray(colors)) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: base_color, scheme, colors array' 
+      });
+    }
+    
+    // Validate colors
+    if (!isValidHexColor(base_color)) {
+      return res.status(400).json({ error: 'Invalid base_color hex format' });
+    }
+    
+    for (const color of colors) {
+      if (!isValidHexColor(color)) {
+        return res.status(400).json({ error: `Invalid color hex format: ${color}` });
+      }
+    }
+    
+    // Insert color match into database
+    const result = await query(`
+      INSERT INTO color_matches (
+        user_id, base_color, scheme, colors, title, description, is_public, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+    `, [
+      userId,
+      base_color,
+      scheme,
+      JSON.stringify(colors),
+      title || `${scheme} palette`,
+      description || '',
+      is_public
+    ]);
+    
+    // Get the created color match
+    const colorMatch = await query(`
+      SELECT id, user_id, base_color, scheme, colors, title, description, is_public, created_at
+      FROM color_matches 
+      WHERE id = ?
+    `, [result.insertId]);
+    
+    if (colorMatch.length === 0) {
+      return res.status(500).json({ error: 'Failed to retrieve saved color match' });
+    }
+    
+    const savedMatch = colorMatch[0];
+    // Parse colors back to array
+    savedMatch.colors = JSON.parse(savedMatch.colors);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Color match saved successfully',
+      data: savedMatch
+    });
+    
+  } catch (error) {
+    console.error('Error saving color match:', error);
+    res.status(500).json({ 
+      error: 'Failed to save color match',
+      message: error.message 
+    });
+  }
+});
+
+// Get user's color matches endpoint
+router.get('/matches', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { limit = 50, offset = 0 } = req.query;
+    
+    const matches = await query(`
+      SELECT id, user_id, base_color, scheme, colors, title, description, is_public, created_at
+      FROM color_matches 
+      WHERE user_id = ?
+      ORDER BY created_at DESC
+      LIMIT ? OFFSET ?
+    `, [userId, parseInt(limit), parseInt(offset)]);
+    
+    // Parse colors for each match
+    const parsedMatches = matches.map(match => ({
+      ...match,
+      colors: JSON.parse(match.colors)
+    }));
+    
+    res.json({
+      success: true,
+      data: parsedMatches,
+      count: parsedMatches.length
+    });
+    
+  } catch (error) {
+    console.error('Error fetching color matches:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch color matches',
+      message: error.message 
+    });
   }
 });
 

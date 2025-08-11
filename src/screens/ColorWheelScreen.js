@@ -12,11 +12,17 @@ import { validateHexColor, getColorScheme, hexToRgb } from '../utils/color';
 export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
   const [selectedColor, setSelectedColor] = useState('#FF0000');
   const [scheme, setScheme] = useState('analogous');
-  const [wheelType, setWheelType] = useState('basic');
+  // Removed wheelType - always use FullColorWheel now
   const [showExtractor, setShowExtractor] = useState(false);
   const [initialImageUri, setInitialImageUri] = useState(null);
   const [manualHex, setManualHex] = useState('');
   const [manualPalette, setManualPalette] = useState(['#24FF89', '#FF249A']); // Start with 2 colors
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [pickingColorForPalette, setPickingColorForPalette] = useState(false);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [saveTitle, setSaveTitle] = useState('');
+  const [saveDescription, setSaveDescription] = useState('');
+  const [saveIsPublic, setSaveIsPublic] = useState(false);
 
   const openImagePicker = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -24,7 +30,9 @@ export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
       quality: 1
     });
     if (!result.canceled) {
-      setInitialImageUri(result.assets[0].uri);
+      const imageUri = result.assets[0].uri;
+      console.log('ColorWheelScreen: Selected image from gallery:', imageUri);
+      setInitialImageUri(imageUri);
       setShowExtractor(true);
     }
   };
@@ -45,7 +53,9 @@ export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
     
     if (!result.canceled) {
       // Same workflow as gallery - send directly to extractor
-      setInitialImageUri(result.assets[0].uri);
+      const imageUri = result.assets[0].uri;
+      console.log('ColorWheelScreen: Captured image from camera:', imageUri);
+      setInitialImageUri(imageUri);
       setShowExtractor(true);
       Haptics.selectionAsync();
     }
@@ -76,11 +86,25 @@ export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
 
   const addColorToManualPalette = () => {
     if (manualPalette.length < 4) {
-      // Generate a random color or use the current selected color
-      const newColor = selectedColor;
-      setManualPalette([...manualPalette, newColor]);
+      // Show color picker on the wheel to select a new color
+      setPickingColorForPalette(true);
+      setShowColorPicker(true);
       Haptics.selectionAsync();
     }
+  };
+
+  const confirmColorForPalette = () => {
+    // Add the currently selected color to manual palette
+    setManualPalette([...manualPalette, selectedColor]);
+    setPickingColorForPalette(false);
+    setShowColorPicker(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const cancelColorPicking = () => {
+    setPickingColorForPalette(false);
+    setShowColorPicker(false);
+    Haptics.selectionAsync();
   };
 
   const removeColorFromManualPalette = (index) => {
@@ -92,14 +116,33 @@ export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
   };
 
   const handleSave = async () => {
+    // Show save modal for user to enter details
+    const colors = scheme === 'manual' ? manualPalette : getColorScheme(selectedColor, scheme);
+    const defaultTitle = `${scheme.charAt(0).toUpperCase() + scheme.slice(1)} Palette`;
+    setSaveTitle(defaultTitle);
+    setSaveDescription('');
+    setSaveIsPublic(false);
+    setShowSaveModal(true);
+    Haptics.selectionAsync();
+  };
+
+  const confirmSave = async () => {
     const colors = scheme === 'manual' ? manualPalette : getColorScheme(selectedColor, scheme);
     const baseColor = scheme === 'manual' ? manualPalette[0] : selectedColor;
     
     try {
-      // Save the color match
-      await onSaveColorMatch({ base_color: baseColor, scheme, colors });
+      // Save the color match with user details
+      await onSaveColorMatch({ 
+        base_color: baseColor, 
+        scheme, 
+        colors,
+        title: saveTitle || `${scheme} palette`,
+        description: saveDescription,
+        is_public: saveIsPublic
+      });
       
-      // Provide haptic feedback
+      // Close modal and provide haptic feedback
+      setShowSaveModal(false);
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       
       // Navigate to Profile/Boards screen to show saved palettes
@@ -108,7 +151,7 @@ export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
         
         // Show success message after navigation
         setTimeout(() => {
-          Alert.alert('Palette Saved!', 'Your color palette has been saved to your boards.', [
+          Alert.alert('Palette Saved!', `"${saveTitle}" has been saved to your boards.`, [
             { text: 'OK', style: 'default' }
           ]);
         }, 500);
@@ -122,24 +165,17 @@ export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
     }
   };
 
+  const cancelSave = () => {
+    setShowSaveModal(false);
+    Haptics.selectionAsync();
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Color Wheel</Text>
 
-      <View style={styles.toggleRow}>
-        {['basic', 'full', 'advanced'].map(type => (
-          <TouchableOpacity key={type} onPress={() => setWheelType(type)} style={[styles.toggleBtn, wheelType === type && styles.activeBtn]}>
-            <Text style={[styles.toggleText, wheelType === type && styles.activeText]}>{type}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      {wheelType === 'advanced' ? (
-        <AdvancedColorWheel 
-          currentUser={{ id: 'demo' }}
-          onSaveColorMatch={onSaveColorMatch}
-        />
-      ) : wheelType === 'full' ? (
+      {/* Always show FullColorWheel with advanced layout */}
+      <View style={styles.wheelContainer}>
         <FullColorWheel 
           initialHex={selectedColor} 
           onChange={c => {
@@ -147,11 +183,50 @@ export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
             Haptics.selectionAsync();
           }} 
         />
-      ) : (
-        scheme === 'manual' ? (
+        
+        {/* Color Picker Overlay for Manual Palette */}
+        {pickingColorForPalette && (
+          <View style={styles.colorPickerOverlay}>
+            <Text style={styles.pickerTitle}>Pick a color for your palette</Text>
+            <View style={styles.pickerButtons}>
+              <TouchableOpacity onPress={cancelColorPicking} style={styles.cancelButton}>
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={confirmColorForPalette} style={styles.confirmButton}>
+                <Text style={styles.confirmButtonText}>Add Color</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+        
+        {/* Color Info Panel (from advanced layout) */}
+        <View style={[styles.colorInfoContainer, pickingColorForPalette && styles.colorInfoPickerMode]}>
+          <View style={[styles.colorPreview, { backgroundColor: selectedColor }]} />
+          <View style={styles.colorDetails}>
+            <View style={styles.colorValueContainer}>
+              <Text style={styles.colorLabel}>HEX</Text>
+              <Text style={styles.colorValue}>{selectedColor}</Text>
+            </View>
+            <View style={styles.colorValueContainer}>
+              <Text style={styles.colorLabel}>RGB</Text>
+              <Text style={styles.colorValue}>
+                {(() => {
+                  const { r, g, b } = hexToRgb(selectedColor);
+                  return `RGB(${r}, ${g}, ${b})`;
+                })()}
+              </Text>
+            </View>
+          </View>
+          {pickingColorForPalette && (
+            <Text style={styles.pickerHint}>👆 Drag on the wheel to pick your color</Text>
+          )}
+        </View>
+        
+        {/* Manual Palette Builder (when manual scheme is selected) */}
+        {scheme === 'manual' && (
           <View style={styles.manualPaletteContainer}>
             <View style={styles.paletteHeader}>
-              <Text style={styles.paletteTitle}>Current Palette</Text>
+              <Text style={styles.paletteTitle}>Manual Palette</Text>
               <Text style={styles.paletteCount}>{manualPalette.length} colors</Text>
             </View>
             <View style={styles.manualPalette}>
@@ -175,27 +250,8 @@ export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
               )}
             </View>
           </View>
-        ) : (
-          <View style={styles.colorInfoContainer}>
-            <View style={[styles.colorPreview, { backgroundColor: selectedColor }]} />
-            <View style={styles.colorDetails}>
-              <View style={styles.colorValueContainer}>
-                <Text style={styles.colorLabel}>HEX</Text>
-                <Text style={styles.colorValue}>{selectedColor}</Text>
-              </View>
-              <View style={styles.colorValueContainer}>
-                <Text style={styles.colorLabel}>RGB</Text>
-                <Text style={styles.colorValue}>
-                  {(() => {
-                    const { r, g, b } = hexToRgb(selectedColor);
-                    return `RGB(${r}, ${g}, ${b})`;
-                  })()}
-                </Text>
-              </View>
-            </View>
-          </View>
-        )
-      )}
+        )}
+      </View>
 
       {/* Color Scheme Selector */}
       <View style={styles.schemeSection}>
@@ -234,12 +290,14 @@ export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
         <CoolorsColorExtractor
           initialImageUri={initialImageUri}
           onColorExtracted={hex => {
+            console.log('ColorWheelScreen: Color extracted from image:', hex);
             setSelectedColor(hex);
             setShowExtractor(false);
             setInitialImageUri(null);
             Haptics.selectionAsync();
           }}
           onClose={() => {
+            console.log('ColorWheelScreen: Extractor closed');
             setShowExtractor(false);
             setInitialImageUri(null);
           }}
@@ -248,6 +306,63 @@ export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
             console.log('Collage created with color:', hex);
           }}
         />
+      </Modal>
+
+      {/* Save Palette Modal */}
+      <Modal visible={showSaveModal} animationType="slide" transparent={true}>
+        <View style={styles.saveModalOverlay}>
+          <View style={styles.saveModalContainer}>
+            <Text style={styles.saveModalTitle}>Save Palette</Text>
+            
+            {/* Palette Preview */}
+            <View style={styles.saveModalPalette}>
+              {(scheme === 'manual' ? manualPalette : getColorScheme(selectedColor, scheme)).map((color, index) => (
+                <View key={index} style={[styles.saveModalColor, { backgroundColor: color }]} />
+              ))}
+            </View>
+            
+            {/* Title Input */}
+            <TextInput
+              style={styles.saveModalInput}
+              placeholder="Palette title"
+              value={saveTitle}
+              onChangeText={setSaveTitle}
+              maxLength={100}
+            />
+            
+            {/* Description Input */}
+            <TextInput
+              style={[styles.saveModalInput, styles.saveModalTextArea]}
+              placeholder="Description (optional)"
+              value={saveDescription}
+              onChangeText={setSaveDescription}
+              multiline={true}
+              numberOfLines={3}
+              maxLength={500}
+            />
+            
+            {/* Public Toggle */}
+            <View style={styles.saveModalToggle}>
+              <Text style={styles.saveModalToggleLabel}>Make public</Text>
+              <TouchableOpacity 
+                onPress={() => setSaveIsPublic(!saveIsPublic)}
+                style={[styles.saveModalSwitch, saveIsPublic && styles.saveModalSwitchActive]}
+              >
+                <View style={[styles.saveModalSwitchThumb, saveIsPublic && styles.saveModalSwitchThumbActive]} />
+              </TouchableOpacity>
+            </View>
+            
+            {/* Action Buttons */}
+            <View style={styles.saveModalButtons}>
+              <TouchableOpacity onPress={cancelSave} style={styles.saveModalCancelButton}>
+                <Text style={styles.saveModalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={confirmSave} style={styles.saveModalSaveButton}>
+                <Text style={styles.saveModalSaveText}>Save Palette</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
       </Modal>
 
       <TextInput
@@ -269,11 +384,11 @@ export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
 const styles = StyleSheet.create({
   container: { padding: 20, alignItems: 'center', paddingBottom: 100 },
   title: { fontSize: 20, fontWeight: 'bold', marginBottom: 20 },
-  toggleRow: { flexDirection: 'row', marginBottom: 20 },
-  toggleBtn: { padding: 10, marginHorizontal: 5, borderRadius: 5, backgroundColor: '#ccc' },
-  activeBtn: { backgroundColor: '#333' },
-  toggleText: { color: '#000' },
-  activeText: { color: '#fff' },
+  wheelContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+    position: 'relative',
+  },
   
   // Enhanced color info display
   colorInfoContainer: {
@@ -459,5 +574,218 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'center',
     marginBottom: 20,
+  },
+
+  // Color Picker Overlay Styles
+  colorPickerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+    borderRadius: 16,
+  },
+  pickerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: 'white',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  pickerButtons: {
+    flexDirection: 'row',
+    gap: 15,
+  },
+  cancelButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  confirmButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+  },
+  cancelButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  confirmButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  colorInfoPickerMode: {
+    borderWidth: 3,
+    borderColor: '#007AFF',
+    shadowColor: '#007AFF',
+    shadowOpacity: 0.3,
+  },
+  pickerHint: {
+    fontSize: 14,
+    color: '#007AFF',
+    textAlign: 'center',
+    marginTop: 10,
+    fontWeight: '500',
+  },
+
+  // Input and Save Button Styles
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 25,
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+    fontSize: 16,
+    backgroundColor: '#f9f9f9',
+    marginBottom: 20,
+    width: '100%',
+    maxWidth: 350,
+  },
+  floatingSaveBtn: {
+    position: 'absolute',
+    bottom: 30,
+    right: 30,
+    backgroundColor: '#007AFF',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+
+  // Save Modal Styles
+  saveModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  saveModalContainer: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 24,
+    width: '100%',
+    maxWidth: 400,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  saveModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  saveModalPalette: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginBottom: 20,
+    gap: 8,
+  },
+  saveModalColor: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  saveModalInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    backgroundColor: '#f9f9f9',
+    marginBottom: 16,
+  },
+  saveModalTextArea: {
+    height: 80,
+    textAlignVertical: 'top',
+  },
+  saveModalToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  saveModalToggleLabel: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  saveModalSwitch: {
+    width: 50,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#ddd',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  saveModalSwitchActive: {
+    backgroundColor: '#007AFF',
+  },
+  saveModalSwitchThumb: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  saveModalSwitchThumbActive: {
+    transform: [{ translateX: 20 }],
+  },
+  saveModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  saveModalCancelButton: {
+    flex: 1,
+    backgroundColor: '#f8f8f8',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  saveModalSaveButton: {
+    flex: 1,
+    backgroundColor: '#007AFF',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  saveModalCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  saveModalSaveText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
   },
 });

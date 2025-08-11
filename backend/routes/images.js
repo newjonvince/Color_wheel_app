@@ -12,10 +12,10 @@ const { authenticateToken } = require('../middleware/auth');
 
 const router = express.Router();
 
-// Rate limiting for image processing (more restrictive than general API)
+// Rate limiting for image processing (more lenient for development/testing)
 const imageProcessingLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // Limit each IP to 20 image processing requests per windowMs
+  max: 100, // Increased limit: 100 image processing requests per windowMs
   message: {
     error: 'TooManyRequests',
     message: 'Too many image processing requests. Please try again later.',
@@ -23,6 +23,10 @@ const imageProcessingLimiter = rateLimit({
   },
   standardHeaders: true,
   legacyHeaders: false,
+  // Skip rate limiting for authenticated users in development
+  skip: (req) => {
+    return process.env.NODE_ENV === 'development' && req.user;
+  }
 });
 
 // ---------- Multer setup (memory storage + limits + file type filter) ----------
