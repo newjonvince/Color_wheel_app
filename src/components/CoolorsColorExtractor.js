@@ -27,7 +27,7 @@ import * as ImagePicker from 'expo-image-picker';
 import ApiService from '../services/api';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-const MAGNIFIER_SIZE = 120;
+const MAGNIFIER_SIZE = 80;
 const DEFAULT_SLOTS = 5;
 
 // Small throttle helper (leading, trailing last call after delay)
@@ -71,7 +71,8 @@ export default function CoolorsColorExtractor({
   const [activeIndex, setActiveIndex] = useState(0);
 
   // current color under magnifier (not yet committed unless we are on active slot)
-  const [liveColor, setLiveColor] = useState('#808080');
+  const [liveColor, setLiveColor] = useState('#FF6B6B'); // color under magnifier
+  const [magnifierColor, setMagnifierColor] = useState('#FF6B6B'); // actual magnifier display colors
 
   // --- helpers -----------------------------------------------------------------
   const fallbackPalette = useMemo(() => (
@@ -202,6 +203,10 @@ export default function CoolorsColorExtractor({
     if (!selectedImage) return;
     const out = await callServerSample(selectedImage.uri, nx, ny, 0.02);
     const hex = (out && out.hex) ? out.hex.toUpperCase() : liveColor;
+    
+    // Update both the magnifier display color and the active slot
+    setMagnifierColor(hex);
+    setLiveColor(hex);
     updateActiveSlot(hex);
   }, 120); // ~8 samples/sec
 
@@ -293,14 +298,17 @@ export default function CoolorsColorExtractor({
               resizeMode="contain"
               onLayout={onImageLayout}
             />
-            {/* Magnifier with colored ring */}
+            {/* Magnifier with colored center showing sampled color */}
             <View
               style={[styles.magnifier, { left: magnifierPosition.x - MAGNIFIER_SIZE / 2, top: magnifierPosition.y - MAGNIFIER_SIZE / 2 }]}
             >
-              <View style={[styles.magnifierInner, { borderColor: liveColor }]}>
-                <View style={styles.crosshair}>
-                  <View style={styles.crosshairHorizontal} />
-                  <View style={styles.crosshairVertical} />
+              <View style={[styles.magnifierInner, { borderColor: '#FFFFFF', borderWidth: 3 }]}>
+                {/* Colored center circle showing the sampled color */}
+                <View style={[styles.magnifierCenter, { backgroundColor: magnifierColor }]}>
+                  <View style={styles.crosshair}>
+                    <View style={[styles.crosshairHorizontal, { backgroundColor: '#FFFFFF' }]} />
+                    <View style={[styles.crosshairVertical, { backgroundColor: '#FFFFFF' }]} />
+                  </View>
                 </View>
               </View>
             </View>
@@ -355,9 +363,10 @@ const styles = StyleSheet.create({
   image: { width: '100%', height: '100%' },
   magnifier: { position: 'absolute', width: MAGNIFIER_SIZE, height: MAGNIFIER_SIZE, borderRadius: MAGNIFIER_SIZE / 2, backgroundColor: 'rgba(255,255,255,0.85)', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 5, borderWidth: 6, borderColor: '#fff' },
   magnifierInner: { flex: 1, borderRadius: (MAGNIFIER_SIZE - 12) / 2, overflow: 'hidden', justifyContent: 'center', alignItems: 'center', borderWidth: 4 },
+  magnifierCenter: { width: '100%', height: '100%', borderRadius: (MAGNIFIER_SIZE - 18) / 2, justifyContent: 'center', alignItems: 'center' },
   crosshair: { position: 'absolute', width: 22, height: 22, justifyContent: 'center', alignItems: 'center' },
-  crosshairHorizontal: { position: 'absolute', width: 22, height: 2, backgroundColor: '#333' },
-  crosshairVertical: { position: 'absolute', width: 2, height: 22, backgroundColor: '#333' },
+  crosshairHorizontal: { position: 'absolute', width: 22, height: 2, backgroundColor: '#FFFFFF' },
+  crosshairVertical: { position: 'absolute', width: 2, height: 22, backgroundColor: '#FFFFFF' },
 
   paletteBar: { backgroundColor: '#fff', paddingVertical: 16, paddingHorizontal: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e6e6e6' },
   slotsRow: { flexDirection: 'row', alignItems: 'center' },

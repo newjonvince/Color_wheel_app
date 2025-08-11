@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
@@ -22,6 +23,9 @@ app.set('trust proxy', 1);
 
 // Security middleware
 app.use(helmet());
+
+// Response compression for better performance
+app.use(compression());
 
 // CORS configuration - safe parsing + TestFlight/Expo web support
 const parseOrigins = (raw) =>

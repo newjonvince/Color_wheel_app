@@ -180,7 +180,7 @@ const ApiService = {
   login, register, getUserProfile,
   // generic
   get: (url, cfg) => api.get(url, cfg),
-  post: (url, body, cfg) => api.post(url, body, cfg if not isFormData(body) else { ...(cfg||{}), headers: { ...(cfg?.headers||{}), 'Content-Type': 'multipart/form-data' } }),
+  post: (url, body, cfg) => api.post(url, body, !isFormData(body) ? cfg : { ...(cfg||{}), headers: { ...(cfg?.headers||{}), 'Content-Type': 'multipart/form-data' } }),
   put: (url, body, cfg) => api.put(url, body, cfg),
   delete: (url, cfg) => api.delete(url, cfg),
 };
