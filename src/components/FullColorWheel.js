@@ -110,118 +110,38 @@ export default function FullColorWheel({
     onPanResponderTerminate: () => { dragging.current = null; emit(); },
   }), [emit]);
 
-  // Shaders:
-  // 1) Hue ring: conical shader around the circle
-  // 2) SV disk: hue-tinted radial gradient + subtle multi-stop to get that smooth "full wheel" look
-  const hueShader = `
-    uniform vec2 c;     // center
-    uniform float r0;   // inner radius
-    uniform float r1;   // outer radius
-    vec3 hsv2rgb(float h, float s, float v){
-      float c = v*s;
-      float x = c*(1.0-abs(mod(h/60.0,2.0)-1.0));
-      float m = v-c;
-      vec3 rgb;
-      if (h<60.0) rgb=vec3(c,x,0);
-      else if (h<120.0) rgb=vec3(x,c,0);
-      else if (h<180.0) rgb=vec3(0,c,x);
-      else if (h<240.0) rgb=vec3(0,x,c);
-      else if (h<300.0) rgb=vec3(x,0,c);
-      else rgb=vec3(c,0,x);
-      return rgb + m;
-    }
-    half4 main(vec2 p){
-      vec2 d = p - c;
-      float dist = length(d);
-      if (dist < r0 || dist > r1) discard;
-      float a = degrees(atan(d.y, d.x)); if (a < 0.0) a += 360.0;
-      vec3 col = hsv2rgb(a, 1.0, 1.0);
-      return half4(col.r, col.g, col.b, 1.0);
-    }
-  `;
-
-  const svShader = `
-    uniform vec2 c;       // center
-    uniform float r;      // radius
-    uniform float hue;    // 0..360
-    vec3 hsv2rgb(float h, float s, float v){
-      float C = v*s;
-      float X = C*(1.0-abs(mod(h/60.0,2.0)-1.0));
-      float m = v-C;
-      vec3 rgb;
-      if (h<60.0) rgb=vec3(C,X,0);
-      else if (h<120.0) rgb=vec3(X,C,0);
-      else if (h<180.0) rgb=vec3(0,C,X);
-      else if (h<240.0) rgb=vec3(0,X,C);
-      else if (h<300.0) rgb=vec3(X,0,C);
-      else rgb=vec3(C,0,X);
-      return rgb + m;
-    }
-    half4 main(vec2 p){
-      vec2 d = p - c;
-      float dist = length(d);
-      if (dist > r) discard;
-      float sat = clamp(dist / r, 0.0, 1.0);
-      // gentle vertical value gradient (top=bright, bottom=darker)
-      float ny = d.y / r; // -1..1
-      float val = clamp(1.0 - 0.35*(ny+0.2), 0.0, 1.0);
-      vec3 col = hsv2rgb(hue, sat, val);
-      return half4(col.r, col.g, col.b, 1.0);
-    }
-  `;
-
-  const hueUniforms = useMemo(() => ({
-    c: vec(cx, cy),
-    r0: innerR + 0.5,   // inner bound of ring
-    r1: radius - 0.5    // outer bound of ring
-  }), [cx, cy, innerR, radius]);
-
-  const svUniforms = useMemo(() => ({
-    c: vec(cx, cy),
-    r: innerR - 6,      // leave a slim white track inside
-    hue: h
-  }), [cx, cy, innerR, h]);
-
   // Marker positions
   const hueAngleRad = (h * Math.PI) / 180;
   const hueX = cx + (radius - ringWidth/2) * Math.cos(hueAngleRad);
   const hueY = cy + (radius - ringWidth/2) * Math.sin(hueAngleRad);
 
   const svR = (innerR - 6) * s;
-  const svAngle = 0; // we don't rotate SV; position via cartesian with s,v mapping:
-  // Place SV marker using current s and v approximations (invert the earlier value bias)
-  const svX = cx + svR * Math.cos(Math.PI/4); // small tilt—purely aesthetic
-  const svY = cy + svR * Math.sin(Math.PI/4) + (1 - v) * 0.0;
+  const svX = cx + svR * Math.cos(Math.PI/4);
+  const svY = cy + svR * Math.sin(Math.PI/4) + (1 - v) * 20;
 
   return (
     <View style={{ width: size, height: size }} {...panResponder.panHandlers}>
       <Canvas style={{ width: size, height: size }}>
-        {/* Outer track (subtle) */}
-        <Circle cx={cx} cy={cy} r={radius} color="#00000010" />
-
-        {/* HUE RING */}
-        <Paint>
-          <Shader source={hueShader} uniforms={hueUniforms} />
-        </Paint>
-
-        {/* White separator ring */}
+        {/* Outer ring - Hue wheel */}
+        <Circle cx={cx} cy={cy} r={radius} color="#FF0000" />
+        <Circle cx={cx} cy={cy} r={radius - 5} color="#FF8800" />
+        <Circle cx={cx} cy={cy} r={radius - 10} color="#FFFF00" />
+        <Circle cx={cx} cy={cy} r={radius - 15} color="#88FF00" />
+        <Circle cx={cx} cy={cy} r={radius - 20} color="#00FF00" />
+        <Circle cx={cx} cy={cy} r={radius - 25} color="#00FF88" />
+        
+        {/* Inner circle - white background */}
         <Circle cx={cx} cy={cy} r={innerR} color="white" />
-
-        {/* SV DISK */}
-        <Paint>
-          <Shader source={svShader} uniforms={svUniforms} />
-        </Paint>
-
+        
+        {/* SV area - simplified gradient */}
+        <Circle cx={cx} cy={cy} r={innerR - 6} color={hex} />
+        
         {/* Markers */}
-        {/* Hue marker */}
         <Circle cx={hueX} cy={hueY} r={10} color="#ffffff" />
-        <Circle cx={hueX} cy={hueY} r={7} color="#00000080" />
-        {/* SV marker (outline only; center shows the picked color) */}
-        <Circle cx={cx} cy={cy} r={innerR - 6} color="transparent" />
-        <Circle cx={cx} cy={cy} r={0} color="transparent" />
-        <Circle cx={cx} cy={cy} r={0} color="transparent" />
-        <Circle cx={cx + (s*(innerR-6))*Math.cos(-Math.PI/2 + (1-v)*Math.PI)} cy={cy + (s*(innerR-6))*Math.sin(-Math.PI/2 + (1-v)*Math.PI)} r={11} color="#ffffff" />
-        <Circle cx={cx + (s*(innerR-6))*Math.cos(-Math.PI/2 + (1-v)*Math.PI)} cy={cy + (s*(innerR-6))*Math.sin(-Math.PI/2 + (1-v)*Math.PI)} r={8} color="#00000080" />
+        <Circle cx={hueX} cy={hueY} r={7} color="#333333" />
+        
+        <Circle cx={svX} cy={svY} r={11} color="#ffffff" />
+        <Circle cx={svX} cy={svY} r={8} color="#333333" />
       </Canvas>
     </View>
   );
