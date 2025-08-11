@@ -27,8 +27,8 @@ function rgbToOklabS(r,g,bInput){ const R=srgbToLinear(r), G=srgbToLinear(g), B=
   const l_=Math.cbrt(l), m_=Math.cbrt(m), s_=Math.cbrt(s);
   const L=0.2104542553*l_+0.7936177850*m_-0.0040720468*s_;
   const a=1.9779984951*l_-2.4285922050*m_+0.4505937099*s_;
-  const b=0.0259040371*l_+0.7827717662*m_-0.8086757660*s_;
-  return {L,a,b}; }
+  const bVal=0.0259040371*l_+0.7827717662*m_-0.8086757660*s_;
+  return {L,a,b:bVal}; }
 function oklabToRgbS(L,a,bInput){ const l_=Math.pow(L+0.3963377774*a+0.2158037573*bInput,3);
   const m_=Math.pow(L-0.1055613458*a-0.0638541728*bInput,3);
   const s_=Math.pow(L-0.0894841775*a-1.2914855480*bInput,3);
