@@ -139,9 +139,14 @@ const unlikePost = async (postId) => {
 const extractColorsFromImage = async (imageUri) => {
   const formData = new FormData();
   formData.append('image', { uri: imageUri, type: 'image/jpeg', name: 'upload.jpg' });
-  const { data } = await api.post('/images/extract-colors', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  
+  // Prepare headers with authentication token if available
+  const headers = { 'Content-Type': 'multipart/form-data' };
+  if (authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+  
+  const { data } = await api.post('/images/extract-colors', formData, { headers });
   return data;
 };
 
