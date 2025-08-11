@@ -7,10 +7,10 @@
 
 import axios from 'axios';
 
-// Prefer env value; fallback to Railway
+// Prefer env value; fallback to Railway (corrected base URL)
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') ||
-  'https://colorwheelapp-production.up.railway.app/api';
+  'https://colorwheelapp-production.up.railway.app';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
