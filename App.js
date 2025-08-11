@@ -103,9 +103,9 @@ const pickUser = (u) => (u?.user ? u.user : u);
 // Emoji tab icon (memoized)
 const EmojiTabIcon = React.memo(({ name, focused }) => {
   const icons = {
-    Community: focused ? '🏠' : '🏘️',
-    ColorWheel: focused ? '🎨' : '🎭',
-    Boards: focused ? '📌' : '📋',
+    Community: focused ? '🌍' : '🌎',
+    ColorWheel: focused ? '⚙️' : '⚪',
+    Profile: focused ? '👤' : '👥',
     Settings: focused ? '⚙️' : '🔧',
   };
   return <Text style={styles.tabIcon}>{icons[name] || '📱'}</Text>;
@@ -397,11 +397,12 @@ export default function App() {
                     currentUser={user}
                     onSaveColorMatch={saveColorMatch}
                     onLogout={handleLogout}
+                    navigation={props.navigation}
                   />
                 )}
               </Tab.Screen>
 
-              <Tab.Screen name="Boards" options={{ title: 'My Boards' }}>
+              <Tab.Screen name="Profile" options={{ title: 'Profile' }}>
                 {(props) => (
                   <BoardsScreen
                     {...props}

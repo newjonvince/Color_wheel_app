@@ -8,7 +8,10 @@ import {
   Dimensions,
   Alert,
   PanResponder,
+  ScrollView,
 } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import ApiService from '../services/api';
 import { hexToHsl } from '../utils/color';
@@ -30,12 +33,22 @@ export default function CoolorsColorExtractor({ initialImageUri, onColorExtracte
   const [palette, setPalette] = useState([]); // ['#xxxxxx']
   const [isLoading, setIsLoading] = useState(false);
   const [imageLayout, setImageLayout] = useState({ width: 0, height: 0, x: 0, y: 0 });
+  const [swatchCount, setSwatchCount] = useState(5); // Palette swatch count control
   const mounted = useRef(true);
+
+  // Gesture values for pinch-to-zoom and pan
+  const scale = useSharedValue(1);
+  const translateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
 
   // --- helpers --------------------------------------------------------------
   const fallbackPalette = useMemo(() => (
     ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FECA57','#FF9FF3','#54A0FF','#5F27CD','#00D2D3','#FF9F43','#10AC84','#EE5A24','#0984E3','#A29BFE','#6C5CE7']
   ), []);
+
+  // Palette swatch count controls
+  const incrementSwatchCount = () => setSwatchCount(c => Math.min(8, c + 1));
+  const decrementSwatchCount = () => setSwatchCount(c => Math.max(3, c - 1));
 
   const chooseDominant = useCallback((paletteArray) => paletteArray?.[0] || '#808080', []);
 
@@ -126,22 +139,45 @@ export default function CoolorsColorExtractor({ initialImageUri, onColorExtracte
     extractColorAtPosition(cx / w, cy / h);
   }, [imageLayout.width, imageLayout.height, extractColorAtPosition]);
 
+  const pinch = Gesture.Pinch()
+    .onUpdate((e) => {
+      scale.value = Math.max(1, Math.min(4, e.scale));
+    });
+
+  const pan = Gesture.Pan()
+    .onUpdate((e) => {
+      // Boundaries are rough; you can refine with imageLayout (w,h)
+      translateX.value = e.translationX;
+      translateY.value = e.translationY;
+    })
+    .onEnd(() => {
+      // gentle settle
+      translateX.value = withTiming(translateX.value, { duration: 120 });
+      translateY.value = withTiming(translateY.value, { duration: 120 });
+    });
+
+  const composed = Gesture.Simultaneous(pinch, pan);
+
+  const imageStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      { scale: scale.value },
+    ],
+  }));
+
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: () => true,
     onPanResponderGrant: (evt) => {
-      if (!selectedImage) return;
       const { locationX, locationY } = evt.nativeEvent;
-      updateMagnifierPosition(locationX, locationY);
+      setMagnifierPosition({ x: locationX, y: locationY });
     },
     onPanResponderMove: (evt) => {
-      if (!selectedImage) return;
       const { locationX, locationY } = evt.nativeEvent;
-      updateMagnifierPosition(locationX, locationY);
+      setMagnifierPosition({ x: locationX, y: locationY });
     },
-  }), [selectedImage, updateMagnifierPosition]);
-
-
+  }), []);
 
   const onImageLayout = useCallback((event) => {
     const { width, height, x, y } = event.nativeEvent.layout;
@@ -187,35 +223,41 @@ export default function CoolorsColorExtractor({ initialImageUri, onColorExtracte
       {/* Image */}
       {selectedImage && (
         <View style={styles.imageContainer}>
-          <View style={styles.imageWrapper} {...panResponder.panHandlers}>
-            <Image
-              source={{ uri: selectedImage.uri }}
-              style={styles.image}
-              resizeMode="contain"
-              onLayout={onImageLayout}
-            />
-            {/* Magnifier */}
-            <View
-              style={[styles.magnifier, { left: magnifierPosition.x - MAGNIFIER_SIZE / 2, top: magnifierPosition.y - MAGNIFIER_SIZE / 2 }]}
-            >
-              <View style={styles.magnifierInner}>
-                {/* Contrast back ring to keep the colored ring visible on any photo */}
-                <View style={styles.dominantRingBack} />
+          <GestureDetector gesture={composed}>
+            <Animated.View style={[styles.imageWrapper, imageStyle]} {...panResponder.panHandlers}>
+              <Image
+                source={{ uri: selectedImage.uri }}
+                style={styles.image}
+                resizeMode="contain"
+                onLayout={onImageLayout}
+              />
+              {/* magnifier stays positioned in image coordinates */}
+              <View
+                style={[
+                  styles.magnifier,
+                  {
+                    left: magnifierPosition.x - MAGNIFIER_SIZE / 2,
+                    top: magnifierPosition.y - MAGNIFIER_SIZE / 2,
+                  },
+                ]}
+              >
+                <View style={styles.magnifierInner}>
+                  <View style={styles.crosshair}>
+                    <View style={styles.crosshairHorizontal} />
+                    <View style={styles.crosshairVertical} />
+                  </View>
+                  {/* Contrast back ring to keep the colored ring visible on any photo */}
+                  <View style={styles.dominantRingBack} />
 
-                {/* The dominant color ring (updates live with extractedColor) */}
-                <View style={[styles.dominantRing, { borderColor: extractedColor }]} />
+                  {/* The dominant color ring (updates live with extractedColor) */}
+                  <View style={[styles.dominantRing, { borderColor: extractedColor }]} />
 
-                {/* Optional tiny center dot filled with the color */}
-                <View style={[styles.dominantCenterDot, { backgroundColor: extractedColor }]} />
-
-                {/* Existing crosshair stays on top for precise aiming */}
-                <View style={styles.crosshair}>
-                  <View style={styles.crosshairHorizontal} />
-                  <View style={styles.crosshairVertical} />
+                  {/* Optional tiny center dot filled with the color */}
+                  <View style={[styles.dominantCenterDot, { backgroundColor: extractedColor }]} />
                 </View>
               </View>
-            </View>
-          </View>
+            </Animated.View>
+          </GestureDetector>
         </View>
       )}
 
@@ -226,15 +268,27 @@ export default function CoolorsColorExtractor({ initialImageUri, onColorExtracte
         </View>
         <Text style={styles.colorText}>{extractedColor.toUpperCase()}</Text>
 
-        {palette.length > 0 && (
-          <View style={styles.paletteRow}>
-            {palette.slice(0, 8).map((c) => (
-              <TouchableOpacity key={c} onPress={() => setExtractedColor(c)}>
-                <View style={[styles.paletteSwatch, { backgroundColor: c, borderColor: c === extractedColor ? '#000' : '#fff' }]} />
+        <View style={{ paddingHorizontal: 20, paddingTop: 10, backgroundColor: '#fff' }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ paddingVertical: 8 }}>
+            {palette.slice(0, swatchCount).map((color, idx) => (
+              <TouchableOpacity key={`${color}-${idx}`} onPress={() => setExtractedColor(color)}>
+                <View style={[
+                  { width: 54, height: 40, borderRadius: 8, marginRight: 8, backgroundColor: color },
+                  extractedColor === color && { borderColor: '#333', borderWidth: 3 }
+                ]} />
               </TouchableOpacity>
             ))}
+          </ScrollView>
+
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12, paddingVertical: 8 }}>
+            <TouchableOpacity onPress={decrementSwatchCount} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#eee', alignItems:'center', justifyContent:'center' }}>
+              <Text style={{ fontSize: 18 }}>−</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={incrementSwatchCount} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#eee', alignItems:'center', justifyContent:'center' }}>
+              <Text style={{ fontSize: 18 }}>+</Text>
+            </TouchableOpacity>
           </View>
-        )}
+        </View>
       </View>
 
       {/* Actions */}

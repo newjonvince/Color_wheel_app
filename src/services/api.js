@@ -109,6 +109,50 @@ export const createColorMatch = async (colorData) => {
   return response.data;
 };
 
+// Community API endpoints
+export const getCommunityPosts = async (cursor = null) => {
+  const params = cursor ? { cursor } : {};
+  const response = await api.get('/community/posts/community', { params });
+  return response.data;
+};
+
+export const followUser = async (userId) => {
+  const response = await api.post(`/community/users/${userId}/follow`);
+  return response.data;
+};
+
+export const unfollowUser = async (userId) => {
+  const response = await api.delete(`/community/users/${userId}/follow`);
+  return response.data;
+};
+
+export const likePost = async (postId) => {
+  const response = await api.post(`/community/posts/${postId}/like`);
+  return response.data;
+};
+
+export const unlikePost = async (postId) => {
+  const response = await api.delete(`/community/posts/${postId}/like`);
+  return response.data;
+};
+
+// Image processing endpoint
+export const extractColorsFromImage = async (imageUri) => {
+  const formData = new FormData();
+  formData.append('image', {
+    uri: imageUri,
+    type: 'image/jpeg',
+    name: 'upload.jpg',
+  });
+  
+  const response = await api.post('/images/extract-colors', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  return response.data;
+};
+
 // Create ApiService object with all methods for default export
 const ApiService = {
   // Token management methods
@@ -128,6 +172,16 @@ const ApiService = {
   // Color methods
   getColorMatches,
   createColorMatch,
+  
+  // Community methods
+  getCommunityPosts,
+  followUser,
+  unfollowUser,
+  likePost,
+  unlikePost,
+  
+  // Image processing methods
+  extractColorsFromImage,
   
   // Direct axios methods for generic requests
   get: (url, config) => api.get(url, config),
@@ -151,4 +205,10 @@ export {
   updateUserProfile,
   getColorMatches,
   createColorMatch,
+  getCommunityPosts,
+  followUser,
+  unfollowUser,
+  likePost,
+  unlikePost,
+  extractColorsFromImage,
 };

@@ -10,8 +10,7 @@ import {
   Alert, 
   PanResponder, 
   Dimensions,
-  Share,
-  Linking
+  Share
 } from 'react-native';
 import Svg, { Circle, Path, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,7 +20,7 @@ import * as Clipboard from 'expo-clipboard';
 import ApiService from '../services/api';
 
 // ✅ pull from your shared utils so hue math matches the app
-import { hslToHex, hexToHsl, validateHexColor } from '../utils/color';
+import { hslToHex, hexToHsl, isValidHexColor } from '../utils/color';
 
 const { width: screenWidth } = Dimensions.get('window');
 const WHEEL_SIZE = screenWidth * 0.8;
@@ -33,13 +32,11 @@ const RING_OUTER = WHEEL_RADIUS;
 export default function AdvancedColorWheel({
   currentUser,
   onSaveColorMatch,
-  initialHex,            // 🆕 optional
-  initialScheme,         // 🆕 optional
+  initialHex,            // 🆕 optional: seed the wheel with a hex
+  initialScheme,         // 🆕 optional: seed the scheme
 }) {
   const [selectedScheme, setSelectedScheme] = useState(initialScheme || 'triadic');
   const [activeMarkerId, setActiveMarkerId] = useState(1);
-
-  // We drive everything from a single "hue" + scheme
   const [baseHue, setBaseHue] = useState(180); // default if no initialHex
   const [showExportModal, setShowExportModal] = useState(false);
 
@@ -47,11 +44,10 @@ export default function AdvancedColorWheel({
   useEffect(() => {
     if (!initialHex) return;
     const hex = initialHex.trim();
-    if (!validateHexColor(hex)) return;
+    if (!isValidHexColor(hex)) return;
 
     const { h } = hexToHsl(hex);     // { h, s, l }
     setBaseHue(Math.round(h));
-
     if (initialScheme) setSelectedScheme(initialScheme);
   }, [initialHex, initialScheme]);
 
@@ -112,7 +108,7 @@ export default function AdvancedColorWheel({
     return slices;
   }, []);
 
-  // Pan to set base hue (only when user is on the ring)
+  // Convert a touch point to a hue on the ring
   const pointToHue = (x, y) => {
     const cx = WHEEL_SIZE / 2;
     const cy = WHEEL_SIZE / 2;
@@ -152,9 +148,7 @@ export default function AdvancedColorWheel({
   // When a user taps a marker, make it active (hue stays driven by marker 1)
   const onMarkerPress = async (id) => {
     setActiveMarkerId(id);
-    try {
-      await Haptics.selectionAsync();
-    } catch {}
+    try { await Haptics.selectionAsync(); } catch {}
   };
 
   const currentColors = useMemo(() => colorMarkers.map(m => m.color), [colorMarkers]);
@@ -162,10 +156,12 @@ export default function AdvancedColorWheel({
   const handleSaveColorMatch = async () => {
     try {
       const payload = {
-        baseColor: currentColors[0],
+        base_color: currentColors[0],   // 🔁 snake_case for backend
         scheme: selectedScheme,
         colors: currentColors,
-        isPublic: false,
+        privacy: 'private',
+        is_locked: false,
+        locked_color: null,
         metadata: {
           source: 'advanced_wheel',
           markerCount: currentColors.length,
@@ -201,21 +197,7 @@ export default function AdvancedColorWheel({
       } else if (method === 'email') {
         const ok = await MailComposer.isAvailableAsync();
         if (!ok) {
-          Alert.alert(
-            'Email Not Available', 
-            'Email is not configured on this device. Would you like to copy the palette instead?',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { 
-                text: 'Copy Text', 
-                onPress: async () => {
-                  await Clipboard.setStringAsync(text);
-                  await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                  Alert.alert('Copied!', 'Color palette copied to clipboard');
-                }
-              }
-            ]
-          );
+          Alert.alert('Email Not Available', 'Email is not configured on this device.');
           return;
         }
         await MailComposer.composeAsync({ subject: 'Fashion Color Palette', body: text });
@@ -262,7 +244,7 @@ export default function AdvancedColorWheel({
             <Stop offset="100%" stopColor="transparent" />
           </RadialGradient>
         </Defs>
-        {ringSlices /* memoized */}
+        {ringSlices}
         {renderMarkers()}
       </Svg>
     </View>
@@ -282,10 +264,7 @@ export default function AdvancedColorWheel({
               style={[styles.schemeButton, selectedScheme === scheme && styles.selectedScheme]}
               onPress={async () => {
                 setSelectedScheme(scheme);
-                // nudge haptics
                 try { await Haptics.selectionAsync(); } catch {}
-                // keep baseHue; markers recompute via useMemo
-                // when switching away from freestyle, ensure marker 1 is active
                 setActiveMarkerId(1);
               }}
             >
@@ -297,7 +276,7 @@ export default function AdvancedColorWheel({
         </ScrollView>
       </View>
 
-      {/* Enhanced Preview with Interactive Swatches */}
+      {/* Preview with interactive swatches */}
       <View style={styles.colorsPreview}>
         {currentColors.map((c, i) => (
           <TouchableOpacity 
@@ -334,7 +313,7 @@ export default function AdvancedColorWheel({
         </TouchableOpacity>
       </View>
 
-      {/* Enhanced Export Modal */}
+      {/* Export Modal */}
       <Modal visible={showExportModal} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>

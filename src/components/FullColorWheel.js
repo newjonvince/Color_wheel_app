@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState, useCallback } from 'react';
 import { View, PanResponder } from 'react-native';
-import { Canvas, Group, Circle, Paint, Shader, vec, useTouchHandler, useValue } from '@shopify/react-native-skia';
+import { Canvas, Circle, Paint, Shader, vec } from '@shopify/react-native-skia';
 
 // ---------- helpers ----------
 const clamp01 = (v) => Math.max(0, Math.min(1, v));

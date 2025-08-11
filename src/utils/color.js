@@ -1,16 +1,18 @@
 /**
- * Color Utility Functions
- * - Safer hex handling (#RGB + #RRGGBB)
- * - WCAG luminance/contrast helpers
+ * color.js — robust color utilities for your app
+ * - Safer hex handling (#RGB + #RRGGBB) + normalization
+ * - HSL/HEX/RGB conversions
+ * - Geometry helpers for the wheel
+ * - WCAG luminance/contrast
+ * - Scheme + marker helpers
  * - Back-compat: export validateHexColor alias
  */
 
-// --- internal helpers --------------------------------------------------------
+// ------------------------------- internal utils ------------------------------
 const clamp = (n, min, max) => Math.min(max, Math.max(min, n));
-
 const toHex = (n) => n.toString(16).padStart(2, '0').toUpperCase();
 
-/** Normalize input into #RRGGBB (uppercase). Supports #RGB. */
+/** Normalize any input to #RRGGBB (uppercase). Accepts #RGB and 0xRRGGBB. */
 export const normalizeHex = (hex) => {
   if (typeof hex !== 'string') return '#000000';
   let h = hex.trim().replace(/^0x/i, '');
@@ -20,10 +22,10 @@ export const normalizeHex = (hex) => {
     return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
   }
   if (/^#([A-Fa-f0-9]{6})$/.test(h)) return h.toUpperCase();
-  return '#000000'; // fallback
+  return '#000000';
 };
 
-// --- conversions -------------------------------------------------------------
+// -------------------------------- conversions --------------------------------
 export const hslToHex = (h, s, l) => {
   h = ((h % 360) + 360) % 360;
   s = clamp(s, 0, 100);
@@ -47,6 +49,9 @@ export const hexToRgb = (hex) => {
   return { r, g, b };
 };
 
+export const rgbToHex = ({ r, g, b }) =>
+  `#${toHex(clamp(r, 0, 255))}${toHex(clamp(g, 0, 255))}${toHex(clamp(b, 0, 255))}`;
+
 export const hexToHsl = (hex) => {
   const { r, g, b } = hexToRgb(hex);
   const rn = r / 255, gn = g / 255, bn = b / 255;
@@ -67,14 +72,10 @@ export const hexToHsl = (hex) => {
     h /= 6;
   }
 
-  return {
-    h: Math.round(h * 360),
-    s: Math.round(s * 100),
-    l: Math.round(l * 100),
-  };
+  return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
 };
 
-// --- geometry ---------------------------------------------------------------
+// --------------------------------- geometry ----------------------------------
 export const normalizeAngle = (angle) => {
   let a = angle;
   while (a < 0) a += 360;
@@ -93,10 +94,9 @@ export const positionToAngle = (x, y, centerX, centerY) => {
   return normalizeAngle(angle);
 };
 
-export const calculateDistance = (x1, y1, x2, y2) =>
-  Math.hypot(x2 - x1, y2 - y1);
+export const calculateDistance = (x1, y1, x2, y2) => Math.hypot(x2 - x1, y2 - y1);
 
-// --- WCAG luminance / contrast ---------------------------------------------
+// --------------------------- WCAG luminance/contrast -------------------------
 export const relativeLuminance = (hex) => {
   const { r, g, b } = hexToRgb(hex);
   const srgb = [r, g, b].map(v => v / 255).map(c =>
@@ -115,7 +115,7 @@ export const contrastRatio = (hex1, hex2) => {
 export const getContrastingTextColor = (hexColor) =>
   contrastRatio(normalizeHex(hexColor), '#000000') >= 4.5 ? '#000000' : '#FFFFFF';
 
-// --- schemes / markers ------------------------------------------------------
+// ----------------------------- schemes/markers -------------------------------
 export const getColorScheme = (baseColor, scheme, baseAngle) => {
   const baseHex = normalizeHex(baseColor);
   let angle = typeof baseAngle === 'number' ? baseAngle : hexToHsl(baseHex).h;
@@ -145,10 +145,6 @@ export const getColorScheme = (baseColor, scheme, baseAngle) => {
 
 /**
  * Calculate marker positions for multi-marker color schemes
- * @param {string} scheme - Color scheme type
- * @param {number} baseAngle - Base angle on color wheel
- * @param {number} activeMarkerId - ID of the active marker
- * @returns {array} Array of marker objects with id, angle, and color
  */
 export const calculateMarkerPositions = (scheme, baseAngle, activeMarkerId = 1) => {
   const a = normalizeAngle(baseAngle);
@@ -174,11 +170,6 @@ export const calculateMarkerPositions = (scheme, baseAngle, activeMarkerId = 1) 
 
 /**
  * Update marker positions when one marker is moved
- * @param {array} currentMarkers - Current marker array
- * @param {number} activeMarkerId - ID of the moved marker
- * @param {number} newAngle - New angle for the active marker
- * @param {string} scheme - Color scheme type
- * @returns {array} Updated marker array
  */
 export const updateMarkerPositions = (currentMarkers, activeMarkerId, newAngle, scheme) => {
   if (scheme === 'freestyle') {
@@ -213,13 +204,6 @@ export const updateMarkerPositions = (currentMarkers, activeMarkerId, newAngle, 
 
 /**
  * Check if a point is within the color wheel ring
- * @param {number} x - X coordinate
- * @param {number} y - Y coordinate
- * @param {number} centerX - Center X coordinate
- * @param {number} centerY - Center Y coordinate
- * @param {number} outerRadius - Outer radius of the ring
- * @param {number} innerRadius - Inner radius of the ring
- * @returns {boolean} True if point is within the ring
  */
 export const isPointInColorWheelRing = (x, y, centerX, centerY, outerRadius, innerRadius) => {
   const d = calculateDistance(x, y, centerX, centerY);
@@ -238,9 +222,8 @@ export const generateColorWheelPath = (radius, strokeWidth) => {
   `;
 };
 
-// --- validation / blending ---------------------------------------------------
-export const isValidHexColor = (hex) => /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(hex.trim());
-
+// ---------------------------- validation/blending ----------------------------
+export const isValidHexColor = (hex) => /^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$/.test(String(hex).trim());
 export const validateHexColor = isValidHexColor; // alias for back-compat
 
 export const blendColors = (color1, color2, ratio) => {
@@ -253,7 +236,7 @@ export const blendColors = (color1, color2, ratio) => {
 
   const r = Math.round(r1 * (1 - t) + r2 * t);
   const g = Math.round(g1 * (1 - t) + g2 * t);
-  const b3 = Math.round(b1 * (1 - t) + b2 * t);
+  const bb = Math.round(b1 * (1 - t) + b2 * t);
 
-  return `#${toHex(r)}${toHex(g)}${toHex(b3)}`;
+  return `#${toHex(r)}${toHex(g)}${toHex(bb)}`;
 };

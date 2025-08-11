@@ -2,7 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, TextInput, Alert, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import ApiService from '../services/api';
+import ApiService, { login as directLogin } from '../services/api';
 
 export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
   const [email, setEmail] = useState('');
@@ -38,8 +38,25 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
     if (!validate()) return;
     if (loading) return; // guard against rapid taps
     setLoading(true);
+    
+    // Debug logging to identify the issue
+    console.log('🔍 Debug - ApiService:', ApiService);
+    console.log('🔍 Debug - ApiService.login:', ApiService.login);
+    console.log('🔍 Debug - typeof ApiService.login:', typeof ApiService.login);
+    
     try {
-      const response = await ApiService.login(email.trim(), password);
+      let response;
+      
+      // Try ApiService.login first, fallback to direct import
+      if (typeof ApiService.login === 'function') {
+        console.log('✅ Using ApiService.login');
+        response = await ApiService.login(email.trim(), password);
+      } else if (typeof directLogin === 'function') {
+        console.log('⚠️ ApiService.login not available, using direct import');
+        response = await directLogin(email.trim(), password);
+      } else {
+        throw new Error('No login function available. Both ApiService.login and directLogin are undefined.');
+      }
       if (response?.success && response?.user) {
         await saveSession({ user: response.user, token: response.token });
         onLoginSuccess?.(response.user);
@@ -49,6 +66,12 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
       }
     } catch (err) {
       console.error('Login error:', err);
+      console.error('Error details:', {
+        name: err?.name,
+        message: err?.message,
+        stack: err?.stack
+      });
+      
       const msg =
         (err?.name === 'TypeError' && /Network/i.test(String(err))) ? 
           'Unable to reach the server. Check your internet connection and try again.' :
@@ -202,7 +225,7 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', paddingHorizontal: 20 },
+  container: { flex: 1, backgroundColor: '#D8C7DD', paddingHorizontal: 20 },
   header: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 60 },
   logoContainer: {
     alignItems: 'center',

@@ -1,800 +1,376 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
-  Modal,
-  TextInput,
-  Dimensions,
-  ActivityIndicator,
-} from 'react-native';
-import * as Haptics from 'expo-haptics';
+// screens/ColorWheelScreen.js
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, Modal, TextInput, ScrollView, StyleSheet, Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Svg, Circle, Path, Defs, RadialGradient, Stop } from 'react-native-svg';
-import { GestureHandlerRootView, PanGestureHandler, State } from 'react-native-gesture-handler';
-import Animated, {
-  useSharedValue,
-  useAnimatedGestureHandler,
-  useAnimatedStyle,
-  runOnJS,
-  withSpring,
-} from 'react-native-reanimated';
-import AdvancedColorWheel from '../components/AdvancedColorWheel';
+import * as Haptics from 'expo-haptics';
+import { Ionicons } from '@expo/vector-icons';
 import FullColorWheel from '../components/FullColorWheel';
+import AdvancedColorWheel from '../components/AdvancedColorWheel';
 import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
-import ColorCollageCreator from '../components/ColorCollageCreator';
-import ApiService from '../services/api';
-import { 
-  hslToHex, 
-  hexToHsl, 
-  hexToRgb, 
-  getColorScheme, 
-  calculateMarkerPositions, 
-  normalizeAngle, 
-  validateHexColor, 
-  blendColors 
-} from '../utils/color';
+import { validateHexColor, getColorScheme, hexToRgb } from '../utils/color';
 
-const { width: screenWidth } = Dimensions.get('window');
-const WHEEL_SIZE = screenWidth * 0.8;
-const WHEEL_RADIUS = WHEEL_SIZE / 2;
-const WHEEL_STROKE_WIDTH = 40;
+export default function ColorWheelScreen({ onSaveColorMatch, navigation }) {
+  const [selectedColor, setSelectedColor] = useState('#FF0000');
+  const [scheme, setScheme] = useState('analogous');
+  const [wheelType, setWheelType] = useState('basic');
+  const [showExtractor, setShowExtractor] = useState(false);
+  const [initialImageUri, setInitialImageUri] = useState(null);
+  const [manualHex, setManualHex] = useState('');
+  const [manualPalette, setManualPalette] = useState(['#24FF89', '#FF249A']); // Start with 2 colors
 
-export default function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout }) {
-  const [selectedColor, setSelectedColor] = useState('#FF6B6B');
-  const [angle, setAngle] = useState(0);
-  const [selectedScheme, setSelectedScheme] = useState('complementary');
-  const [isColorLocked, setIsColorLocked] = useState(false);
-  const [lockedColor, setLockedColor] = useState(null);
-  const [showCoolorsExtractor, setShowCoolorsExtractor] = useState(false);
-  const [showCollageCreator, setShowCollageCreator] = useState(false);
-  const [collageImage, setCollageImage] = useState(null);
-  const [collageBaseColor, setCollageBaseColor] = useState(null);
-  const [showManualInput, setShowManualInput] = useState(false);
-  const [manualColorInput, setManualColorInput] = useState('');
-  const [useAdvancedMode, setUseAdvancedMode] = useState(false);
-  const [useFullColorWheel, setUseFullColorWheel] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const openImagePicker = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1
+    });
+    if (!result.canceled) {
+      setInitialImageUri(result.assets[0].uri);
+      setShowExtractor(true);
+    }
+  };
 
-  // Contrast calculation utilities for accessibility
-  const getLuminance = (hex) => {
-    const { r, g, b } = hexToRgb(hex);
-    const rNorm = r / 255;
-    const gNorm = g / 255;
-    const bNorm = b / 255;
-    
-    const sRGB = [rNorm, gNorm, bNorm].map(c => {
-      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const openCamera = async () => {
+    // Request camera permissions
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission Required', 'Camera permission is needed to take photos.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1,
+      allowsEditing: false, // Skip editing, go directly to extractor
     });
     
-    return 0.2126 * sRGB[0] + 0.7152 * sRGB[1] + 0.0722 * sRGB[2];
-  };
-
-  const calculateContrastRatio = (color1, color2) => {
-    const lum1 = getLuminance(color1);
-    const lum2 = getLuminance(color2);
-    const brightest = Math.max(lum1, lum2);
-    const darkest = Math.min(lum1, lum2);
-    return (brightest + 0.05) / (darkest + 0.05);
-  };
-
-  const getContrastLevel = (ratio) => {
-    if (ratio >= 7) return 'AAA';
-    if (ratio >= 4.5) return 'AA';
-    if (ratio >= 3) return 'A';
-    return null;
-  };
-  
-  // Freestyle colors state (only state-based markers for freestyle mode)
-  const [freestyleColors, setFreestyleColors] = useState(['#FF6B6B', '#4ECDC4']);
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [activeMarkerId, setActiveMarkerId] = useState(1);
-
-  // Shared values for gesture handling
-  const gestureX = useSharedValue(0);
-  const gestureY = useSharedValue(0);
-  const isGestureActive = useSharedValue(false);
-
-  // Helper function to calculate angle and color from coordinates
-  const calculateAngleFromCoordinates = (x, y) => {
-    'worklet';
-    const centerX = WHEEL_SIZE / 2;
-    const centerY = WHEEL_SIZE / 2;
-    const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
-    
-    if (distance >= WHEEL_RADIUS - WHEEL_STROKE_WIDTH && distance <= WHEEL_RADIUS) {
-      let newAngle = Math.atan2(y - centerY, x - centerX) * (180 / Math.PI);
-      if (newAngle < 0) newAngle += 360;
-      return newAngle;
+    if (!result.canceled) {
+      // Same workflow as gallery - send directly to extractor
+      setInitialImageUri(result.assets[0].uri);
+      setShowExtractor(true);
+      Haptics.selectionAsync();
     }
-    return null;
   };
 
-  // Update color state from gesture (runs on JS thread)
-  const updateColorFromGesture = (newAngle) => {
-    if (isColorLocked || newAngle === null) return;
-    
-    const newColor = hslToHex(newAngle, 100, 50);
-    // updateColorState already handles all necessary state updates
-    updateColorState(newAngle, newColor, activeMarkerId);
-  };
-
-  // Enhanced gesture handler with reanimated for better performance
-  const gestureHandler = useAnimatedGestureHandler({
-    onStart: (event) => {
-      if (isColorLocked) return;
-      
-      isGestureActive.value = true;
-      gestureX.value = event.x;
-      gestureY.value = event.y;
-      
-      const newAngle = calculateAngleFromCoordinates(event.x, event.y);
-      if (newAngle !== null) {
-        runOnJS(updateColorFromGesture)(newAngle);
+  const handleManualHex = () => {
+    let hex = manualHex.trim().toUpperCase();
+    if (!hex.startsWith('#')) hex = '#' + hex;
+    if (validateHexColor(hex)) {
+      if (scheme === 'manual') {
+        // Add to manual palette if there's room
+        if (manualPalette.length < 4) {
+          setManualPalette([...manualPalette, hex]);
+          setManualHex('');
+          Haptics.selectionAsync();
+        } else {
+          Alert.alert('Palette Full', 'You can only have up to 4 colors in manual mode.');
+        }
+      } else {
+        setSelectedColor(hex);
+        Haptics.selectionAsync();
       }
-    },
-    onActive: (event) => {
-      if (isColorLocked) return;
-      
-      gestureX.value = event.x;
-      gestureY.value = event.y;
-      
-      const newAngle = calculateAngleFromCoordinates(event.x, event.y);
-      if (newAngle !== null) {
-        runOnJS(updateColorFromGesture)(newAngle);
-      }
-    },
-    onEnd: () => {
-      isGestureActive.value = false;
-      gestureX.value = withSpring(0);
-      gestureY.value = withSpring(0);
-    },
-  });
-
-  // Memoized color scheme generation for performance
-  const memoizedColorScheme = useMemo(() => {
-    if (selectedScheme === 'freestyle') {
-      return freestyleColors;
-    }
-    return getColorScheme(selectedColor, selectedScheme, angle);
-  }, [selectedColor, selectedScheme, angle, freestyleColors]);
-
-  // Memoized marker positions - single source of truth
-  const memoizedMarkers = useMemo(() => {
-    if (selectedScheme === 'freestyle') {
-      // Generate freestyle markers with adaptive spacing
-      return freestyleColors.map((color, index) => ({
-        id: index + 1,
-        color,
-        angle: index * (360 / freestyleColors.length), // Adaptive spacing
-        isActive: index + 1 === activeMarkerId
-      }));
-    }
-    // For schemes, derive markers from driving state
-    return calculateMarkerPositions(selectedScheme, angle, activeMarkerId);
-  }, [selectedScheme, angle, activeMarkerId, freestyleColors]);
-
-  // Update driving state only - markers derived via useMemo
-  const updateColorState = (newAngle, newColor, activeId = 1) => {
-    if (selectedScheme === 'freestyle') {
-      // In freestyle mode, update the specific color in the array
-      setFreestyleColors(prev => 
-        prev.map((color, index) => 
-          index + 1 === activeId ? newColor : color
-        )
-      );
-      setActiveMarkerId(activeId);
-      return;
-    }
-
-    // For schemes, update driving state only
-    setAngle(newAngle);
-    setSelectedColor(newColor);
-    setActiveMarkerId(activeId);
-  };
-
-  // Add color to freestyle palette
-  const addFreestyleColor = () => {
-    if (freestyleColors.length < 4) {
-      const newColor = hslToHex(Math.random() * 360, 100, 50);
-      setFreestyleColors(prev => [...prev, newColor]);
-      // Auto-select the new color
-      setActiveMarkerId(freestyleColors.length + 1);
-    }
-  };
-
-  // Remove color from freestyle palette
-  const removeFreestyleColor = (index) => {
-    if (freestyleColors.length > 2) {
-      setFreestyleColors(prev => prev.filter((_, i) => i !== index));
-      // Adjust active marker if needed
-      if (activeMarkerId > freestyleColors.length - 1) {
-        setActiveMarkerId(1);
-      }
-    }
-  };
-
-  // Update freestyle color
-  const updateFreestyleColor = (index, newColor) => {
-    setFreestyleColors(prev => 
-      prev.map((color, i) => i === index ? newColor : color)
-    );
-  };
-
-  const handleColorExtracted = (extractedColor) => {
-    // Convert extracted color to HSL to get the angle for the wheel
-    const { h: hue } = hexToHsl(extractedColor);
-    
-    setSelectedColor(extractedColor);
-    setLockedColor(extractedColor);
-    setAngle(hue);
-    setIsColorLocked(true);
-    setSelectedScheme('complementary'); // Default to complementary
-    setShowCoolorsExtractor(false);
-    
-    // Update markers with the new color
-    updateColorMarkers(hue, extractedColor, activeMarkerId);
-  };
-
-  const handleCreateCollage = (image, baseColor) => {
-    setCollageImage(image);
-    setCollageBaseColor(baseColor);
-    setShowCoolorsExtractor(false);
-    setShowCollageCreator(true);
-  };
-
-  const handleCollageExport = (collageUri) => {
-    console.log('Collage exported:', collageUri);
-    setShowCollageCreator(false);
-    // Optionally save to user's color matches or boards
-  };
-
-  const handleCollageClose = () => {
-    setShowCollageCreator(false);
-    setCollageImage(null);
-    setCollageBaseColor(null);
-  };
-
-  const toggleColorLock = async () => {
-    // Add haptic feedback
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
-    if (isColorLocked) {
-      setIsColorLocked(false);
-      setLockedColor(null);
     } else {
-      setIsColorLocked(true);
-      setLockedColor(selectedColor);
+      Alert.alert('Invalid Color', 'Please enter a valid HEX color.');
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
   };
 
-  const handleSaveColorMatch = async () => {
-    if (!selectedBoard) {
-      Alert.alert('No Board Selected', 'Please select a board to save your color match.');
-      return;
+  const addColorToManualPalette = () => {
+    if (manualPalette.length < 4) {
+      // Generate a random color or use the current selected color
+      const newColor = selectedColor;
+      setManualPalette([...manualPalette, newColor]);
+      Haptics.selectionAsync();
     }
+  };
 
-    setIsSaving(true);
+  const removeColorFromManualPalette = (index) => {
+    if (manualPalette.length > 2) { // Keep minimum of 2 colors
+      const newPalette = manualPalette.filter((_, i) => i !== index);
+      setManualPalette(newPalette);
+      Haptics.selectionAsync();
+    }
+  };
+
+  const handleSave = async () => {
+    const colors = scheme === 'manual' ? manualPalette : getColorScheme(selectedColor, scheme);
+    const baseColor = scheme === 'manual' ? manualPalette[0] : selectedColor;
     
     try {
-      await ApiService.createColorMatch({
-        color: selectedColor,
-        scheme: selectedScheme,
-        colors: memoizedColorScheme,
-        boardId: selectedBoard.id,
-      });
+      // Save the color match
+      await onSaveColorMatch({ base_color: baseColor, scheme, colors });
       
-      // Success haptic feedback
+      // Provide haptic feedback
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      Alert.alert('Success', 'Color combination saved successfully!');
       
-      if (onSaveColorMatch) {
-        onSaveColorMatch({
-          baseColor: isColorLocked ? lockedColor : selectedColor,
-          scheme: selectedScheme,
-          colors: memoizedColorScheme,
-          timestamp: new Date().toISOString(),
-          isLocked: isColorLocked,
-          lockedColor: isColorLocked ? lockedColor : null,
-        });
-      }
-    } catch (error) {
-      console.error('Error saving color match:', error);
-      // Error haptic feedback
-      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleGalleryColorExtraction = () => {
-    setShowCoolorsExtractor(true);
-  };
-
-  // Handle color extraction from camera image
-  const handleColorExtractedFromImage = (imageUri) => {
-    console.log('Color extracted from image:', imageUri);
-    // TODO: Implement color extraction logic
-    // For now, just set a random color
-    const randomColors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'];
-    const randomColor = randomColors[Math.floor(Math.random() * randomColors.length)];
-    
-    // Convert to angle and update state
-    const hsl = hexToHsl(randomColor);
-    const newAngle = hsl.h;
-    
-    updateColorState(newAngle, randomColor);
-    
-    Alert.alert(
-      'Color Extracted!',
-      `Extracted color: ${randomColor}`,
-      [{ text: 'OK' }]
-    );
-  };
-
-  // Handle FullColorWheel color changes
-  const handleFullColorWheelChange = ({ hex, h, s, v }) => {
-    setSelectedColor(hex);
-    setAngle(h);
-    // Trigger haptic feedback for smooth interaction
-    Haptics.selectionAsync();
-  };
-
-  const renderColorWheel = () => {
-    // Render multiple markers for different schemes
-    const renderMarkers = () => {
-      if (selectedScheme === 'freestyle') {
-        // In freestyle mode, show markers for each freestyle color
-        return freestyleColors.map((color, index) => {
-          const markerAngle = (index * 90) * (Math.PI / 180); // Spread them around
-          const markerRadius = WHEEL_RADIUS - (WHEEL_STROKE_WIDTH / 2);
-          const markerX = WHEEL_RADIUS + markerRadius * Math.cos(markerAngle);
-          const markerY = WHEEL_RADIUS + markerRadius * Math.sin(markerAngle);
-          
-          return (
-            <Circle
-              key={`freestyle-${index}`}
-              cx={markerX}
-              cy={markerY}
-              r="8"
-              fill={color}
-              stroke="white"
-              strokeWidth="3"
-              opacity={0.9}
-            />
-          );
-        });
-      }
-      
-      // Render markers using memoized positions
-      return memoizedMarkers.map((marker) => {
-        const markerAngle = marker.angle * (Math.PI / 180);
-        const markerRadius = WHEEL_RADIUS - (WHEEL_STROKE_WIDTH / 2);
-        const markerX = WHEEL_RADIUS + markerRadius * Math.cos(markerAngle);
-        const markerY = WHEEL_RADIUS + markerRadius * Math.sin(markerAngle);
+      // Navigate to Profile/Boards screen to show saved palettes
+      if (navigation) {
+        navigation.navigate('Profile');
         
-        return (
-          <Circle
-            key={marker.id}
-            cx={markerX}
-            cy={markerY}
-            r={marker.isActive ? "10" : "8"}
-            fill={marker.color}
-            stroke={marker.isActive ? "#333" : "white"}
-            strokeWidth={marker.isActive ? "4" : "3"}
-            opacity={marker.isActive ? 1 : 0.8}
-          />
-        );
-      });
-    };
-
-    return (
-      <PanGestureHandler onGestureEvent={gestureHandler} enabled={!isColorLocked}>
-        <Animated.View style={styles.wheelContainer}>
-          <Svg width={WHEEL_SIZE} height={WHEEL_SIZE}>
-            <Defs>
-              <RadialGradient id="colorWheel" cx="50%" cy="50%" r="50%">
-                <Stop offset="0%" stopColor="white" />
-                <Stop offset="100%" stopColor="transparent" />
-              </RadialGradient>
-            </Defs>
-            
-            {/* Color wheel segments */}
-            {Array.from({ length: 360 }, (_, i) => {
-              const startAngle = i * (Math.PI / 180);
-              const endAngle = (i + 1) * (Math.PI / 180);
-              const color = hslToHex(i, 100, 50);
-              
-              const x1 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.cos(startAngle);
-              const y1 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.sin(startAngle);
-              const x2 = WHEEL_RADIUS + WHEEL_RADIUS * Math.cos(startAngle);
-              const y2 = WHEEL_RADIUS + WHEEL_RADIUS * Math.sin(startAngle);
-              const x3 = WHEEL_RADIUS + WHEEL_RADIUS * Math.cos(endAngle);
-              const y3 = WHEEL_RADIUS + WHEEL_RADIUS * Math.sin(endAngle);
-              const x4 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.cos(endAngle);
-              const y4 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.sin(endAngle);
-              
-              return (
-                <Path
-                  key={i}
-                  d={`M ${x1} ${y1} L ${x2} ${y2} L ${x3} ${y3} L ${x4} ${y4} Z`}
-                  fill={color}
-                />
-              );
-            })}
-            
-            {/* Multi-marker color selectors */}
-            {renderMarkers()}
-          </Svg>
-        </Animated.View>
-      </PanGestureHandler>
-    );
+        // Show success message after navigation
+        setTimeout(() => {
+          Alert.alert('Palette Saved!', 'Your color palette has been saved to your boards.', [
+            { text: 'OK', style: 'default' }
+          ]);
+        }, 500);
+      } else {
+        Alert.alert('Saved', 'Your color match has been saved.');
+      }
+    } catch (e) {
+      console.error('Save error:', e);
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Error', 'Failed to save color match. Please try again.');
+    }
   };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Fashion Color Wheel</Text>
-        <Text style={styles.subtitle}>Discover perfect color combinations</Text>
-        
-        {/* Mode Toggle */}
-        <View style={styles.modeToggle}>
-          <TouchableOpacity 
-            style={[styles.toggleButton, !useAdvancedMode && !useFullColorWheel && styles.activeToggle]}
-            onPress={() => {
-              setUseAdvancedMode(false);
-              setUseFullColorWheel(false);
-            }}
-          >
-            <Text style={[styles.toggleText, !useAdvancedMode && !useFullColorWheel && styles.activeToggleText]}>Basic</Text>
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Color Wheel</Text>
+
+      <View style={styles.toggleRow}>
+        {['basic', 'full', 'advanced'].map(type => (
+          <TouchableOpacity key={type} onPress={() => setWheelType(type)} style={[styles.toggleBtn, wheelType === type && styles.activeBtn]}>
+            <Text style={[styles.toggleText, wheelType === type && styles.activeText]}>{type}</Text>
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.toggleButton, useFullColorWheel && styles.activeToggle]}
-            onPress={() => {
-              setUseAdvancedMode(false);
-              setUseFullColorWheel(true);
-            }}
-          >
-            <Text style={[styles.toggleText, useFullColorWheel && styles.activeToggleText]}>Full Wheel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.toggleButton, useAdvancedMode && styles.activeToggle]}
-            onPress={() => {
-              setUseAdvancedMode(true);
-              setUseFullColorWheel(false);
-            }}
-          >
-            <Text style={[styles.toggleText, useAdvancedMode && styles.activeToggleText]}>Advanced</Text>
-          </TouchableOpacity>
-        </View>
+        ))}
       </View>
 
-      {/* Conditional Rendering: Advanced vs Full vs Basic Color Wheel */}
-      {useAdvancedMode ? (
+      {wheelType === 'advanced' ? (
         <AdvancedColorWheel 
-          currentUser={currentUser}
+          currentUser={{ id: 'demo' }}
           onSaveColorMatch={onSaveColorMatch}
         />
-      ) : useFullColorWheel ? (
-        <View style={styles.fullColorWheelContainer}>
-          <FullColorWheel
-            size={340}
-            ringWidth={30}
-            initialHex={selectedColor}
-            onChange={handleFullColorWheelChange}
-          />
-        </View>
+      ) : wheelType === 'full' ? (
+        <FullColorWheel 
+          initialHex={selectedColor} 
+          onChange={c => {
+            setSelectedColor(c.hex);
+            Haptics.selectionAsync();
+          }} 
+        />
       ) : (
-        <>
-          {renderColorWheel()}
+        scheme === 'manual' ? (
+          <View style={styles.manualPaletteContainer}>
+            <View style={styles.paletteHeader}>
+              <Text style={styles.paletteTitle}>Current Palette</Text>
+              <Text style={styles.paletteCount}>{manualPalette.length} colors</Text>
+            </View>
+            <View style={styles.manualPalette}>
+              {manualPalette.map((color, index) => (
+                <TouchableOpacity 
+                  key={index} 
+                  style={styles.manualColorItem}
+                  onLongPress={() => removeColorFromManualPalette(index)}
+                >
+                  <View style={[styles.manualColorSwatch, { backgroundColor: color }]} />
+                  <Text style={styles.manualColorHex}>{color}</Text>
+                </TouchableOpacity>
+              ))}
+              {manualPalette.length < 4 && (
+                <TouchableOpacity 
+                  style={styles.addColorButton}
+                  onPress={addColorToManualPalette}
+                >
+                  <Ionicons name="add" size={24} color="#007AFF" />
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+        ) : (
+          <View style={styles.colorInfoContainer}>
+            <View style={[styles.colorPreview, { backgroundColor: selectedColor }]} />
+            <View style={styles.colorDetails}>
+              <View style={styles.colorValueContainer}>
+                <Text style={styles.colorLabel}>HEX</Text>
+                <Text style={styles.colorValue}>{selectedColor}</Text>
+              </View>
+              <View style={styles.colorValueContainer}>
+                <Text style={styles.colorLabel}>RGB</Text>
+                <Text style={styles.colorValue}>
+                  {(() => {
+                    const { r, g, b } = hexToRgb(selectedColor);
+                    return `RGB(${r}, ${g}, ${b})`;
+                  })()}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )
+      )}
 
-          <View style={styles.colorDisplay}>
-        <View style={[styles.colorBox, { backgroundColor: selectedColor }]} />
-        <View style={styles.colorInfo}>
-          <Text style={styles.colorText}>Selected Color</Text>
-          <Text style={styles.colorValue}>{selectedColor}</Text>
-        </View>
-      </View>
-
-      <View style={styles.inputButtons}>
-        <TouchableOpacity
-          style={styles.inputButton}
-          onPress={async () => {
-            try {
-              const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-              if (permissionResult.status !== 'granted') {
-                Alert.alert('Permission Denied', 'Camera access is required to take a photo.');
-                return;
-              }
-
-              const result = await ImagePicker.launchCameraAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                quality: 1,
-              });
-
-              if (!result.canceled && result.assets && result.assets.length > 0) {
-                setShowCoolorsExtractor(true);
-                setTimeout(() => {
-                  handleColorExtractedFromImage(result.assets[0].uri);
-                }, 300);
-              }
-            } catch (error) {
-              console.error('Error launching camera:', error);
-              Alert.alert('Error', 'Could not open camera.');
-            }
-          }}
-        >
-          <Text style={styles.inputButtonText}>📷 Camera</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.inputButton} onPress={handleGalleryColorExtraction}>
-          <Text style={styles.inputButtonText}>🖼️ Gallery</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.inputButton} onPress={() => setShowManualInput(true)}>
-          <Text style={styles.inputButtonText}>✏️ Manual</Text>
-        </TouchableOpacity>
-      </View>
-
+      {/* Color Scheme Selector */}
       <View style={styles.schemeSection}>
-        <Text style={styles.sectionTitle}>Color Schemes</Text>
+        <Text style={styles.sectionTitle}>Color Scheme</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.schemeScroll}>
-          {['complementary', 'analogous', 'triadic', 'tetradic', 'monochromatic'].map((scheme) => (
+          {['analogous', 'complementary', 'triadic', 'tetradic', 'monochromatic', 'manual'].map((schemeType) => (
             <TouchableOpacity
-              key={scheme}
-              style={[styles.schemeButton, selectedScheme === scheme && styles.selectedScheme]}
-              onPress={() => setSelectedScheme(scheme)}
+              key={schemeType}
+              style={[styles.schemeButton, scheme === schemeType && styles.selectedScheme]}
+              onPress={() => {
+                setScheme(schemeType);
+                Haptics.selectionAsync();
+              }}
             >
-              <Text style={[styles.schemeText, selectedScheme === scheme && styles.selectedSchemeText]}>
-                {scheme.charAt(0).toUpperCase() + scheme.slice(1)}
+              <Text style={[styles.schemeText, scheme === schemeType && styles.selectedSchemeText]}>
+                {schemeType.charAt(0).toUpperCase() + schemeType.slice(1)}
               </Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
       </View>
 
-      <View style={styles.colorsPreview}>
-        {memoizedColorScheme.map((color, index) => {
-          // Calculate contrast ratio with base color for accessibility
-          const contrastRatio = calculateContrastRatio(selectedColor, color);
-          const contrastLevel = getContrastLevel(contrastRatio);
-          
-          return (
-            <View key={index} style={styles.previewColorContainer}>
-              <View style={[styles.previewColor, { backgroundColor: color }]} />
-              {contrastLevel && (
-                <Text style={styles.contrastBadge}>{contrastLevel}</Text>
-              )}
-            </View>
-          );
-        })}
+      {/* Image Source Buttons */}
+      <View style={styles.imageSourceButtons}>
+        <TouchableOpacity onPress={openImagePicker} style={[styles.btn, styles.imageBtn]}>
+          <Ionicons name="images" size={20} color="white" />
+          <Text style={styles.btnText}>Gallery</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={openCamera} style={[styles.btn, styles.imageBtn]}>
+          <Ionicons name="camera" size={20} color="white" />
+          <Text style={styles.btnText}>Camera</Text>
+        </TouchableOpacity>
       </View>
 
-      <TouchableOpacity 
-        style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
-        onPress={handleSaveColorMatch}
-        disabled={isSaving}
-      >
-        {isSaving ? (
-          <View style={styles.savingContainer}>
-            <ActivityIndicator size="small" color="white" />
-            <Text style={styles.saveButtonText}>Saving...</Text>
-          </View>
-        ) : (
-          <Text style={styles.saveButtonText}>💾 Save Color Match</Text>
-        )}
-      </TouchableOpacity>
-
-      {/* Manual Input Modal */}
-      <Modal visible={showManualInput} transparent={true} animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Enter Hex Color</Text>
-            <TextInput
-              style={styles.hexInput}
-              value={manualColorInput}
-              onChangeText={setManualColorInput}
-              placeholder="#FF6B6B"
-              placeholderTextColor="#999"
-            />
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={styles.cancelButton}
-                onPress={() => setShowManualInput(false)}
-              >
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.confirmButton}
-                onPress={async () => {
-                  // Allow both #RGB and #RRGGBB formats
-                  let processedColor = manualColorInput.trim();
-                  
-                  // Convert #RGB to #RRGGBB
-                  if (processedColor.match(/^#[0-9A-F]{3}$/i)) {
-                    const r = processedColor[1];
-                    const g = processedColor[2];
-                    const b = processedColor[3];
-                    processedColor = `#${r}${r}${g}${g}${b}${b}`;
-                  }
-                  
-                  if (validateHexColor(processedColor)) {
-                    // Compute angle from hex color
-                    const hsl = hexToHsl(processedColor);
-                    const newAngle = hsl.h;
-                    
-                    // Use centralized update function for proper marker sync
-                    updateColorState(newAngle, processedColor, activeMarkerId);
-                    
-                    // Update main color state for non-freestyle modes
-                    if (selectedScheme !== 'freestyle') {
-                      setSelectedColor(processedColor);
-                      setAngle(newAngle);
-                    }
-                    
-                    setShowManualInput(false);
-                    setManualColorInput('');
-                    
-                    // Success haptic feedback
-                    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  } else {
-                    Alert.alert('Invalid Color', 'Please enter a valid hex color (e.g., #FF5733 or #F73)');
-                    // Error haptic feedback
-                    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-                  }
-                }}
-              >
-                <Text style={styles.confirmText}>Apply</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
+      <Modal visible={showExtractor} animationType="slide">
+        <CoolorsColorExtractor
+          initialImageUri={initialImageUri}
+          onColorExtracted={hex => {
+            setSelectedColor(hex);
+            setShowExtractor(false);
+            setInitialImageUri(null);
+            Haptics.selectionAsync();
+          }}
+          onClose={() => {
+            setShowExtractor(false);
+            setInitialImageUri(null);
+          }}
+          onCreateCollage={(image, hex) => {
+            // Handle collage creation if needed
+            console.log('Collage created with color:', hex);
+          }}
+        />
       </Modal>
 
-      {/* Color Lock Status */}
-      {isColorLocked && (
-        <View style={styles.colorLockStatus}>
-          <Text style={styles.lockStatusText}>🔒 Color Locked: {lockedColor}</Text>
-          <TouchableOpacity 
-          style={[styles.lockButton, isColorLocked && styles.lockButtonActive]}
-          onPress={toggleColorLock}
-        >
-          <Text style={[styles.lockButtonText, isColorLocked && styles.lockButtonTextActive]}>
-            {isColorLocked ? '🔓 Unlock' : '🔒 Lock'} Color
-          </Text>
-        </TouchableOpacity>
-        </View>
-      )}
+      <TextInput
+        style={styles.input}
+        placeholder={scheme === 'manual' ? 'Add color #RRGGBB' : '#RRGGBB'}
+        value={manualHex}
+        onChangeText={setManualHex}
+        onSubmitEditing={handleManualHex}
+      />
 
-          {/* Coolors Color Extractor Modal */}
-          {showCoolorsExtractor && (
-            <Modal
-              animationType="slide"
-              transparent={false}
-              visible={showCoolorsExtractor}
-              onRequestClose={() => setShowCoolorsExtractor(false)}
-            >
-              <CoolorsColorExtractor
-                onColorExtracted={handleColorExtracted}
-                onClose={() => setShowCoolorsExtractor(false)}
-                onCreateCollage={handleCreateCollage}
-              />
-            </Modal>
-          )}
-
-          {/* Color Collage Creator Modal */}
-          {showCollageCreator && collageImage && (
-            <ColorCollageCreator
-              image={collageImage}
-              colors={memoizedColorScheme}
-              onClose={handleCollageClose}
-              onExport={handleCollageExport}
-            />
-          )}
-        </>
-      )}
-      </ScrollView>
-    </GestureHandlerRootView>
+      {/* Floating Save Button */}
+      <TouchableOpacity onPress={handleSave} style={styles.floatingSaveBtn}>
+        <Ionicons name="download" size={24} color="white" />
+      </TouchableOpacity>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f8f9fa',
-  },
-  header: {
-    alignItems: 'center',
-    paddingVertical: 20,
-    paddingTop: 40,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 5,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#7f8c8d',
-    textAlign: 'center',
-  },
-  wheelContainer: {
-    alignItems: 'center',
-    marginVertical: 20,
-  },
-  colorDisplay: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  container: { padding: 20, alignItems: 'center', paddingBottom: 100 },
+  title: { fontSize: 20, fontWeight: 'bold', marginBottom: 20 },
+  toggleRow: { flexDirection: 'row', marginBottom: 20 },
+  toggleBtn: { padding: 10, marginHorizontal: 5, borderRadius: 5, backgroundColor: '#ccc' },
+  activeBtn: { backgroundColor: '#333' },
+  toggleText: { color: '#000' },
+  activeText: { color: '#fff' },
+  
+  // Enhanced color info display
+  colorInfoContainer: {
     backgroundColor: 'white',
-    margin: 20,
-    padding: 15,
-    borderRadius: 15,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    width: '100%',
+    maxWidth: 350,
   },
-  colorBox: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    marginRight: 15,
-    borderWidth: 3,
-    borderColor: 'white',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+  colorPreview: {
+    width: 80,
+    height: 80,
+    borderRadius: 16,
+    marginBottom: 16,
+    alignSelf: 'center',
   },
-  colorInfo: {
-    flex: 1,
-  },
-  colorText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#2c3e50',
-    marginBottom: 5,
-  },
-  colorValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#3498db',
-    fontFamily: 'monospace',
-  },
-  inputButtons: {
+  colorDetails: {
     flexDirection: 'row',
     justifyContent: 'space-around',
-    marginHorizontal: 20,
-    marginBottom: 20,
   },
-  inputButton: {
-    backgroundColor: '#3498db',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    minWidth: 100,
+  colorValueContainer: {
+    backgroundColor: '#f5f5f5',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     alignItems: 'center',
+    flex: 0.45,
   },
-  inputButtonText: {
-    color: 'white',
-    fontSize: 14,
+  colorLabel: {
+    fontSize: 12,
+    color: '#666',
     fontWeight: '600',
+    marginBottom: 4,
   },
+  colorValue: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: 'bold',
+    fontFamily: 'monospace',
+  },
+  
+  // Image source buttons
+  imageSourceButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    width: '100%',
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  btn: { padding: 15, backgroundColor: '#007AFF', borderRadius: 8, marginTop: 10 },
+  imageBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    marginTop: 0,
+    flex: 0.45,
+    justifyContent: 'center',
+  },
+  btnText: { color: '#fff', fontWeight: 'bold', marginLeft: 8 },
+  input: { borderWidth: 1, borderColor: '#ccc', padding: 10, marginTop: 20, borderRadius: 5, width: 150, textAlign: 'center' },
+  
+  // Floating save button
+  floatingSaveBtn: {
+    position: 'absolute',
+    bottom: 30,
+    right: 30,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  
+  // Color scheme selector
   schemeSection: {
-    marginHorizontal: 20,
     marginBottom: 20,
+    width: '100%',
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 15,
+    color: '#333',
+    marginBottom: 12,
+    textAlign: 'center',
   },
   schemeScroll: {
     flexDirection: 'row',
@@ -802,213 +378,86 @@ const styles = StyleSheet.create({
   schemeButton: {
     backgroundColor: 'white',
     paddingVertical: 10,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     borderRadius: 20,
     marginRight: 10,
     borderWidth: 2,
-    borderColor: '#ecf0f1',
+    borderColor: '#e0e0e0',
   },
   selectedScheme: {
-    backgroundColor: '#3498db',
-    borderColor: '#3498db',
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
   },
   schemeText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#7f8c8d',
+    color: '#666',
   },
   selectedSchemeText: {
     color: 'white',
   },
-  colorsPreview: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginHorizontal: 20,
-    marginBottom: 30,
-  },
-  previewColorContainer: {
-    alignItems: 'center',
-    marginHorizontal: 5,
-  },
-  previewColor: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 2,
-    borderColor: 'white',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  contrastBadge: {
-    fontSize: 10,
-    fontWeight: 'bold',
-    color: '#666',
-    marginTop: 2,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  saveButton: {
-    backgroundColor: '#e74c3c',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    marginTop: 20,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  saveButtonDisabled: {
-    backgroundColor: '#bdc3c7',
-    shadowOpacity: 0.1,
-  },
-  savingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  saveButtonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContent: {
+  
+  // Manual palette styles
+  manualPaletteContainer: {
     backgroundColor: 'white',
+    borderRadius: 16,
     padding: 20,
-    borderRadius: 15,
-    width: '80%',
-    alignItems: 'center',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 15,
-    color: '#2c3e50',
-  },
-  hexInput: {
-    borderWidth: 1,
-    borderColor: '#bdc3c7',
-    borderRadius: 10,
-    padding: 15,
-    fontSize: 18,
-    fontFamily: 'monospace',
-    width: '100%',
-    textAlign: 'center',
     marginBottom: 20,
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
     width: '100%',
+    maxWidth: 350,
   },
-  cancelButton: {
-    backgroundColor: '#95a5a6',
-    paddingVertical: 12,
-    paddingHorizontal: 25,
-    borderRadius: 10,
-  },
-  cancelText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  confirmButton: {
-    backgroundColor: '#27ae60',
-    paddingVertical: 12,
-    paddingHorizontal: 25,
-    borderRadius: 10,
-  },
-  confirmText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  demoText: {
-    fontSize: 14,
-    color: '#7f8c8d',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  colorLockStatus: {
+  paletteHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#fff3cd',
-    marginHorizontal: 20,
-    marginBottom: 15,
-    padding: 15,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#ffeaa7',
+    marginBottom: 16,
   },
-  lockStatusText: {
+  paletteTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  paletteCount: {
     fontSize: 14,
-    color: '#856404',
-    fontWeight: '600',
-    flex: 1,
+    color: '#666',
   },
-  unlockButton: {
-    backgroundColor: '#ffc107',
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    borderRadius: 15,
-  },
-  unlockButtonText: {
-    color: '#212529',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  // Mode Toggle Styles
-  modeToggle: {
+  manualPalette: {
     flexDirection: 'row',
-    backgroundColor: '#e9ecef',
-    borderRadius: 25,
-    padding: 4,
-    marginTop: 15,
+    flexWrap: 'wrap',
+    justifyContent: 'space-around',
   },
-  toggleButton: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
+  manualColorItem: {
     alignItems: 'center',
+    marginBottom: 12,
+    width: '22%',
   },
-  activeToggle: {
-    backgroundColor: '#007bff',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
+  manualColorSwatch: {
+    width: 50,
+    height: 50,
+    borderRadius: 12,
+    marginBottom: 8,
   },
-  toggleText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6c757d',
+  manualColorHex: {
+    fontSize: 12,
+    color: '#333',
+    fontWeight: 'bold',
+    fontFamily: 'monospace',
   },
-  activeToggleText: {
-    color: '#ffffff',
-  },
-  fullColorWheelContainer: {
+  addColorButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#007AFF',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 20,
+    alignSelf: 'center',
     marginBottom: 20,
   },
 });
