@@ -44,7 +44,7 @@ const WHEEL_SIZE = screenWidth * 0.8;
 const WHEEL_RADIUS = WHEEL_SIZE / 2;
 const WHEEL_STROKE_WIDTH = 40;
 
-export default function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout }) {
+function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout }) {
   const route = useRoute();
   const [selectedColor, setSelectedColor] = useState('#FF6B6B');
   const [baseHex, setBaseHex] = useState('#FF6B6B');
@@ -986,3 +986,5 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
 });
+
+export default ColorWheelScreen;
