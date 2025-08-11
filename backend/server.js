@@ -2,10 +2,11 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const logger = require('./utils/logger');
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
-const colorRoutes = require('./routes/colors');
+const { router: colorRoutes } = require('./routes/colors');
 const boardRoutes = require('./routes/boards');
 const userRoutes = require('./routes/users');
 const communityRoutes = require('./routes/community');
