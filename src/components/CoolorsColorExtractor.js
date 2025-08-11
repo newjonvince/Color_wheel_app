@@ -171,7 +171,7 @@ export default function CoolorsColorExtractor({
       onComplete(resultData);
     } else if (navigateOnActions && navigation) {
       // Navigation flow
-      navigation.navigate('ColorWheelScreen', {
+      navigation.navigate('ColorWheel', {
         palette: resultData.slots,
         baseHex: resultData.dominant,
         from: 'extractor',
