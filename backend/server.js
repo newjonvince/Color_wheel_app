@@ -44,6 +44,9 @@ const corsOptions = {
   },
   credentials: true,
   optionsSuccessStatus: 200,
+  // Explicitly allow headers needed for image uploads
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions)); // handle preflight everywhere
