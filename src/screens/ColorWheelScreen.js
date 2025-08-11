@@ -66,6 +66,8 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
   const [manualColorInput, setManualColorInput] = useState('');
   const [useAdvancedMode, setUseAdvancedMode] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showCollageCreator, setShowCollageCreator] = useState(false);
+  const [selectedBoard, setSelectedBoard] = useState(null);
 
   // Honor incoming navigation params from Export
   useEffect(() => {
@@ -297,10 +299,12 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
     
     try {
       await ApiService.createColorMatch({
-        color: selectedColor,
+        base_color: isColorLocked ? lockedColor : selectedColor,
         scheme: selectedScheme,
         colors: memoizedColorScheme,
-        boardId: selectedBoard.id,
+        title: 'Quick save',
+        description: '',
+        is_public: false,
       });
       
       // Success haptic feedback
@@ -321,6 +325,10 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
       console.error('Error saving color match:', error);
       // Error haptic feedback
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      
+      // Show user-friendly error message
+      const errorMessage = error?.response?.data?.error || error?.message || 'Failed to save color match. Please try again.';
+      Alert.alert('Save Failed', errorMessage);
     } finally {
       setIsSaving(false);
     }

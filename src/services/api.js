@@ -119,14 +119,33 @@ export const startImageExtractSession = async (imageUri, {
   form.append('maxWidth', String(maxWidth));
   form.append('maxHeight', String(maxHeight));
 
-  const { data } = await api.post('/images/extract-session', form, {
-    headers: { 'Content-Type': 'multipart/form-data', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
-    onUploadProgress: (evt) => {
-      if (onProgress && evt.total) onProgress(Math.round((evt.loaded / evt.total) * 100));
-    },
-  });
-  // expected: { sessionId, token, width, height, dominant, palette }
-  return data;
+  try {
+    // Try new endpoint first
+    const { data } = await api.post('/images/extract-session', form, {
+      headers: { 'Content-Type': 'multipart/form-data', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+      onUploadProgress: (evt) => {
+        if (onProgress && evt.total) onProgress(Math.round((evt.loaded / evt.total) * 100));
+      },
+    });
+    return data;
+  } catch (error) {
+    // Fallback to backend endpoint
+    const { data } = await api.post('/images/extract-colors', form, {
+      headers: { 'Content-Type': 'multipart/form-data', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+      onUploadProgress: (evt) => {
+        if (onProgress && evt.total) onProgress(Math.round((evt.loaded / evt.total) * 100));
+      },
+    });
+    // Normalize response to expected format
+    return {
+      sessionId: data.sessionId || data.token,
+      token: data.token || data.sessionId,
+      width: data.width,
+      height: data.height,
+      dominant: data.dominant,
+      palette: data.palette
+    };
+  }
 };
 
 // B-2) Sample a color at coordinates (accepts absolute or normalized)
@@ -148,16 +167,29 @@ export const sampleImageColor = async (sessionToken, {
     throw new Error('Provide either {x,y} or normalized {nx,ny}');
   }
 
-  const { data } = await api.post('/images/extract-sample', body, withAuthHeaders());
-  // { hex, rgb, hsl, nearest?, updatedPalette? }
-  return data;
+  try {
+    // Try new endpoint first
+    const { data } = await api.post('/images/extract-sample', body, withAuthHeaders());
+    return data;
+  } catch (error) {
+    // Fallback to backend endpoint with normalized coordinates
+    const { data } = await api.post('/images/sample-color', body, withAuthHeaders());
+    return data;
+  }
 };
 
 // B-3) Close a session (cleanup)
 export const closeImageExtractSession = async (sessionId) => {
   if (!sessionId) return { ok: true };
-  const { data } = await api.post(`/images/extract-session/${encodeURIComponent(sessionId)}/close`, {}, withAuthHeaders());
-  return data; // { ok: true }
+  try {
+    // Try new endpoint first
+    const { data } = await api.post(`/images/extract-session/${encodeURIComponent(sessionId)}/close`, {}, withAuthHeaders());
+    return data;
+  } catch (error) {
+    // Fallback to backend endpoint
+    const { data } = await api.post('/images/close-session', { sessionId }, withAuthHeaders());
+    return data;
+  }
 };
 
 /** -----------------------------------------------------------------------
