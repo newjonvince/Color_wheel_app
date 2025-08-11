@@ -115,32 +115,152 @@ export const contrastRatio = (hex1, hex2) => {
 export const getContrastingTextColor = (hexColor) =>
   contrastRatio(normalizeHex(hexColor), '#000000') >= 4.5 ? '#000000' : '#FFFFFF';
 
+
+// ========================= OKLab / OKLCH + WCAG upgrades =========================
+// Linearize sRGB channel
+const _srgbToLinear = (c) => {
+  c = c / 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+};
+const _linearToSrgb = (c) => {
+  const v = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1/2.4) - 0.055;
+  return Math.min(255, Math.max(0, Math.round(v * 255)));
+};
+
+export const rgbToOklab = (r, g, b) => {
+  const R = _srgbToLinear(r);
+  const G = _srgbToLinear(g);
+  const B = _srgbToLinear(b);
+  const l = 0.4122214708 * R + 0.5363325363 * G + 0.0514459929 * B;
+  const m = 0.2119034982 * R + 0.6806995451 * G + 0.1073969566 * B;
+  const s = 0.0883024619 * R + 0.2817188376 * G + 0.6299787005 * B;
+  const l_ = Math.cbrt(l);
+  const m_ = Math.cbrt(m);
+  const s_ = Math.cbrt(s);
+  const L = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_;
+  const a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_;
+  const b2 = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_;
+  return { L, a, b: b2 };
+};
+
+export const oklabToRgb = (L, a, b2) => {
+  const l_ = Math.pow(L + 0.3963377774 * a + 0.2158037573 * b2, 3);
+  const m_ = Math.pow(L - 0.1055613458 * a - 0.0638541728 * b2, 3);
+  const s_ = Math.pow(L - 0.0894841775 * a - 1.2914855480 * b2, 3);
+  let R = +4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_;
+  let G = -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_;
+  let B = -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_;
+  return { r: _linearToSrgb(R), g: _linearToSrgb(G), b: _linearToSrgb(B) };
+};
+
+export const oklabToOklch = (L, a, b) => {
+  const C = Math.sqrt(a*a + b*b);
+  let h = Math.atan2(b, a) * 180 / Math.PI;
+  if (h < 0) h += 360;
+  return { L, C, h };
+};
+export const oklchToOklab = (L, C, h) => {
+  const hr = (h * Math.PI) / 180;
+  const a = C * Math.cos(hr);
+  const b = C * Math.sin(hr);
+  return { L, a, b };
+};
+
+export const hexToOklch = (hex) => {
+  const { r,g,b } = hexToRgb(hex);
+  const { L,a,b:bb } = rgbToOklab(r,g,b);
+  return oklabToOklch(L,a,bb);
+};
+
+export const oklchToHexClamped = (L, C, h, maxIterations = 20) => {
+  let lo = 0, hi = C, best = null;
+  for (let i=0;i<maxIterations;i++) {
+    const mid = (lo + hi) / 2;
+    const { a, b } = oklchToOklab(L, mid, h);
+    const { r,g,b:bb } = oklabToRgb(L, a, b);
+    const inGamut = r>=0 && r<=255 && g>=0 && g<=255 && bb>=0 && bb<=255;
+    if (inGamut) { best = { r,g,b:bb }; lo = mid; } else { hi = mid; }
+  }
+  if (!best) {
+    const { a, b } = oklchToOklab(L, 0, h);
+    const { r,g,b:bb } = oklabToRgb(L, a, b);
+    return rgbToHex({ r, g, b: bb });
+  }
+  return rgbToHex(best);
+};
+
+export const nearestAccessible = (hexBg, hexFg, target = 4.5) => {
+  const fg = hexToOklch(hexFg);
+  let L = fg.L;
+  const step = 0.01;
+  let tries = 0;
+  let best = hexFg;
+  let bestCR = contrastRatio(hexBg, hexFg);
+
+  while (tries < 40 && bestCR < target) {
+    L = Math.min(1, Math.max(0, L + (bestCR < target ? (L < 0.5 ? -step : step) : 0)));
+    const nudged = oklchToHexClamped(L, fg.C, fg.h);
+    const cr = contrastRatio(hexBg, nudged);
+    if (cr > bestCR) { bestCR = cr; best = nudged; }
+    else {
+      L = Math.min(1, Math.max(0, L - 2*step));
+      const nudged2 = oklchToHexClamped(L, fg.C, fg.h);
+      const cr2 = contrastRatio(hexBg, nudged2);
+      if (cr2 > bestCR) { bestCR = cr2; best = nudged2; }
+    }
+    tries++;
+  }
+  return { hex: best, ratio: bestCR };
+};
+
+const SCHEME_OFFSETS_OKLCH = {
+  analogous: [0, 30, -30],
+  complementary: [0, 180],
+  triadic: [0, 120, 240],
+  tetradic: [0, 90, 180, 270],
+  'split-complementary': [0, 150, -150],
+  monochromatic: [0],
+};
+
+export const generateOklchScheme = (baseHex, type = 'analogous') => {
+  const { L, C, h } = hexToOklch(baseHex);
+  const deltas = SCHEME_OFFSETS_OKLCH[type] || SCHEME_OFFSETS_OKLCH.analogous;
+  const hues = deltas.map(d => (h + d + 360) % 360);
+  const colors = hues.map(hh => oklchToHexClamped(L, C, hh));
+  return { baseHex: normalizeHex(baseHex), scheme: type, hues, colors };
+};
+// ======================= end OKLab / OKLCH + WCAG upgrades =====================
 // ----------------------------- schemes/markers -------------------------------
 export const getColorScheme = (baseColor, scheme, baseAngle) => {
   const baseHex = normalizeHex(baseColor);
-  let angle = typeof baseAngle === 'number' ? baseAngle : hexToHsl(baseHex).h;
-
-  const colors = [baseHex];
+  const { L, C, h } = hexToOklch(baseHex);
+  const angle = typeof baseAngle === 'number' ? baseAngle : h;
   switch (scheme) {
-    case 'complementary':
-      colors.push(hslToHex(normalizeAngle(angle + 180), 100, 50)); break;
-    case 'analogous':
-      colors.push(hslToHex(normalizeAngle(angle + 30), 100, 50));
-      colors.push(hslToHex(normalizeAngle(angle - 30), 100, 50)); break;
-    case 'triadic':
-      colors.push(hslToHex(normalizeAngle(angle + 120), 100, 50));
-      colors.push(hslToHex(normalizeAngle(angle + 240), 100, 50)); break;
-    case 'tetradic':
-      colors.push(hslToHex(normalizeAngle(angle + 90), 100, 50));
-      colors.push(hslToHex(normalizeAngle(angle + 180), 100, 50));
-      colors.push(hslToHex(normalizeAngle(angle + 270), 100, 50)); break;
-    case 'monochromatic':
-      colors.push(hslToHex(angle, 100, 30));
-      colors.push(hslToHex(angle, 100, 70));
-      colors.push(hslToHex(angle, 60, 50)); break;
-    default: break;
+    case 'complementary': {
+      const hues = [angle, (angle + 180) % 360];
+      return hues.map(hh => oklchToHexClamped(L, C, hh)).map(normalizeHex);
+    }
+    case 'analogous': {
+      const hues = [angle, (angle + 30) % 360, (angle + 330) % 360];
+      return hues.map(hh => oklchToHexClamped(L, C, hh)).map(normalizeHex);
+    }
+    case 'triadic': {
+      const hues = [angle, (angle + 120) % 360, (angle + 240) % 360];
+      return hues.map(hh => oklchToHexClamped(L, C, hh)).map(normalizeHex);
+    }
+    case 'tetradic': {
+      const hues = [angle, (angle + 90) % 360, (angle + 180) % 360, (angle + 270) % 360];
+      return hues.map(hh => oklchToHexClamped(L, C, hh)).map(normalizeHex);
+    }
+    case 'monochromatic': {
+      // keep hue constant, vary L around base
+      const Ls = [Math.max(0, L - 0.2), L, Math.min(1, L + 0.2)];
+      return Ls.map(Lv => oklchToHexClamped(Lv, C, angle)).map(normalizeHex);
+    }
+    default: {
+      return [baseHex];
+    }
   }
-  return colors.map(normalizeHex);
 };
 
 /**
@@ -240,3 +360,6 @@ export const blendColors = (color1, color2, ratio) => {
 
   return `#${toHex(r)}${toHex(g)}${toHex(bb)}`;
 };
+
+// Export all needed functions for FullColorWheel and ColorWheelScreen
+export { generateOklchScheme, hexToOklch, oklchToHexClamped, contrastRatio, nearestAccessible };

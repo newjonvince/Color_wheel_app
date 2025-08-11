@@ -1,5 +1,5 @@
 /**
- * routes/images.js
+ * routes/images.js (optimized)
  * Image palette extraction + pixel sampling with image tokens.
  *
  * Endpoints:
@@ -9,11 +9,15 @@
  *  POST /api/images/sample-color     (application/json: { imageId, x, y, units? })
  *      -> { hex }
  *
+ *  POST /api/images/close-session    (application/json: { imageId })
+ *      -> { success: true }
+ *
  * Notes:
- *  - Uses in-memory store with TTL (default 15 minutes) to cache uploaded images by token.
+ *  - Uses in-memory store with TTL (default 10 minutes) to cache uploaded images by token.
  *  - Sampling coordinates:
  *      - If units === 'px', x and y are pixel coordinates.
  *      - Otherwise, x and y are normalized [0..1].
+ *  - Performance: store raw RGBA buffer for O(1) pixel reads during sampling.
  */
 
 const express = require('express');
@@ -30,23 +34,12 @@ const upload = multer({
 });
 
 // ---------------- Image token store (in-memory) ----------------
-const IMAGE_TTL_MS = 15 * 60 * 1000; // 15 minutes
-const imageStore = new Map(); // token -> { buffer, width, height, mime, createdAt }
+// Store normalized PNG buffer and precomputed raw RGBA for fast sampling
+const IMAGE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const imageStore = new Map(); // token -> { buffer, raw, width, height, mime, createdAt }
 
 function makeToken() {
   return crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
-}
-
-function putImage(buffer, meta, mime = 'image/png') {
-  const token = makeToken();
-  imageStore.set(token, {
-    buffer,
-    width: meta.width,
-    height: meta.height,
-    mime,
-    createdAt: Date.now(),
-  });
-  return token;
 }
 
 function getImage(token) {
@@ -65,7 +58,7 @@ setInterval(() => {
   for (const [k, v] of imageStore) {
     if (now - v.createdAt > IMAGE_TTL_MS) imageStore.delete(k);
   }
-}, 10 * 60 * 1000).unref?.();
+}, 5 * 60 * 1000).unref?.();
 
 // ---------------- Helpers ----------------
 function toHex(r, g, b) {
@@ -118,8 +111,19 @@ router.post('/extract-colors', upload.single('image'), async (req, res) => {
 
     const { dominant, hexes } = await getPaletteFromBuffer(paletteBuffer);
 
-    // Save normalized buffer to token store for fast sampling
-    const token = putImage(normalized, meta, 'image/png');
+    // Precompute raw RGBA once for fast sampling
+    const raw = await sharp(normalized).ensureAlpha().raw().toBuffer();
+
+    // Save normalized + raw buffer to token store
+    const token = makeToken();
+    imageStore.set(token, {
+      buffer: normalized, // PNG, if needed later
+      raw,                // Uint8Array RGBA
+      width: meta.width,
+      height: meta.height,
+      mime: 'image/png',
+      createdAt: Date.now(),
+    });
 
     return res.json({
       dominant,
@@ -158,7 +162,17 @@ router.post('/sample-color', express.json(), async (req, res) => {
     const left = Math.floor(clamp(px, 0, width - 1));
     const top  = Math.floor(clamp(py, 0, height - 1));
 
-    // Extract a single pixel region, get raw RGBA
+    // Fast path: read from precomputed raw RGBA buffer
+    if (rec.raw && rec.raw.length === width * height * 4) {
+      const idx = (top * width + left) * 4;
+      const r = rec.raw[idx];
+      const g = rec.raw[idx + 1];
+      const b = rec.raw[idx + 2];
+      const hex = toHex(r, g, b);
+      return res.json({ hex, x: left, y: top, width, height });
+    }
+
+    // Fallback path (should rarely hit): single-pixel extract via sharp
     const pixel = await sharp(rec.buffer)
       .extract({ left, top, width: 1, height: 1 })
       .ensureAlpha()
@@ -172,6 +186,24 @@ router.post('/sample-color', express.json(), async (req, res) => {
   } catch (e) {
     console.error('sample-color failed:', e);
     return res.status(500).json({ error: 'Sampling failed' });
+  }
+});
+
+/**
+ * POST /api/images/close-session
+ * JSON: { imageId }
+ * Explicitly free memory before TTL for better perf on short sessions.
+ */
+router.post('/close-session', express.json(), (req, res) => {
+  try {
+    const { imageId } = req.body || {};
+    if (!imageId) return res.status(400).json({ error: 'imageId is required' });
+    if (!imageStore.has(imageId)) return res.status(404).json({ error: 'Image token not found' });
+    imageStore.delete(imageId);
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('close-session failed:', e);
+    return res.status(500).json({ error: 'Close session failed' });
   }
 });
 

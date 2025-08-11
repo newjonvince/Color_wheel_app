@@ -45,11 +45,13 @@ const isFormData = (v) => typeof FormData !== 'undefined' && v instanceof FormDa
  * Endpoints expected on backend: POST /colors/validate, POST /colors/scheme, POST /colors/blend
  * Palettes persistence: POST /colors, GET /colors/matches
  * --------------------------------------------------------------------- */
+// Validates HEX format on backend (POST /colors/validate)
 export const validateHex = async (hex) => {
   const { data } = await api.post('/colors/validate', { hex });
   return data; // { ok, hex, valid }
 };
 
+// Generates a scheme from baseColor + scheme type (POST /colors/scheme)
 export const generateScheme = async (baseColor, scheme = 'analogous') => {
   const { data } = await api.post('/colors/scheme', { baseColor, scheme });
   return data; // { ok, baseHex, scheme, hues:[deg...], colors:[hex...] }
@@ -60,6 +62,8 @@ export const blend = async (color1, color2, weight = 0.5) => {
   return data;
 };
 
+// Creates a new palette (POST /colors/matches)
+// Requires authentication token set via setToken()
 export const createColorMatch = async ({ base_color, scheme, colors, title, description, is_public }) => {
   const body = { base_color, scheme, colors, title, description, is_public };
   const { data } = await api.post('/colors/matches', body);

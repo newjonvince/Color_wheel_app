@@ -1,17 +1,3 @@
-// CoolorsColorExtractor.js — interactive magnifier with live palette slots
-// Drop-in replacement. Requires server endpoints:
-//  - POST /images/extract-colors   (multipart: image) -> { dominant, palette: ["#..."] }
-//  - POST /images/sample-color     (multipart: image + {x,y,radius} or JSON alongside) -> { hex }
-// If /sample-color isn't available, the component falls back to approximating from the initial palette.
-//
-// Props:
-//  - initialImageUri?: string
-//  - initialSlots?: number (default 5)
-//  - onComplete?(result: { imageUri, slots: string[], activeIndex: number }): void
-//  - onColorExtracted?(hex: string): void  // kept for backward-compat (uses slots[0])
-//  - onCreateCollage?(imageAssetOrUri, slotsArray): void
-//  - onClose(): void
-//
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   StyleSheet,
@@ -25,143 +11,111 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import ApiService from '../services/api';
+import { hexToHsl } from '../utils/color';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-const MAGNIFIER_SIZE = 80;
-const DEFAULT_SLOTS = 5;
+const MAGNIFIER_SIZE = 120;
 
-// Small throttle helper (leading, trailing last call after delay)
-function useThrottle(fn, ms) {
-  const last = useRef(0);
-  const trailing = useRef(null);
-  return useCallback((...args) => {
-    const now = Date.now();
-    const remaining = ms - (now - last.current);
-    if (remaining <= 0) {
-      last.current = now;
-      fn(...args);
-    } else {
-      clearTimeout(trailing.current);
-      trailing.current = setTimeout(() => {
-        last.current = Date.now();
-        fn(...args);
-      }, remaining);
-    }
-  }, [fn, ms]);
-}
+/**
+ * Props:
+ * - navigation (React Navigation)  <-- REQUIRED for navigation flow
+ * - initialImageUri: string
+ * - initialSlots?: number
+ * - navigateOnActions?: boolean (default false) - if true, uses navigation; if false, uses callbacks
+ * - onComplete?: ({ imageUri, slots, dominant }) => void (modal flow)
+ * - onSaveToBoard?: ({ imageUri, slots, dominant }) => void (modal flow)
+ * - onClose?: () => void
+ */
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
 export default function CoolorsColorExtractor({
+  navigation,
   initialImageUri,
-  initialSlots = DEFAULT_SLOTS,
+  initialSlots = 5,
+  navigateOnActions = false,
   onComplete,
-  onColorExtracted,
-  onCreateCollage,
+  onSaveToBoard,
   onClose,
 }) {
-  const [selectedImage, setSelectedImage] = useState(null); // { uri, width?, height? }
-  const [isLoading, setIsLoading] = useState(false);
-
-  // layout state
-  const [imageLayout, setImageLayout] = useState({ width: 0, height: 0, x: 0, y: 0 });
+  const [selectedImage, setSelectedImage] = useState(null); // { uri }
   const [magnifierPosition, setMagnifierPosition] = useState({ x: screenWidth / 2, y: screenHeight / 2 });
+  const [extractedColor, setExtractedColor] = useState('#808080');
+  const [palette, setPalette] = useState([]); // ['#xxxxxx']
+  const [isLoading, setIsLoading] = useState(false);
+  const [imageLayout, setImageLayout] = useState({ width: 0, height: 0, x: 0, y: 0 });
+  const [sessionData, setSessionData] = useState(null); // { imageId, token, width, height, dominant, palette }
+  const mounted = useRef(true);
 
-  // palette & slots
-  const [serverPalette, setServerPalette] = useState([]); // reference palette from the server
-  const [slots, setSlots] = useState(Array.from({ length: initialSlots }, () => '#CCCCCC'));
-  const [activeIndex, setActiveIndex] = useState(0);
-
-  // current color under magnifier (not yet committed unless we are on active slot)
-  const [liveColor, setLiveColor] = useState('#FF6B6B'); // color under magnifier
-  const [magnifierColor, setMagnifierColor] = useState('#FF6B6B'); // actual magnifier display colors
-
-  // --- helpers -----------------------------------------------------------------
+  // --- helpers --------------------------------------------------------------
   const fallbackPalette = useMemo(() => (
     ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FECA57','#FF9FF3','#54A0FF','#5F27CD','#00D2D3','#FF9F43','#10AC84','#EE5A24','#0984E3','#A29BFE','#6C5CE7']
   ), []);
 
-  const fillSlotsFromPalette = useCallback((paletteArr) => {
-    const base = Array.from({ length: Math.max(initialSlots, 1) }, (_, i) => paletteArr[i % paletteArr.length] || '#CCCCCC');
-    setSlots(base);
-    setLiveColor(base[0] || '#808080');
-  }, [initialSlots]);
+  const chooseDominant = useCallback((paletteArray) => paletteArray?.[0] || '#808080', []);
 
-  const callServerSample = useCallback(async (uri, normX, normY, radius = 0.02) => {
-    // Throttled elsewhere; keep this fast.
+  const startSession = useCallback(async (uri) => {
+    // Uses session-based API for live sampling
     try {
-      if (ApiService?.sampleColorAt) {
-        return await ApiService.sampleColorAt(uri, normX, normY, radius);
-      }
-      const apiBase = ApiService.baseURL?.replace(/\/?$/, '');
-      const url = `${apiBase}/images/sample-color`;
-      const form = new FormData();
-      form.append('image', { uri, name: 'upload.jpg', type: 'image/jpeg' });
-      form.append('x', String(normX));
-      form.append('y', String(normY));
-      form.append('radius', String(radius));
-      const headers = { Accept: 'application/json' };
-      if (ApiService.token) headers['Authorization'] = `Bearer ${ApiService.token}`;
-      const res = await fetch(url, { method: 'POST', headers, body: form });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json(); // { hex }
+      const data = await ApiService.startImageExtractSession(uri, {
+        maxWidth: 1200,
+        maxHeight: 1200,
+      });
+      // expected: { sessionId, token, width, height, dominant, palette }
+      return data;
     } catch (e) {
-      // fallback: snap to nearest server palette color
-      const approx = nearestFromPalette(liveColor, serverPalette.length ? serverPalette : fallbackPalette);
-      return { hex: approx };
+      console.warn('Session start failed, using fallback palette:', e?.message);
+      return { 
+        sessionId: null, 
+        token: null, 
+        width: 800, 
+        height: 600, 
+        dominant: fallbackPalette[0], 
+        palette: fallbackPalette 
+      };
     }
-  }, [fallbackPalette, liveColor, serverPalette]);
+  }, [fallbackPalette]);
 
-  // simple distance on RGB
-  const hexToRgb = (hex) => {
-    const h = hex.replace('#','');
-    const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
-    return {r,g,b};
-  };
-  const nearestFromPalette = (hex, palette) => {
-    const {r, g, b} = hexToRgb(hex);
-    let best = palette[0], bestD = Infinity;
-    palette.forEach(p => {
-      const q = hexToRgb(p);
-      const d = (r-q.r)**2 + (g-q.g)**2 + (b-q.b)**2;
-      if (d < bestD) { bestD = d; best = p; }
-    });
-    return best;
-  };
+  const sampleColor = useCallback(async (sessionToken, nx, ny) => {
+    // Live sampling at normalized coordinates
+    try {
+      if (!sessionToken) return { hex: extractedColor };
+      const data = await ApiService.sampleImageColor(sessionToken, { nx, ny });
+      // expected: { hex, rgb, hsl }
+      return data;
+    } catch (e) {
+      console.warn('Color sampling failed:', e?.message);
+      return { hex: extractedColor };
+    }
+  }, [extractedColor]);
+
+  const closeSession = useCallback(async (sessionId) => {
+    // Explicit cleanup
+    try {
+      if (!sessionId) return;
+      await ApiService.closeImageExtractSession(sessionId);
+    } catch (e) {
+      console.warn('Session cleanup failed:', e?.message);
+    }
+  }, []);
 
   const processImage = useCallback(async (asset) => {
     setIsLoading(true);
     try {
       setSelectedImage(asset);
-      console.log('CoolorsColorExtractor: Processing image with ApiService.extractColorsFromImage');
+      const sessionResult = await startSession(asset.uri);
+      setSessionData(sessionResult);
       
-      // Use the proper ApiService method for backend extraction
-      const response = await ApiService.extractColorsFromImage(asset.uri, {
-        onProgress: (progress) => {
-          console.log(`Upload progress: ${progress}%`);
-        }
-      });
-      
-      const { dominant, palette } = response;
-      const basePalette = (Array.isArray(palette) && palette.length) ? palette : fallbackPalette;
-      setServerPalette(basePalette);
-      fillSlotsFromPalette(basePalette);
-      
-      // preselect first slot with dominant
-      setSlots(prev => {
-        const next = [...prev];
-        next[0] = dominant || basePalette[0];
-        return next;
-      });
-      setLiveColor(dominant || basePalette[0]);
-      
-      console.log('CoolorsColorExtractor: Image processed successfully, dominant:', dominant);
+      const srvPalette = sessionResult.palette;
+      setPalette(Array.isArray(srvPalette) && srvPalette.length ? srvPalette : fallbackPalette);
+      setExtractedColor(sessionResult.dominant || fallbackPalette[0]);
     } catch (e) {
-      console.error('CoolorsColorExtractor: processImage error', e);
-      setServerPalette(fallbackPalette);
-      fillSlotsFromPalette(fallbackPalette);
+      setPalette(fallbackPalette);
+      setExtractedColor(fallbackPalette[0]);
+      setSessionData(null);
     } finally {
-      setIsLoading(false);
+      if (mounted.current) setIsLoading(false);
     }
-  }, [fallbackPalette, fillSlotsFromPalette]);
+  }, [startSession, fallbackPalette]);
 
   const pickImage = useCallback(async () => {
     try {
@@ -181,44 +135,109 @@ export default function CoolorsColorExtractor({
     }
   }, [onClose, processImage]);
 
-  // mount init
+  // mount
   useEffect(() => {
+    mounted.current = true;
     (async () => {
-      if (initialImageUri) await processImage({ uri: initialImageUri });
-      else await pickImage();
+      if (initialImageUri) {
+        await processImage({ uri: initialImageUri });
+      } else {
+        await pickImage();
+      }
     })();
+    return () => { mounted.current = false; };
   }, [initialImageUri, pickImage, processImage]);
 
-  // --- magnifier interactions ---------------------------------------------------
-  const updateActiveSlot = useCallback((hex) => {
-    setSlots(prev => {
-      const next = [...prev];
-      next[activeIndex] = hex;
-      return next;
-    });
-    setLiveColor(hex);
-  }, [activeIndex]);
+  // Explicit session cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (sessionData?.sessionId || sessionData?.imageId) {
+        // Cleanup session immediately on unmount (don't rely on TTL)
+        closeSession(sessionData.sessionId || sessionData.imageId);
+      }
+    };
+  }, [sessionData, closeSession]);
 
-  const throttledSample = useThrottle(async (nx, ny) => {
-    if (!selectedImage) return;
-    const out = await callServerSample(selectedImage.uri, nx, ny, 0.02);
-    const hex = (out && out.hex) ? out.hex.toUpperCase() : liveColor;
-    
-    // Update both the magnifier display color and the active slot
-    setMagnifierColor(hex);
-    setLiveColor(hex);
-    updateActiveSlot(hex);
-  }, 120); // ~8 samples/sec
+  // --- dual-flow action handlers --------------------------------------------
+  const handleExportToWheel = useCallback(() => {
+    const resultData = {
+      imageUri: selectedImage?.uri || initialImageUri,
+      slots: palette,
+      dominant: chooseDominant(palette),
+    };
 
-  const extractAt = useCallback((x, y) => {
+    if (!navigateOnActions && onComplete) {
+      // Modal/callback flow
+      onComplete(resultData);
+    } else if (navigateOnActions && navigation) {
+      // Navigation flow
+      navigation.navigate('ColorWheelScreen', {
+        palette: resultData.slots,
+        baseHex: resultData.dominant,
+        from: 'extractor',
+      });
+    } else {
+      Alert.alert('Error', 'Cannot complete action - missing navigation or callback');
+    }
+  }, [navigateOnActions, onComplete, navigation, selectedImage, initialImageUri, palette, chooseDominant]);
+
+  const handleSaveToBoard = useCallback(() => {
+    const resultData = {
+      imageUri: selectedImage?.uri || initialImageUri,
+      slots: palette,
+      dominant: chooseDominant(palette),
+    };
+
+    if (!navigateOnActions && onSaveToBoard) {
+      // Modal/callback flow
+      onSaveToBoard(resultData);
+    } else if (navigateOnActions && navigation) {
+      // Navigation flow
+      navigation.navigate('BoardScreen', {
+        imageUri: resultData.imageUri,
+        palette: resultData.slots,
+        dominant: resultData.dominant,
+        from: 'extractor',
+      });
+    } else {
+      Alert.alert('Error', 'Cannot save to board - missing navigation or callback');
+    }
+  }, [navigateOnActions, onSaveToBoard, navigation, selectedImage, initialImageUri, palette, chooseDominant]);
+
+  // --- interaction ---------------------------------------------------------
+  const extractColorAtPosition = useCallback(async (relativeX, relativeY) => {
+    if (!sessionData?.token) {
+      // Fallback: pick color from palette if no session
+      if (!palette.length) return;
+      const idx = Math.max(0, Math.min(palette.length - 1, Math.floor((relativeX + relativeY) * palette.length) % palette.length));
+      setExtractedColor(palette[idx]);
+      return;
+    }
+
+    // Live sampling using session API
+    try {
+      const { hex } = await sampleColor(sessionData.token, relativeX, relativeY);
+      if (hex && mounted.current) {
+        setExtractedColor(hex);
+      }
+    } catch (e) {
+      console.warn('Live sampling failed:', e?.message);
+      // Fallback to palette selection
+      if (palette.length) {
+        const idx = Math.max(0, Math.min(palette.length - 1, Math.floor((relativeX + relativeY) * palette.length) % palette.length));
+        setExtractedColor(palette[idx]);
+      }
+    }
+  }, [sessionData, sampleColor, palette]);
+
+  const updateMagnifierPosition = useCallback(async (x, y) => {
     const w = imageLayout.width || 1;
     const h = imageLayout.height || 1;
-    const cx = Math.max(MAGNIFIER_SIZE/2, Math.min(w - MAGNIFIER_SIZE/2, x));
-    const cy = Math.max(MAGNIFIER_SIZE/2, Math.min(h - MAGNIFIER_SIZE/2, y));
+    const cx = Math.max(MAGNIFIER_SIZE / 2, Math.min(w - MAGNIFIER_SIZE / 2, x));
+    const cy = Math.max(MAGNIFIER_SIZE / 2, Math.min(h - MAGNIFIER_SIZE / 2, y));
     setMagnifierPosition({ x: cx, y: cy });
-    const nx = cx / w, ny = cy / h;
-    throttledSample(nx, ny);
-  }, [imageLayout.height, imageLayout.width, throttledSample]);
+    await extractColorAtPosition(cx / w, cy / h);
+  }, [imageLayout.width, imageLayout.height, extractColorAtPosition]);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => true,
@@ -226,47 +245,34 @@ export default function CoolorsColorExtractor({
     onPanResponderGrant: (evt) => {
       if (!selectedImage) return;
       const { locationX, locationY } = evt.nativeEvent;
-      extractAt(locationX, locationY);
+      updateMagnifierPosition(locationX, locationY);
     },
     onPanResponderMove: (evt) => {
       if (!selectedImage) return;
       const { locationX, locationY } = evt.nativeEvent;
-      extractAt(locationX, locationY);
+      updateMagnifierPosition(locationX, locationY);
     },
-  }), [selectedImage, extractAt]);
+  }), [selectedImage, updateMagnifierPosition]);
+
+
 
   const onImageLayout = useCallback((event) => {
     const { width, height, x, y } = event.nativeEvent.layout;
     setImageLayout({ width, height, x, y });
     if (width > 0 && height > 0) {
       setMagnifierPosition({ x: width / 2, y: height / 2 });
+      extractColorAtPosition(0.5, 0.5);
     }
-  }, []);
+  }, [extractColorAtPosition]);
 
-  // --- controls -----------------------------------------------------------------
-  const addSlot = () => setSlots(prev => [...prev, serverPalette[prev.length % serverPalette.length] || '#CCCCCC']);
-  const removeSlot = () => setSlots(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+  const handleUseOnWheel = useCallback(() => {
+    onColorExtracted?.(extractedColor);
+  }, [extractedColor, onColorExtracted]);
 
-  const nextSlot = () => {
-    if (activeIndex < slots.length - 1) {
-      setActiveIndex(i => i + 1);
-    } else {
-      // finished → callbacks
-      onComplete?.({ imageUri: selectedImage?.uri, slots, activeIndex });
-      onColorExtracted?.(slots[0]);
-    }
-  };
+  const handleCreateCollagePress = useCallback(() => {
+    if (onCreateCollage && selectedImage) onCreateCollage(selectedImage, extractedColor);
+  }, [onCreateCollage, selectedImage, extractedColor]);
 
-  const handleUseOnWheel = () => {
-    onColorExtracted?.(slots[0]);
-    onComplete?.({ imageUri: selectedImage?.uri, slots, activeIndex });
-  };
-
-  const handleCreateCollagePress = () => {
-    if (onCreateCollage && selectedImage) onCreateCollage(selectedImage, slots);
-  };
-
-  // --- UI -----------------------------------------------------------------------
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -282,9 +288,12 @@ export default function CoolorsColorExtractor({
         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
           <Text style={styles.closeButtonText}>✕</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Image picker</Text>
-        <TouchableOpacity onPress={nextSlot} style={styles.nextButton}>
-          <Text style={styles.nextButtonText}>{activeIndex < slots.length - 1 ? 'Next' : 'Done'}</Text>
+        <Text style={styles.headerTitle}>Color Extractor</Text>
+        <TouchableOpacity
+          onPress={() => initialImageUri ? pickImage() : handleUseOnWheel()}
+          style={styles.nextButton}
+        >
+          <Text style={styles.nextButtonText}>{initialImageUri ? 'Pick another' : 'Next'}</Text>
         </TouchableOpacity>
       </View>
 
@@ -298,17 +307,24 @@ export default function CoolorsColorExtractor({
               resizeMode="contain"
               onLayout={onImageLayout}
             />
-            {/* Magnifier with colored center showing sampled color */}
+            {/* Magnifier */}
             <View
               style={[styles.magnifier, { left: magnifierPosition.x - MAGNIFIER_SIZE / 2, top: magnifierPosition.y - MAGNIFIER_SIZE / 2 }]}
             >
-              <View style={[styles.magnifierInner, { borderColor: '#FFFFFF', borderWidth: 3 }]}>
-                {/* Colored center circle showing the sampled color */}
-                <View style={[styles.magnifierCenter, { backgroundColor: magnifierColor }]}>
-                  <View style={styles.crosshair}>
-                    <View style={[styles.crosshairHorizontal, { backgroundColor: '#FFFFFF' }]} />
-                    <View style={[styles.crosshairVertical, { backgroundColor: '#FFFFFF' }]} />
-                  </View>
+              <View style={styles.magnifierInner}>
+                {/* Contrast back ring to keep the colored ring visible on any photo */}
+                <View style={styles.dominantRingBack} />
+
+                {/* The dominant color ring (updates live with extractedColor) */}
+                <View style={[styles.dominantRing, { borderColor: extractedColor }]} />
+
+                {/* Optional tiny center dot filled with the color */}
+                <View style={[styles.dominantCenterDot, { backgroundColor: extractedColor }]} />
+
+                {/* Existing crosshair stays on top for precise aiming */}
+                <View style={styles.crosshair}>
+                  <View style={styles.crosshairHorizontal} />
+                  <View style={styles.crosshairVertical} />
                 </View>
               </View>
             </View>
@@ -316,32 +332,33 @@ export default function CoolorsColorExtractor({
         </View>
       )}
 
-      {/* Slots row */}
-      <View style={styles.paletteBar}>
-        <View style={styles.slotsRow}>
-          {slots.map((c, idx) => (
-            <TouchableOpacity key={idx} onPress={() => setActiveIndex(idx)}>
-              <View style={[styles.slot, { backgroundColor: c }, activeIndex === idx ? styles.slotActive : null]}>
-                {activeIndex === idx && <View style={styles.slotDot} />}
-              </View>
-            </TouchableOpacity>
-          ))}
+      {/* Palette + selected color */}
+      <View style={styles.colorBarContainer}>
+        <View style={[styles.colorBar, { backgroundColor: extractedColor }]}>
+          <View style={styles.colorDot} />
         </View>
+        <Text style={styles.colorText}>{extractedColor.toUpperCase()}</Text>
 
-        {/* plus / minus */}
-        <View style={styles.slotActions}>
-          <TouchableOpacity style={styles.circleBtn} onPress={removeSlot}><Text style={styles.circleBtnText}>−</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.circleBtn} onPress={addSlot}><Text style={styles.circleBtnText}>＋</Text></TouchableOpacity>
-        </View>
+        {palette.length > 0 && (
+          <View style={styles.paletteRow}>
+            {palette.slice(0, 8).map((c) => (
+              <TouchableOpacity key={c} onPress={() => setExtractedColor(c)}>
+                <View style={[styles.paletteSwatch, { backgroundColor: c, borderColor: c === extractedColor ? '#000' : '#fff' }]} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </View>
 
       {/* Actions */}
       <View style={styles.actionButtonsContainer}>
-        <TouchableOpacity style={[styles.actionButton, styles.secondaryButton]} onPress={handleCreateCollagePress}>
-          <Text style={styles.secondaryButtonText}>Create Collage</Text>
+        <TouchableOpacity style={[styles.actionButton, styles.secondaryButton]} onPress={handleSaveToBoard}>
+          <Text style={styles.secondaryButtonText}>Save to Board</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionButton, styles.primaryButton]} onPress={handleUseOnWheel}>
-          <Text style={styles.primaryButtonText}>View on Color Wheel</Text>
+        <TouchableOpacity style={[styles.actionButton, styles.primaryButton]} onPress={handleExportToWheel}>
+          <Text style={styles.primaryButtonText}>
+            {!navigateOnActions && onComplete ? 'Use Palette' : 'Export to Color Wheel'}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -361,22 +378,46 @@ const styles = StyleSheet.create({
   imageContainer: { flex: 1, paddingHorizontal: 20 },
   imageWrapper: { flex: 1, position: 'relative' },
   image: { width: '100%', height: '100%' },
-  magnifier: { position: 'absolute', width: MAGNIFIER_SIZE, height: MAGNIFIER_SIZE, borderRadius: MAGNIFIER_SIZE / 2, backgroundColor: 'rgba(255,255,255,0.85)', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 5, borderWidth: 6, borderColor: '#fff' },
-  magnifierInner: { flex: 1, borderRadius: (MAGNIFIER_SIZE - 12) / 2, overflow: 'hidden', justifyContent: 'center', alignItems: 'center', borderWidth: 4 },
-  magnifierCenter: { width: '100%', height: '100%', borderRadius: (MAGNIFIER_SIZE - 18) / 2, justifyContent: 'center', alignItems: 'center' },
-  crosshair: { position: 'absolute', width: 22, height: 22, justifyContent: 'center', alignItems: 'center' },
-  crosshairHorizontal: { position: 'absolute', width: 22, height: 2, backgroundColor: '#FFFFFF' },
-  crosshairVertical: { position: 'absolute', width: 2, height: 22, backgroundColor: '#FFFFFF' },
-
-  paletteBar: { backgroundColor: '#fff', paddingVertical: 16, paddingHorizontal: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e6e6e6' },
-  slotsRow: { flexDirection: 'row', alignItems: 'center' },
-  slot: { width: (screenWidth - 32 - 100) / 5, maxWidth: 80, height: 44, borderRadius: 10, marginRight: 8, borderWidth: 1, borderColor: '#e6e6e6', justifyContent: 'center', alignItems: 'center' },
-  slotActive: { borderColor: '#000' },
-  slotDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#000' },
-  slotActions: { flexDirection: 'row', position: 'absolute', right: 16, top: 12 },
-  circleBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center', marginLeft: 10 },
-  circleBtnText: { fontSize: 20, color: '#333', fontWeight: '600' },
-
+  magnifier: { position: 'absolute', width: MAGNIFIER_SIZE, height: MAGNIFIER_SIZE, borderRadius: MAGNIFIER_SIZE / 2, borderWidth: 4, borderColor: '#fff', backgroundColor: 'rgba(255,255,255,0.9)', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 5 },
+  magnifierInner: { flex: 1, borderRadius: (MAGNIFIER_SIZE - 8) / 2, overflow: 'hidden', justifyContent: 'center', alignItems: 'center' },
+  // Ring sizes derived from the magnifier size
+  dominantRingBack: {
+    position: 'absolute',
+    width: MAGNIFIER_SIZE - 24,   // slightly larger than the color ring for contrast
+    height: MAGNIFIER_SIZE - 24,
+    borderRadius: (MAGNIFIER_SIZE - 24) / 2,
+    borderWidth: 4,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  dominantRing: {
+    position: 'absolute',
+    width: MAGNIFIER_SIZE - 30,   // main color ring
+    height: MAGNIFIER_SIZE - 30,
+    borderRadius: (MAGNIFIER_SIZE - 30) / 2,
+    borderWidth: 6,               // ring thickness
+  },
+  dominantCenterDot: {
+    position: 'absolute',
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  crosshair: { position: 'absolute', width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
+  crosshairHorizontal: { position: 'absolute', width: 20, height: 2, backgroundColor: '#333' },
+  crosshairVertical: { position: 'absolute', width: 2, height: 20, backgroundColor: '#333' },
+  colorBarContainer: { paddingHorizontal: 20, paddingVertical: 20, backgroundColor: '#fff', alignItems: 'center' },
+  colorBar: { width: screenWidth - 40, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
+  colorDot: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff', borderWidth: 2, borderColor: 'rgba(0,0,0,0.2)' },
+  colorText: { fontSize: 16, fontWeight: '600', color: '#333' },
+  paletteRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
+  paletteSwatch: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, marginRight: 6 },
   actionButtonsContainer: { flexDirection: 'row', marginHorizontal: 20, marginBottom: 40, gap: 12 },
   actionButton: { flex: 1, paddingVertical: 16, borderRadius: 25, alignItems: 'center' },
   primaryButton: { backgroundColor: '#007AFF' },
