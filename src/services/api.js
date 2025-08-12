@@ -5,7 +5,6 @@
 // - Correct payloads for legacy images endpoints
 
 import axios from 'axios';
-import * as ImageManipulator from 'expo-image-manipulator';
 
 const base =
   process.env.EXPO_PUBLIC_API_BASE_URL ||
@@ -75,17 +74,8 @@ export const startImageExtractSession = async (imageUri, {
   onProgress,
 } = {}) => {
   if (!imageUri) throw new Error('imageUri is required');
-  
-  // Normalize to JPEG to avoid HEIC/HEIF issues on backend
-  const normalized = await ImageManipulator.manipulateAsync(
-    imageUri,
-    [],                                  // no transform, just re-encode
-    { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
-  );
-  const normalizedUri = normalized.uri;
-  
   const form = new FormData();
-  form.append('image', { uri: normalizedUri, name: 'upload.jpg', type: 'image/jpeg' });
+  form.append('image', { uri: imageUri, name: fileName, type: mime });
   form.append('maxWidth', String(maxWidth));
   form.append('maxHeight', String(maxHeight));
 
@@ -132,16 +122,8 @@ export const closeImageExtractSession = async (sessionId) => {
 };
 
 export const extractColorsFromImage = async (imageUri, opts = {}) => {
-  // Normalize to JPEG to avoid HEIC/HEIF issues on backend
-  const normalized = await ImageManipulator.manipulateAsync(
-    imageUri,
-    [],                                  // no transform, just re-encode
-    { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
-  );
-  const normalizedUri = normalized.uri;
-  
   const form = new FormData();
-  form.append('image', { uri: normalizedUri, name: 'upload.jpg', type: 'image/jpeg' });
+  form.append('image', { uri: imageUri, name: 'upload.jpg', type: 'image/jpeg' });
   if (opts.maxWidth) form.append('maxWidth', String(opts.maxWidth));
   if (opts.maxHeight) form.append('maxHeight', String(opts.maxHeight));
   const { data } = await _postMultipart('/images/extract-colors', form);
@@ -165,12 +147,57 @@ export const getCommunityFeed = async (cursor = null) => {
   return data;
 };
 
+// ---- Authentication endpoints ----
+export const login = async (email, password) => {
+  const { data } = await api.post('/auth/login', { email, password });
+  if (data.token) {
+    setToken(data.token);
+  }
+  return data;
+};
+
+export const register = async (userData) => {
+  const { data } = await api.post('/auth/register', userData);
+  if (data.token) {
+    setToken(data.token);
+  }
+  return data;
+};
+
+export const demoLogin = async () => {
+  const { data } = await api.post('/auth/demo-login');
+  if (data.token) {
+    setToken(data.token);
+  }
+  return data;
+};
+
+export const logout = async () => {
+  try {
+    await api.post('/auth/logout', {}, withAuthHeaders());
+  } catch (error) {
+    console.warn('Logout API call failed:', error);
+  }
+  setToken(null);
+};
+
+export const getUserProfile = async () => {
+  const { data } = await api.get('/auth/profile', withAuthHeaders());
+  return data;
+};
+
+export const clearToken = () => {
+  setToken(null);
+};
+
 // ---- Export default object ----
 const ApiService = {
   // env
-  API_BASE, setToken, getToken,
+  API_BASE, setToken, getToken, clearToken,
   // generic
   get, post, put, delete: del, _delete,
+  // auth
+  login, register, demoLogin, logout, getUserProfile,
   // images
   startImageExtractSession, sampleImageColor, closeImageExtractSession, extractColorsFromImage,
   // colors
@@ -180,8 +207,3 @@ const ApiService = {
 };
 
 export default ApiService;
-
-export const health = async () => {
-  const { data } = await api.get('/health');
-  return data;
-};

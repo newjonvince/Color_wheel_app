@@ -10,6 +10,19 @@ import * as SecureStore from 'expo-secure-store';
 import * as Updates from 'expo-updates';
 import ApiService from './src/services/api';
 
+// Deep link support (matches app.json -> expo.scheme: "colorwheel")
+const linking = {
+  prefixes: ['colorwheel://'],
+  config: {
+    screens: {
+      Community: 'community',
+      ColorWheel: 'wheel',
+      Profile: 'profile',
+      Settings: 'settings',
+    },
+  },
+};
+
 // --- Optional crash/error reporting (Sentry) -------------------------------
 let sentryReady = false;
 try {
@@ -427,9 +440,11 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ErrorBoundary>
-          <NavigationContainer>
+          <NavigationContainer linking={linking} fallback={<Text>Loading…</Text>}>
             <StatusBar style={Platform.OS === 'ios' ? 'dark' : 'auto'} />
             <Tab.Navigator
+              detachInactiveScreens={true}
+              initialRouteName="ColorWheel"
               screenOptions={({ route }) => ({
                 tabBarIcon: ({ focused }) => <EmojiTabIcon focused={focused} name={route.name} />,
                 tabBarActiveTintColor: '#e74c3c',
@@ -439,17 +454,6 @@ export default function App() {
                 headerShown: false,
               })}
             >
-              <Tab.Screen name="Community" options={{ title: 'Community' }}>
-                {(props) => (
-                  <CommunityFeedScreen
-                    {...props}
-                    currentUser={user}
-                    onSaveColorMatch={saveColorMatch}
-                    onLogout={handleLogout}
-                  />
-                )}
-              </Tab.Screen>
-
               <Tab.Screen name="ColorWheel" options={{ title: 'Wheel' }}>
                 {(props) => (
                   <ColorWheelScreen
@@ -458,6 +462,17 @@ export default function App() {
                     onSaveColorMatch={saveColorMatch}
                     onLogout={handleLogout}
                     navigation={props.navigation}
+                  />
+                )}
+              </Tab.Screen>
+
+              <Tab.Screen name="Community" options={{ title: 'Community' }}>
+                {(props) => (
+                  <CommunityFeedScreen
+                    {...props}
+                    currentUser={user}
+                    onSaveColorMatch={saveColorMatch}
+                    onLogout={handleLogout}
                   />
                 )}
               </Tab.Screen>
