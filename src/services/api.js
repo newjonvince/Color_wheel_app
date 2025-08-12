@@ -1,278 +1,128 @@
-
-// src/services/api.js
-// Unified API client + image extraction session helpers
-// Works with Railway-hosted backend. One-time upload -> token -> coordinate samples flow.
+// services/api.js — fixed & compatible
+// - Supports both new session endpoints and legacy ones
+// - Correct payloads for /images/sample-color and /images/close-session
+// - Provides color match + validate helpers
 
 import axios from 'axios';
 
-/** -----------------------------------------------------------------------
- * Base configuration
- * --------------------------------------------------------------------- */
-const RAW_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL || '').replace(/\/$/, '');
-const API_BASE_URL = RAW_BASE || 'https://colorwheelapp-production.up.railway.app';
+const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000/api';
 
 const api = axios.create({
-  baseURL: `${API_BASE_URL}/api`,
-  timeout: 25000,
-  headers: { 'Content-Type': 'application/json' },
-  withCredentials: false,
+  baseURL: API_BASE,
+  timeout: 20000,
 });
 
-// Attach token (JWT) if available
 let authToken = null;
-export const setToken = (token) => {
-  authToken = token || null;
-  if (authToken) api.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
-  else delete api.defaults.headers.common['Authorization'];
-};
-export const clearToken = () => setToken(null);
+export const setToken = (t) => { authToken = t; };
 export const getToken = () => authToken;
 
-/** -----------------------------------------------------------------------
- * Helpers
- * --------------------------------------------------------------------- */
-const withAuthHeaders = (extra = {}) => {
-  const headers = { ...(extra || {}) };
-  if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-  return { headers };
-};
+function withAuthHeaders(extra = {}) {
+  const headers = { ...(extra.headers || {}) };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  return { ...extra, headers };
+}
 
-const isFormData = (v) => typeof FormData !== 'undefined' && v instanceof FormData;
-
-/** -----------------------------------------------------------------------
- * Colors (server-backed utilities)
- * Endpoints expected on backend: POST /colors/validate, POST /colors/scheme, POST /colors/blend
- * Palettes persistence: POST /colors, GET /colors/matches
- * --------------------------------------------------------------------- */
-// Validates HEX format on backend (POST /colors/validate)
-export const validateHex = async (hex) => {
-  const { data } = await api.post('/colors/validate', { hex });
-  return data; // { ok, hex, valid }
-};
-
-// Generates a scheme from baseColor + scheme type (POST /colors/scheme)
-export const generateScheme = async (baseColor, scheme = 'analogous') => {
-  const { data } = await api.post('/colors/scheme', { baseColor, scheme });
-  return data; // { ok, baseHex, scheme, hues:[deg...], colors:[hex...] }
-};
-
-export const blend = async (color1, color2, weight = 0.5) => {
-  const { data } = await api.post('/colors/blend', { color1, color2, weight });
-  return data;
-};
-
-// Creates a new palette (POST /colors/matches)
-// Requires authentication token set via setToken()
-export const createColorMatch = async ({ base_color, scheme, colors, title, description, is_public }) => {
-  const body = { base_color, scheme, colors, title, description, is_public };
-  const { data } = await api.post('/colors/matches', body);
-  return data; // { success, data: {...} }
-};
-
-export const listPalettes = async (params = {}) => {
-  const { data } = await api.get('/colors/matches', { params });
-  return data; // { ok, count, data }
-};
-
-/** -----------------------------------------------------------------------
- * Image extraction (two modes)
- *
- * A) Legacy single-call:
- *    POST /images/extract-colors (multipart: image)
- *    -> { dominant, palette }
- *
- * B) Session-based (recommended):
- *    1) POST /images/extract-session (multipart: image)
- *       -> { sessionId, token, width, height, dominant, palette }
- *    2) POST /images/extract-sample { sessionToken, x, y, normalized? }
- *       -> { hex, rgb, hsl, nearest?, updatedPalette? }
- *    3) POST /images/extract-session/:id/close  (optional)
- *       -> { ok: true }
- * --------------------------------------------------------------------- */
-
-// A) One-off upload (kept for compatibility)
-export const extractColorsFromImage = async (imageUri, { mime = 'image/jpeg', fileName = 'upload.jpg', onProgress } = {}) => {
-  if (!imageUri) throw new Error('imageUri is required');
-  const form = new FormData();
-  form.append('image', { uri: imageUri, name: fileName, type: mime });
-
-  const { data } = await api.post('/images/extract-colors', form, {
+// ---- Compat helpers for images endpoints (support both server styles) ----
+async function _postMultipart(url, form, cfg) {
+  return api.post(url, form, {
     headers: { 'Content-Type': 'multipart/form-data', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
-    onUploadProgress: (evt) => {
-      if (onProgress && evt.total) onProgress(Math.round((evt.loaded / evt.total) * 100));
-    },
+    ...(cfg || {}),
   });
-  return data; // { dominant, palette }
-};
+}
+async function _try(primary, fallback) {
+  try { return await primary(); }
+  catch (e) {
+    const status = e?.response?.status;
+    if (status === 404 || status === 405) return await fallback();
+    throw e;
+  }
+}
 
-// B-1) Start a session (one-time upload)
+// ---------------- Images: session-based extractor ----------------
 export const startImageExtractSession = async (imageUri, {
   mime = 'image/jpeg',
   fileName = 'upload.jpg',
-  maxWidth = 900,
-  maxHeight = 900,
+  maxWidth = 1200,
+  maxHeight = 1200,
   onProgress,
 } = {}) => {
   if (!imageUri) throw new Error('imageUri is required');
+
   const form = new FormData();
   form.append('image', { uri: imageUri, name: fileName, type: mime });
   form.append('maxWidth', String(maxWidth));
   form.append('maxHeight', String(maxHeight));
 
-  try {
-    // Try new endpoint first
-    const { data } = await api.post('/images/extract-session', form, {
-      headers: { 'Content-Type': 'multipart/form-data', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
-      onUploadProgress: (evt) => {
-        if (onProgress && evt.total) onProgress(Math.round((evt.loaded / evt.total) * 100));
-      },
-    });
-    return data;
-  } catch (error) {
-    // Fallback to backend endpoint
-    const { data } = await api.post('/images/extract-colors', form, {
-      headers: { 'Content-Type': 'multipart/form-data', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
-      onUploadProgress: (evt) => {
-        if (onProgress && evt.total) onProgress(Math.round((evt.loaded / evt.total) * 100));
-      },
-    });
-    // Normalize response to expected format
-    return {
-      sessionId: data.sessionId || data.token,
-      token: data.token || data.sessionId,
-      width: data.width,
-      height: data.height,
-      dominant: data.dominant,
-      palette: data.palette
-    };
-  }
+  const uploadCfg = {
+    onUploadProgress: (evt) => {
+      if (onProgress && evt.total) onProgress(Math.round((evt.loaded / evt.total) * 100));
+    },
+  };
+
+  const { data } = await _try(
+    () => _postMultipart('/images/extract-session', form, uploadCfg),
+    () => _postMultipart('/images/extract-colors', form, uploadCfg),
+  );
+
+  const token = data.imageId || data.sessionId || data.token;
+  return { ...data, sessionId: token, imageId: token, token };
 };
 
-// B-2) Sample a color at coordinates (accepts absolute or normalized)
 export const sampleImageColor = async (sessionToken, {
-  x = null, y = null, // absolute px in the server-sized image
-  nx = null, ny = null, // normalized 0..1 (if given, server converts)
+  x = null, y = null, nx = null, ny = null,
 } = {}) => {
   if (!sessionToken) throw new Error('sessionToken is required');
-  const body = { sessionToken };
-  if (nx != null && ny != null) {
-    body.normalized = true;
-    body.x = nx;
-    body.y = ny;
-  } else if (x != null && y != null) {
-    body.normalized = false;
-    body.x = x;
-    body.y = y;
-  } else {
-    throw new Error('Provide either {x,y} or normalized {nx,ny}');
-  }
+  let useNormalized; let sx; let sy;
+  if (nx != null && ny != null) { useNormalized = true; sx = nx; sy = ny; }
+  else if (x != null && y != null) { useNormalized = false; sx = x; sy = y; }
+  else { throw new Error('Provide either {x,y} or normalized {nx,ny}'); }
 
-  try {
-    // Try new endpoint first
-    const { data } = await api.post('/images/extract-sample', body, withAuthHeaders());
-    return data;
-  } catch (error) {
-    // Fallback to backend endpoint with correct payload format
-    const backendBody = {
-      imageId: sessionToken, // Backend expects imageId instead of sessionToken
-      x: body.x,
-      y: body.y,
-      units: body.normalized ? 'normalized' : 'px'
-    };
-    const { data } = await api.post('/images/sample-color', backendBody, withAuthHeaders());
-    return data;
-  }
+  const bodyA = { sessionToken, x: sx, y: sy, normalized: useNormalized };
+  const doA = () => api.post('/images/extract-sample', bodyA, withAuthHeaders());
+
+  const bodyB = { imageId: sessionToken, x: sx, y: sy, units: useNormalized ? 'normalized' : 'px' };
+  const doB = () => api.post('/images/sample-color', bodyB, withAuthHeaders());
+
+  const { data } = await _try(doA, doB);
+  return data;
 };
 
-// B-3) Close a session (cleanup)
 export const closeImageExtractSession = async (sessionId) => {
   if (!sessionId) return { ok: true };
-  try {
-    // Try new endpoint first
-    const { data } = await api.post(`/images/extract-session/${encodeURIComponent(sessionId)}/close`, {}, withAuthHeaders());
-    return data;
-  } catch (error) {
-    // Fallback to backend endpoint with correct payload format
-    const { data } = await api.post('/images/close-session', { imageId: sessionId }, withAuthHeaders());
-    return data;
-  }
-};
-
-/** -----------------------------------------------------------------------
- * Auth / Users
- * --------------------------------------------------------------------- */
-export const login = async (email, password) => (await api.post('/auth/login', { email, password })).data;
-export const register = async (user) => (await api.post('/auth/register', user)).data;
-export const getUserProfile = async () => (await api.get('/users/profile')).data;
-
-/** -----------------------------------------------------------------------
- * Community API Methods
- * --------------------------------------------------------------------- */
-export const getCommunityPosts = async (cursor, limit = 20) => {
-  const params = new URLSearchParams();
-  if (cursor) params.append('cursor', cursor);
-  params.append('limit', limit.toString());
-  const { data } = await api.get(`/community/posts/community?${params}`, withAuthHeaders());
+  const doA = () => api.post(`/images/extract-session/${encodeURIComponent(sessionId)}/close`, {}, withAuthHeaders());
+  const doB = () => api.post('/images/close-session', { imageId: sessionId }, withAuthHeaders());
+  const { data } = await _try(doA, doB);
   return data;
 };
 
-export const getSuggestedUsers = async (limit = 20, offset = 0) => {
-  const { data } = await api.get(`/community/users/suggested?limit=${limit}&offset=${offset}`, withAuthHeaders());
+export const extractColorsFromImage = async (imageUri, opts = {}) => {
+  const form = new FormData();
+  form.append('image', { uri: imageUri, name: 'upload.jpg', type: 'image/jpeg' });
+  if (opts.maxWidth) form.append('maxWidth', String(opts.maxWidth));
+  if (opts.maxHeight) form.append('maxHeight', String(opts.maxHeight));
+  const { data } = await _postMultipart('/images/extract-colors', form);
   return data;
 };
 
-export const getFollowing = async (limit = 20, offset = 0) => {
-  const { data } = await api.get(`/community/users/following?limit=${limit}&offset=${offset}`, withAuthHeaders());
+export const createColorMatch = async (body) => {
+  const { data } = await api.post('/colors/matches', body, withAuthHeaders());
   return data;
 };
 
-export const getFollowers = async (limit = 20, offset = 0) => {
-  const { data } = await api.get(`/community/users/followers?limit=${limit}&offset=${offset}`, withAuthHeaders());
+export const validateHex = async (hex) => {
+  const { data } = await api.post('/colors/validate', { hex }, withAuthHeaders());
   return data;
 };
 
-export const followUser = async (userId) => {
-  const { data } = await api.post(`/community/users/${userId}/follow`, {}, withAuthHeaders());
+export const getCommunityFeed = async () => {
+  const { data } = await api.get('/community/posts/community', withAuthHeaders());
   return data;
 };
 
-export const unfollowUser = async (userId) => {
-  const { data } = await api.delete(`/community/users/${userId}/follow`, withAuthHeaders());
-  return data;
-};
-
-export const likePost = async (postId) => {
-  const { data } = await api.post(`/community/posts/${postId}/like`, {}, withAuthHeaders());
-  return data;
-};
-
-export const unlikePost = async (postId) => {
-  const { data } = await api.delete(`/community/posts/${postId}/like`, withAuthHeaders());
-  return data;
-};
-
-/** -----------------------------------------------------------------------
- * Low-level passthrough
- * --------------------------------------------------------------------- */
 const ApiService = {
-  // tokens
-  setToken, clearToken, getToken,
-  // colors
-  validateHex, generateScheme, blend,
-  createColorMatch, listPalettes,
-  // images
-  extractColorsFromImage,
-  startImageExtractSession, sampleImageColor, closeImageExtractSession,
-  // auth
-  login, register, getUserProfile,
-  // community
-  getCommunityPosts, getSuggestedUsers, getFollowing, getFollowers,
-  followUser, unfollowUser, likePost, unlikePost,
-  // generic
-  get: (url, cfg) => api.get(url, cfg),
-  post: (url, body, cfg) => api.post(url, body, !isFormData(body) ? cfg : { ...(cfg||{}), headers: { ...(cfg?.headers||{}), 'Content-Type': 'multipart/form-data' } }),
-  put: (url, body, cfg) => api.put(url, body, cfg),
-  delete: (url, cfg) => api.delete(url, cfg),
+  setToken, getToken,
+  startImageExtractSession, sampleImageColor, closeImageExtractSession, extractColorsFromImage,
+  createColorMatch, validateHex, getCommunityFeed,
 };
 
 export default ApiService;

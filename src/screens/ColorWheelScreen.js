@@ -495,7 +495,7 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
                 const uri = asset.uri || asset?.assets?.[0]?.uri;
                 if (!uri) return;
                 setSelectedImageUri(uri);
-                setShowCoolorsExtractor(true);  // opens CoolorsColorExtractor modal
+                setShowExtractor(true);  // opens CoolorsColorExtractor modal
               }}
             />
           </View>
