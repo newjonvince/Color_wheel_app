@@ -11,9 +11,13 @@
       "resizeMode": "contain",
       "backgroundColor": "#0B0B0C"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "extra": {
-      "eas": { "projectId": "bdda9f6e-8e60-4d2f-882a-e1c37085af9b" }
+      "eas": {
+        "projectId": "bdda9f6e-8e60-4d2f-882a-e1c37085af9b"
+      }
     },
     "ios": {
       "bundleIdentifier": "com.fashioncolorwheel.app",
@@ -22,7 +26,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Allow camera access to sample colors from photos.",
         "NSPhotoLibraryUsageDescription": "Allow photo library access to import images.",
-        "NSPhotoLibraryAddUsageDescription": "Allow saving palettes/images to your library."
+        "NSPhotoLibraryAddUsageDescription": "Allow saving palettes/images to your library.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -30,13 +35,23 @@
       "versionCode": 50,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.READ_MEDIA_IMAGES"
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
       "expo-image-picker",
-      ["expo-build-properties", { "ios": { "deploymentTarget": "15.1" } }]
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
+      ]
     ],
-    "runtimeVersion": { "policy": "sdkVersion" }
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    }
   }
 }

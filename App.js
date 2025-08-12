@@ -237,16 +237,18 @@ export default function App() {
       
       // Try to load from backend first
       try {
-        const backendMatches = await ApiService.getUserColorMatches();
+        const backendMatches = typeof ApiService.getUserColorMatches === 'function'
+  ? await ApiService.getUserColorMatches()
+  : null;
+        if (backendMatches) {
         console.log('App: Loaded', backendMatches?.length || 0, 'color matches from backend');
         setSavedColorMatches(backendMatches || []);
-        
         // Also save to local storage as backup
         if (backendMatches?.length > 0) {
           await AsyncStorage.setItem(key, JSON.stringify(backendMatches));
         }
-        
         return;
+      }
       } catch (backendError) {
         console.warn('Backend load failed, falling back to local storage:', backendError);
       }
@@ -276,7 +278,7 @@ export default function App() {
       
       // Save to backend first
       try {
-        const savedMatch = await ApiService.createColorMatch({
+        const savedResp = await ApiService.createColorMatch({
           base_color: colorMatch.base_color,
           scheme: colorMatch.scheme,
           colors: colorMatch.colors,
@@ -284,16 +286,14 @@ export default function App() {
           description: colorMatch.description || '',
           is_public: colorMatch.is_public || false
         });
+        const savedMatch = (savedResp && savedResp.data) ? savedResp.data : savedResp;
         console.log('App: Color match saved to backend:', savedMatch);
-        
         // Update local state with backend response (includes ID)
         const updated = [...savedColorMatches, savedMatch];
         setSavedColorMatches(updated);
-        
         // Also save to local storage as backup
         const key = getMatchesKey(user?.id);
         await AsyncStorage.setItem(key, JSON.stringify(updated));
-        
         return savedMatch;
       } catch (backendError) {
         console.error('Backend save failed, saving locally only:', backendError);
@@ -315,6 +315,8 @@ export default function App() {
 
   const handleLoginSuccess = useCallback(async (u) => {
     const nextUser = pickUser(u);
+    // if the LoginScreen passes back a token, set it now
+    try { if (u && (u.token || u.authToken)) { ApiService.setToken?.(u.token || u.authToken); } } catch {}
     setUser(nextUser);
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
@@ -326,6 +328,8 @@ export default function App() {
 
   const handleSignUpComplete = useCallback(async (u) => {
     const nextUser = pickUser(u);
+    // if the LoginScreen passes back a token, set it now
+    try { if (u && (u.token || u.authToken)) { ApiService.setToken?.(u.token || u.authToken); } } catch {}
     setUser(nextUser);
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
@@ -340,6 +344,7 @@ export default function App() {
     try {
       await ApiService.logout?.();
       await ApiService.clearToken?.();
+      ApiService.setToken?.(null);
       await AsyncStorage.removeItem('isLoggedIn');
       await AsyncStorage.removeItem('userData');
       setUser(null);
@@ -354,6 +359,7 @@ export default function App() {
   const handleAccountDeleted = useCallback(async () => {
     try {
       await ApiService.clearToken?.();
+      ApiService.setToken?.(null);
       const keysToRemove = ['isLoggedIn', 'userData', getMatchesKey(user?.id)];
       await AsyncStorage.multiRemove(keysToRemove);
       setSavedColorMatches([]);
