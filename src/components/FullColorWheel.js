@@ -198,12 +198,11 @@ const FullColorWheel = forwardRef(function FullColorWheel({
       baseAngle.value = withTiming(ang, { duration: 140 }); // smooth to final
     });
 
-  // marker animated styles
+  // marker animated styles - use pre-computed offsets
   const markerStyles = new Array(4).fill(0).map((_, idx) =>
     useAnimatedStyle(() => {
-      const offsets = SCHEME_OFFSETS[scheme] || [0];
-      if (idx >= offsets.length) return { opacity: 0 };
-      const a = (baseAngle.value + offsets[idx] + 360) % 360;
+      if (idx >= schemeOffsets.length) return { opacity: 0 };
+      const a = (baseAngle.value + schemeOffsets[idx] + 360) % 360;
       const rad = (a - 90) * (Math.PI / 180);
       return {
         position: 'absolute',
