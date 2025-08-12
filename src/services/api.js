@@ -162,3 +162,8 @@ const ApiService = {
 };
 
 export default ApiService;
+
+export const health = async () => {
+  const { data } = await api.get('/health');
+  return data;
+};

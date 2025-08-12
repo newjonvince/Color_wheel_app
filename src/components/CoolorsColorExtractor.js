@@ -1,427 +1,247 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  Image,
-  Dimensions,
-  Alert,
-  PanResponder,
-} from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+// CoolorsColorExtractor.js (v3) — session-based, UI-thread safe for Reanimated worklets
+// Fixes release crash by avoiding JS object captures inside worklets.
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, { useSharedValue, useAnimatedStyle, runOnJS } from 'react-native-reanimated';
 import ApiService from '../services/api';
-import { hexToHsl } from '../utils/color';
 
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-const MAGNIFIER_SIZE = 120;
-
-/**
- * Props:
- * - navigation (React Navigation)  <-- REQUIRED for navigation flow
- * - initialImageUri: string
- * - initialSlots?: number
- * - navigateOnActions?: boolean (default false) - if true, uses navigation; if false, uses callbacks
- * - onComplete?: ({ imageUri, slots, dominant }) => void (modal flow)
- * - onSaveToBoard?: ({ imageUri, slots, dominant }) => void (modal flow)
- * - onClose?: () => void
- */
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
 export default function CoolorsColorExtractor({
   navigation,
+  navigateOnActions = false,
   initialImageUri,
   initialSlots = 5,
-  navigateOnActions = false,
   onComplete,
   onSaveToBoard,
   onClose,
 }) {
-  const [selectedImage, setSelectedImage] = useState(null); // { uri }
-  const [magnifierPosition, setMagnifierPosition] = useState({ x: screenWidth / 2, y: screenHeight / 2 });
-  const [extractedColor, setExtractedColor] = useState('#808080');
-  const [palette, setPalette] = useState([]); // ['#xxxxxx']
-  const [isLoading, setIsLoading] = useState(false);
-  const [imageLayout, setImageLayout] = useState({ width: 0, height: 0, x: 0, y: 0 });
-  const [sessionData, setSessionData] = useState(null); // { imageId, token, width, height, dominant, palette }
-  const mounted = useRef(true);
+  const [loading, setLoading] = useState(true);
+  const [sessionId, setSessionId] = useState(null);
+  const [sessionToken, setSessionToken] = useState(null);
+  const [imageMeta, setImageMeta] = useState({ width: 0, height: 0 });
+  const [palette, setPalette] = useState([]);
+  const [dominant, setDominant] = useState('#FFFFFF');
+  const [error, setError] = useState(null);
 
-  // --- helpers --------------------------------------------------------------
-  const fallbackPalette = useMemo(() => (
-    ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FECA57','#FF9FF3','#54A0FF','#5F27CD','#00D2D3','#FF9F43','#10AC84','#EE5A24','#0984E3','#A29BFE','#6C5CE7']
-  ), []);
+  // Layout -> SharedValues for geometry (worklet-safe)
+  const [layoutW, setLayoutW] = useState(0);
+  const [layoutH, setLayoutH] = useState(0);
+  const svOffsetX = useSharedValue(0);
+  const svOffsetY = useSharedValue(0);
+  const svRenderedW = useSharedValue(1);
+  const svRenderedH = useSharedValue(1);
 
-  const chooseDominant = useCallback((paletteArray) => paletteArray?.[0] || '#808080', []);
+  // Magnifier normalized coords
+  const nx = useSharedValue(0.5);
+  const ny = useSharedValue(0.5);
+  const [currentHex, setCurrentHex] = useState('#FFFFFF');
 
-  const startSession = useCallback(async (uri) => {
-    // Uses session-based API for live sampling
-    try {
-      const data = await ApiService.startImageExtractSession(uri, {
-        maxWidth: 1200,
-        maxHeight: 1200,
-      });
-      // expected: { sessionId, token, width, height, dominant, palette }
-      return data;
-    } catch (e) {
-      console.warn('Session start failed, using fallback palette:', e?.message);
-      return { 
-        sessionId: null, 
-        token: null, 
-        width: 800, 
-        height: 600, 
-        dominant: fallbackPalette[0], 
-        palette: fallbackPalette 
-      };
-    }
-  }, [fallbackPalette]);
-
-  const sampleColor = useCallback(async (sessionToken, nx, ny) => {
-    // Live sampling at normalized coordinates
-    try {
-      if (!sessionToken) return { hex: extractedColor };
-      const data = await ApiService.sampleImageColor(sessionToken, { nx, ny });
-      // expected: { hex, rgb, hsl }
-      return data;
-    } catch (e) {
-      console.warn('Color sampling failed:', e?.message);
-      return { hex: extractedColor };
-    }
-  }, [extractedColor]);
-
-  const closeSession = useCallback(async (sessionId) => {
-    // Explicit cleanup
-    try {
-      if (!sessionId) return;
-      await ApiService.closeImageExtractSession(sessionId);
-    } catch (e) {
-      console.warn('Session cleanup failed:', e?.message);
-    }
-  }, []);
-
-  const processImage = useCallback(async (asset) => {
-    setIsLoading(true);
-    try {
-      setSelectedImage(asset);
-      const sessionResult = await startSession(asset.uri);
-      setSessionData(sessionResult);
-      
-      const srvPalette = sessionResult.palette;
-      setPalette(Array.isArray(srvPalette) && srvPalette.length ? srvPalette : fallbackPalette);
-      setExtractedColor(sessionResult.dominant || fallbackPalette[0]);
-    } catch (e) {
-      setPalette(fallbackPalette);
-      setExtractedColor(fallbackPalette[0]);
-      setSessionData(null);
-    } finally {
-      if (mounted.current) setIsLoading(false);
-    }
-  }, [startSession, fallbackPalette]);
-
-  const pickImage = useCallback(async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: false,
-        quality: 0.9,
-      });
-      if (!result.canceled && result.assets?.[0]) {
-        await processImage(result.assets[0]);
-      } else {
-        onClose?.();
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to select image');
-      onClose?.();
-    }
-  }, [onClose, processImage]);
-
-  // mount
+  // Compute fit info on JS and push to SharedValues
   useEffect(() => {
-    mounted.current = true;
+    const iw = imageMeta.width || 1;
+    const ih = imageMeta.height || 1;
+    const vw = layoutW || 1;
+    const vh = layoutH || 1;
+    const scale = Math.min(vw / iw, vh / ih);
+    const renderedW = iw * scale;
+    const renderedH = ih * scale;
+    const offsetX = (vw - renderedW) / 2;
+    const offsetY = (vh - renderedH) / 2;
+    svOffsetX.value = offsetX;
+    svOffsetY.value = offsetY;
+    svRenderedW.value = renderedW;
+    svRenderedH.value = renderedH;
+  }, [imageMeta, layoutW, layoutH]);
+
+  // Start session
+  useEffect(() => {
+    let live = true;
     (async () => {
-      if (initialImageUri) {
-        await processImage({ uri: initialImageUri });
-      } else {
-        await pickImage();
+      if (!initialImageUri) { setError('No image'); setLoading(false); return; }
+      setLoading(true);
+      try {
+        const data = await ApiService.startImageExtractSession(initialImageUri, { maxWidth: 1200, maxHeight: 1200 });
+        if (!live) return;
+        const token = data.imageId || data.sessionId || data.token;
+        setSessionId(token);
+        setSessionToken(token);
+        setImageMeta({ width: data.width, height: data.height });
+        const slots = Array.isArray(data.palette) && data.palette.length ? data.palette.slice(0, initialSlots) : [];
+        setPalette(slots);
+        setDominant(data.dominant || slots[0] || '#FFFFFF');
+        setCurrentHex(data.dominant || slots[0] || '#FFFFFF');
+        setLoading(false);
+      } catch (e) {
+        setError('Failed to start extraction session');
+        setLoading(false);
       }
     })();
-    return () => { mounted.current = false; };
-  }, [initialImageUri, pickImage, processImage]);
+    return () => { live = false; };
+  }, [initialImageUri, initialSlots]);
 
-  // Explicit session cleanup on unmount
+  // Close session on unmount
   useEffect(() => {
-    return () => {
-      if (sessionData?.sessionId || sessionData?.imageId) {
-        // Cleanup session immediately on unmount (don't rely on TTL)
-        closeSession(sessionData.sessionId || sessionData.imageId);
+    return () => { if (sessionId) ApiService.closeImageExtractSession(sessionId).catch(()=>{}); };
+  }, [sessionId]);
+
+  // Live sample
+  const doSample = useCallback(async (rx, ry) => {
+    if (!sessionToken) return;
+    try {
+      const res = await ApiService.sampleImageColor(sessionToken, { nx: rx, ny: ry });
+      if (res?.hex) setCurrentHex(res.hex.toUpperCase());
+      if (Array.isArray(res?.updatedPalette) && res.updatedPalette.length) {
+        setPalette(res.updatedPalette);
       }
-    };
-  }, [sessionData, closeSession]);
+    } catch {}
+  }, [sessionToken]);
 
-  // --- dual-flow action handlers --------------------------------------------
+  // Gesture worklet — compute normalization using SharedValues only
+  const drag = Gesture.Pan()
+    .onBegin((e) => {
+      'worklet';
+      const rx = clamp01((e.x - svOffsetX.value) / svRenderedW.value);
+      const ry = clamp01((e.y - svOffsetY.value) / svRenderedH.value);
+      nx.value = rx; ny.value = ry;
+      // Guard runOnJS call to prevent native crashes
+      if (typeof doSample === 'function') {
+        runOnJS(doSample)(rx, ry);
+      }
+    })
+    .onChange((e) => {
+      'worklet';
+      const rx = clamp01((e.x - svOffsetX.value) / svRenderedW.value);
+      const ry = clamp01((e.y - svOffsetY.value) / svRenderedH.value);
+      nx.value = rx; ny.value = ry;
+      // Guard runOnJS call to prevent native crashes
+      if (typeof doSample === 'function') {
+        runOnJS(doSample)(rx, ry);
+      }
+    });
+
+  // Magnifier style using SharedValues only
+  const magnifierStyle = useAnimatedStyle(() => {
+    const px = svOffsetX.value + nx.value * svRenderedW.value;
+    const py = svOffsetY.value + ny.value * svRenderedH.value;
+    return { transform: [{ translateX: px - 28 }, { translateY: py - 28 }] };
+  });
+
+  // Actions
+  const handleUseColors = useCallback(() => {
+    onComplete && onComplete({ imageUri: initialImageUri, slots: palette, dominant: currentHex });
+  }, [onComplete, palette, currentHex, initialImageUri]);
+
   const handleExportToWheel = useCallback(() => {
-    const resultData = {
-      imageUri: selectedImage?.uri || initialImageUri,
-      slots: palette,
-      dominant: chooseDominant(palette),
-    };
-
-    if (!navigateOnActions && onComplete) {
-      // Modal/callback flow
-      onComplete(resultData);
-    } else if (navigateOnActions && navigation) {
-      // Navigation flow
-      navigation.navigate('ColorWheel', {
-        palette: resultData.slots,
-        baseHex: resultData.dominant,
+    if (navigateOnActions && navigation) {
+      navigation.navigate('ColorWheel', { // <- make sure this route exists
+        palette,
+        baseHex: dominant || currentHex,
         from: 'extractor',
       });
     } else {
-      Alert.alert('Error', 'Cannot complete action - missing navigation or callback');
+      onComplete && onComplete({ imageUri: initialImageUri, slots: palette, dominant: currentHex });
     }
-  }, [navigateOnActions, onComplete, navigation, selectedImage, initialImageUri, palette, chooseDominant]);
+  }, [navigateOnActions, navigation, palette, dominant, currentHex, onComplete, initialImageUri]);
 
   const handleSaveToBoard = useCallback(() => {
-    const resultData = {
-      imageUri: selectedImage?.uri || initialImageUri,
-      slots: palette,
-      dominant: chooseDominant(palette),
-    };
-
-    if (!navigateOnActions && onSaveToBoard) {
-      // Modal/callback flow
-      onSaveToBoard(resultData);
-    } else if (navigateOnActions && navigation) {
-      // Navigation flow
-      navigation.navigate('Profile', {
-        imageUri: resultData.imageUri,
-        palette: resultData.slots,
-        dominant: resultData.dominant,
+    if (navigateOnActions && navigation) {
+      navigation.navigate('BoardScreen', {
+        imageUri: initialImageUri,
+        palette,
+        dominant: dominant || currentHex,
         from: 'extractor',
       });
     } else {
-      Alert.alert('Error', 'Cannot save to board - missing navigation or callback');
+      onSaveToBoard && onSaveToBoard({ imageUri: initialImageUri, slots: palette, dominant: currentHex });
     }
-  }, [navigateOnActions, onSaveToBoard, navigation, selectedImage, initialImageUri, palette, chooseDominant]);
+  }, [navigateOnActions, navigation, initialImageUri, palette, dominant, currentHex, onSaveToBoard]);
 
-  // --- interaction ---------------------------------------------------------
-  const extractColorAtPosition = useCallback(async (relativeX, relativeY) => {
-    if (!sessionData?.token) {
-      // Fallback: pick color from palette if no session
-      if (!palette.length) return;
-      const idx = Math.max(0, Math.min(palette.length - 1, Math.floor((relativeX + relativeY) * palette.length) % palette.length));
-      setExtractedColor(palette[idx]);
-      return;
-    }
-
-    // Live sampling using session API
-    try {
-      const { hex } = await sampleColor(sessionData.token, relativeX, relativeY);
-      if (hex && mounted.current) {
-        setExtractedColor(hex);
-      }
-    } catch (e) {
-      console.warn('Live sampling failed:', e?.message);
-      // Fallback to palette selection
-      if (palette.length) {
-        const idx = Math.max(0, Math.min(palette.length - 1, Math.floor((relativeX + relativeY) * palette.length) % palette.length));
-        setExtractedColor(palette[idx]);
-      }
-    }
-  }, [sessionData, sampleColor, palette]);
-
-  const updateMagnifierPosition = useCallback(async (x, y) => {
-    const w = imageLayout.width || 1;
-    const h = imageLayout.height || 1;
-    const cx = Math.max(MAGNIFIER_SIZE / 2, Math.min(w - MAGNIFIER_SIZE / 2, x));
-    const cy = Math.max(MAGNIFIER_SIZE / 2, Math.min(h - MAGNIFIER_SIZE / 2, y));
-    setMagnifierPosition({ x: cx, y: cy });
-    await extractColorAtPosition(cx / w, cy / h);
-  }, [imageLayout.width, imageLayout.height, extractColorAtPosition]);
-
-  const panResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: (evt) => {
-      if (!selectedImage) return;
-      const { locationX, locationY } = evt.nativeEvent;
-      updateMagnifierPosition(locationX, locationY);
-    },
-    onPanResponderMove: (evt) => {
-      if (!selectedImage) return;
-      const { locationX, locationY } = evt.nativeEvent;
-      updateMagnifierPosition(locationX, locationY);
-    },
-  }), [selectedImage, updateMagnifierPosition]);
-
-
-
-  const onImageLayout = useCallback((event) => {
-    const { width, height, x, y } = event.nativeEvent.layout;
-    setImageLayout({ width, height, x, y });
-    if (width > 0 && height > 0) {
-      setMagnifierPosition({ x: width / 2, y: height / 2 });
-      extractColorAtPosition(0.5, 0.5);
-    }
-  }, [extractColorAtPosition]);
-
-  const handleUseOnWheel = useCallback(() => {
-    onColorExtracted?.(extractedColor);
-  }, [extractedColor, onColorExtracted]);
-
-  const handleCreateCollagePress = useCallback(() => {
-    if (onCreateCollage && selectedImage) onCreateCollage(selectedImage, extractedColor);
-  }, [onCreateCollage, selectedImage, extractedColor]);
-
-  if (isLoading) {
+  if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Processing image…</Text>
+      <View style={styles.center}>
+        <ActivityIndicator />
+        <Text style={styles.muted}>Preparing image…</Text>
+      </View>
+    );
+  }
+  if (error) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.error}>{error}</Text>
+        <TouchableOpacity style={styles.btn} onPress={onClose}><Text style={styles.btnText}>Close</Text></TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-          <Text style={styles.closeButtonText}>✕</Text>
+    <View
+      style={styles.root}
+      onLayout={e => {
+        const { width, height } = e.nativeEvent.layout;
+        setLayoutW(width); setLayoutH(height);
+      }}
+    >
+      <GestureDetector gesture={drag}>
+        <View style={styles.imageWrap}>
+          <Image source={{ uri: initialImageUri }} style={styles.image} resizeMode="contain" />
+          <Animated.View style={[styles.magnifier, magnifierStyle]} pointerEvents="none">
+            <View style={[styles.magSwatch, { backgroundColor: currentHex }]} />
+            <Text style={styles.magHex}>{currentHex}</Text>
+          </Animated.View>
+        </View>
+      </GestureDetector>
+
+      <View style={styles.paletteRow}>
+        {palette.map((c, i) => (<View key={i} style={[styles.swatch, { backgroundColor: c }]} />))}
+      </View>
+
+      <View style={styles.footer}>
+        <TouchableOpacity style={[styles.btn, styles.secondary]} onPress={onClose}>
+          <Text style={[styles.btnText, styles.secondaryText]}>Cancel</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Color Extractor</Text>
-        <TouchableOpacity
-          onPress={() => initialImageUri ? pickImage() : handleUseOnWheel()}
-          style={styles.nextButton}
-        >
-          <Text style={styles.nextButtonText}>{initialImageUri ? 'Pick another' : 'Next'}</Text>
+        <TouchableOpacity style={[styles.btn, styles.alt]} onPress={handleExportToWheel}>
+          <Text style={styles.btnText}>Export to Color Wheel</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.btn} onPress={handleSaveToBoard}>
+          <Text style={styles.btnText}>Save to Board</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Image */}
-      {selectedImage && (
-        <View style={styles.imageContainer}>
-          <View style={styles.imageWrapper} {...panResponder.panHandlers}>
-            <Image
-              source={{ uri: selectedImage.uri }}
-              style={styles.image}
-              resizeMode="contain"
-              onLayout={onImageLayout}
-            />
-            {/* Magnifier */}
-            <View
-              style={[styles.magnifier, { left: magnifierPosition.x - MAGNIFIER_SIZE / 2, top: magnifierPosition.y - MAGNIFIER_SIZE / 2 }]}
-            >
-              <View style={styles.magnifierInner}>
-                {/* Contrast back ring to keep the colored ring visible on any photo */}
-                <View style={styles.dominantRingBack} />
-
-                {/* The dominant color ring (updates live with extractedColor) */}
-                <View style={[styles.dominantRing, { borderColor: extractedColor }]} />
-
-                {/* Optional tiny center dot filled with the color */}
-                <View style={[styles.dominantCenterDot, { backgroundColor: extractedColor }]} />
-
-                {/* Existing crosshair stays on top for precise aiming */}
-                <View style={styles.crosshair}>
-                  <View style={styles.crosshairHorizontal} />
-                  <View style={styles.crosshairVertical} />
-                </View>
-              </View>
-            </View>
-          </View>
+      {!navigateOnActions && (
+        <View style={styles.footerInline}>
+          <TouchableOpacity style={styles.btn} onPress={handleUseColors}>
+            <Text style={styles.btnText}>Use Colors</Text>
+          </TouchableOpacity>
         </View>
       )}
-
-      {/* Palette + selected color */}
-      <View style={styles.colorBarContainer}>
-        <View style={[styles.colorBar, { backgroundColor: extractedColor }]}>
-          <View style={styles.colorDot} />
-        </View>
-        <Text style={styles.colorText}>{extractedColor.toUpperCase()}</Text>
-
-        {palette.length > 0 && (
-          <View style={styles.paletteRow}>
-            {palette.slice(0, 8).map((c) => (
-              <TouchableOpacity key={c} onPress={() => setExtractedColor(c)}>
-                <View style={[styles.paletteSwatch, { backgroundColor: c, borderColor: c === extractedColor ? '#000' : '#fff' }]} />
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-      </View>
-
-      {/* Actions */}
-      <View style={styles.actionButtonsContainer}>
-        <TouchableOpacity style={[styles.actionButton, styles.secondaryButton]} onPress={handleSaveToBoard}>
-          <Text style={styles.secondaryButtonText}>Save to Board</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionButton, styles.primaryButton]} onPress={handleExportToWheel}>
-          <Text style={styles.primaryButtonText}>
-            {!navigateOnActions && onComplete ? 'Use Palette' : 'Export to Color Wheel'}
-          </Text>
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' },
-  loadingText: { fontSize: 16, color: '#666' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 20, backgroundColor: '#fff' },
-  closeButton: { padding: 10 },
-  closeButtonText: { fontSize: 18, color: '#333' },
-  headerTitle: { fontSize: 18, fontWeight: '600', color: '#333' },
-  nextButton: { padding: 10 },
-  nextButtonText: { fontSize: 16, color: '#007AFF', fontWeight: '600' },
-  imageContainer: { flex: 1, paddingHorizontal: 20 },
-  imageWrapper: { flex: 1, position: 'relative' },
-  image: { width: '100%', height: '100%' },
-  magnifier: { position: 'absolute', width: MAGNIFIER_SIZE, height: MAGNIFIER_SIZE, borderRadius: MAGNIFIER_SIZE / 2, borderWidth: 4, borderColor: '#fff', backgroundColor: 'rgba(255,255,255,0.9)', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 5 },
-  magnifierInner: { flex: 1, borderRadius: (MAGNIFIER_SIZE - 8) / 2, overflow: 'hidden', justifyContent: 'center', alignItems: 'center' },
-  // Ring sizes derived from the magnifier size
-  dominantRingBack: {
+  root: { flex: 1, backgroundColor: '#0B0B0C' },
+  imageWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  image: { width: '100%', height: '80%' },
+  magnifier: {
     position: 'absolute',
-    width: MAGNIFIER_SIZE - 24,   // slightly larger than the color ring for contrast
-    height: MAGNIFIER_SIZE - 24,
-    borderRadius: (MAGNIFIER_SIZE - 24) / 2,
-    borderWidth: 4,
-    borderColor: '#fff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.15,
-    shadowRadius: 2,
-    elevation: 2,
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#fff', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 6,
   },
-  dominantRing: {
-    position: 'absolute',
-    width: MAGNIFIER_SIZE - 30,   // main color ring
-    height: MAGNIFIER_SIZE - 30,
-    borderRadius: (MAGNIFIER_SIZE - 30) / 2,
-    borderWidth: 6,               // ring thickness
-  },
-  dominantCenterDot: {
-    position: 'absolute',
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  crosshair: { position: 'absolute', width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
-  crosshairHorizontal: { position: 'absolute', width: 20, height: 2, backgroundColor: '#333' },
-  crosshairVertical: { position: 'absolute', width: 2, height: 20, backgroundColor: '#333' },
-  colorBarContainer: { paddingHorizontal: 20, paddingVertical: 20, backgroundColor: '#fff', alignItems: 'center' },
-  colorBar: { width: screenWidth - 40, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center', marginBottom: 10, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },
-  colorDot: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff', borderWidth: 2, borderColor: 'rgba(0,0,0,0.2)' },
-  colorText: { fontSize: 16, fontWeight: '600', color: '#333' },
-  paletteRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
-  paletteSwatch: { width: 28, height: 28, borderRadius: 14, borderWidth: 2, marginRight: 6 },
-  actionButtonsContainer: { flexDirection: 'row', marginHorizontal: 20, marginBottom: 40, gap: 12 },
-  actionButton: { flex: 1, paddingVertical: 16, borderRadius: 25, alignItems: 'center' },
-  primaryButton: { backgroundColor: '#007AFF' },
-  secondaryButton: { backgroundColor: '#f8f8f8', borderWidth: 1, borderColor: '#e0e0e0' },
-  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  secondaryButtonText: { color: '#333', fontSize: 16, fontWeight: '600' },
+  magSwatch: { width: 40, height: 22, borderRadius: 6, borderWidth: 1, borderColor: '#E6E6E6' },
+  magHex: { color: '#111', fontSize: 11, fontWeight: '600', marginTop: 4 },
+  paletteRow: { flexDirection: 'row', justifyContent: 'center', gap: 8, paddingVertical: 12, backgroundColor: '#0B0B0C' },
+  swatch: { width: 48, height: 22, borderRadius: 6, borderWidth: 1, borderColor: '#2A2A2A' },
+  footer: { flexDirection: 'row', justifyContent: 'space-between', padding: 16, backgroundColor: '#0B0B0C' },
+  footerInline: { paddingHorizontal: 16, paddingBottom: 16, backgroundColor: '#0B0B0C' },
+  btn: { backgroundColor: '#246BFD', paddingHorizontal: 12, paddingVertical: 12, borderRadius: 10, flex: 1, marginHorizontal: 4, alignItems: 'center' },
+  btnText: { color: '#fff', fontWeight: '700', fontSize: 12, textAlign: 'center' },
+  secondary: { backgroundColor: '#232323' },
+  secondaryText: { color: '#EDEDED' },
+  alt: { backgroundColor: '#4B6BFB' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  muted: { marginTop: 8, color: '#999' },
+  error: { color: '#F44', marginBottom: 12 },
 });

@@ -251,16 +251,16 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
     setAngle(hue);
     setIsColorLocked(true);
     setSelectedScheme('complementary'); // Default to complementary
-    setShowExtractor(false); // Fixed: was setShowCoolorsExtractor
+    setShowExtractor(false); // Fixed: was setShowExtractor
     
     // Update markers with the new color
-    updateColorMarkers(hue, extractedColor, activeMarkerId);
+    if (typeof updateColorMarkers === 'function') { updateColorMarkers(hue, extractedColor, activeMarkerId); }
   };
 
   const handleCreateCollage = (image, baseColor) => {
     setCollageImage(image);
     setCollageBaseColor(baseColor);
-    setShowExtractor(false); // Fixed: was setShowCoolorsExtractor
+    setShowExtractor(false); // Fixed: was setShowExtractor
     setShowCollageCreator(true);
   };
 
@@ -290,10 +290,9 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
   };
 
   const handleSaveColorMatch = async () => {
-    if (!selectedBoard) {
-      Alert.alert('No Board Selected', 'Please select a board to save your color match.');
-      return;
-    }
+    // Board selection optional — allow quick save without board
+    // If you must enforce board selection, restore this guard.
+    
 
     setIsSaving(true);
     
@@ -468,12 +467,18 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
 
       {/* Conditional Rendering: Advanced vs Basic Color Wheel */}
       {useAdvancedMode ? (
-        <AdvancedColorWheel 
-          currentUser={currentUser}
-          onSaveColorMatch={onSaveColorMatch}
-        />
-      ) : (
-        <>
+          (typeof AdvancedColorWheel !== 'undefined' && AdvancedColorWheel) ? (
+            <AdvancedColorWheel 
+              currentUser={currentUser}
+              onSaveColorMatch={onSaveColorMatch}
+            />
+          ) : (
+            <View style={{ padding: 16 }}>
+              <Text style={{ color: '#444' }}>Advanced mode coming soon.</Text>
+            </View>
+          )
+        ) : (
+          <>
           {/* Color Wheel */}
           <View style={{ alignItems: 'center', paddingVertical: 10 }}>
             <FullColorWheel

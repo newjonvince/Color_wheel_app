@@ -1,5 +1,5 @@
 // FullColorWheel.js
-import React, { forwardRef, useImperativeHandle, useMemo } from 'react';
+import React, { forwardRef, useImperativeHandle, useMemo, useCallback } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { View, StyleSheet } from 'react-native';
 import Animated, { useSharedValue, useDerivedValue, useAnimatedStyle, withTiming, runOnJS, useAnimatedReaction } from 'react-native-reanimated';
@@ -147,19 +147,32 @@ const FullColorWheel = forwardRef(function FullColorWheel({
     });
   }, [scheme, ringR]);
 
-  // Use useAnimatedReaction for better performance - runs on UI thread
-  useAnimatedReaction(
-    () => ({ angle: baseAngle.value, scheme }), // track deps on the UI thread
-    (state) => {
-      const offsets = SCHEME_OFFSETS[state.scheme] || [0];
-      const hues = offsets.map(off => (state.angle + off + 360) % 360);
-      const palette = hues.map(h => oklchToHexClamped(baseLC.value.L, baseLC.value.C, h));
+  // Create a JS callback to handle palette generation safely
+  const updatePalette = useCallback((angle) => {
+    const offsets = SCHEME_OFFSETS[scheme] || [0];
+    const hues = offsets.map(off => (angle + off + 360) % 360);
+    const baseLCValue = baseLC.value;
+    const palette = hues.map(h => oklchToHexClamped(baseLCValue.L, baseLCValue.C, h));
+    
+    // Guard callbacks before calling to prevent crashes
+    if (typeof onColorsChange === 'function') {
+      onColorsChange(palette);
+    }
+    if (typeof onHexChange === 'function') {
+      onHexChange(palette[0]);
+    }
+  }, [scheme, onColorsChange, onHexChange]);
 
-      // fire JS callbacks safely
-      runOnJS(onColorsChange)?.(palette);
-      runOnJS(onHexChange)?.(palette[0]);
+  // Use useAnimatedReaction with only UI thread safe operations
+  useAnimatedReaction(
+    () => baseAngle.value, // Only track the angle value
+    (angle) => {
+      // Guard the callback before calling runOnJS to prevent native crashes
+      if (typeof updatePalette === 'function') {
+        runOnJS(updatePalette)(angle);
+      }
     },
-    [scheme]
+    [updatePalette]
   );
 
   // gesture: set directly during drag, smooth only on release
