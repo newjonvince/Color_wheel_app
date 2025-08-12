@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "ColorFashionWheel",
-    "slug": "color-fashion-wheel",
+    "slug": "fashion-color-wheel-backend",
     "scheme": "colorwheel",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -35,7 +35,7 @@
     },
     "plugins": [
       "expo-image-picker",
-      ["expo-build-properties", { "ios": { "deploymentTarget": "14.0" } }]
+      ["expo-build-properties", { "ios": { "deploymentTarget": "15.1" } }]
     ],
     "runtimeVersion": { "policy": "sdkVersion" }
   }
