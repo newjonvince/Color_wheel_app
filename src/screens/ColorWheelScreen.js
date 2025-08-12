@@ -27,21 +27,6 @@ import Animated, {
 import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 import ColorCollageCreator from '../components/ColorCollageCreator';
 import ApiService from '../services/api';
-
-// Lazily require the Skia wheel so we don't crash when @shopify/react-native-skia isn't available.
-let FullColorWheelLazy = null;
-function getFullColorWheelSafe() {
-  try {
-    if (!FullColorWheelLazy) {
-      // This may throw in Expo Go / builds without Skia; we catch and fallback to SVG.
-      FullColorWheelLazy = require('../components/FullColorWheel').default;
-    }
-    return FullColorWheelLazy;
-  } catch (e) {
-    console.warn('Skia FullColorWheel unavailable, falling back to SVG wheel:', e?.message || e);
-    return null;
-  }
-}
 import { 
   hslToHex, 
   hexToHsl, 
@@ -58,19 +43,107 @@ import {
   nearestAccessible
 } from '../utils/color';
 
+// Lazily require the Skia wheel so we don't crash when @shopify/react-native-skia isn't available.
+let FullColorWheelLazy = null;
+let hasSkiaError = false;
+
+function getFullColorWheelSafe() {
+  if (hasSkiaError) return null; // Don't retry if we already know it fails
+  
+  try {
+    if (!FullColorWheelLazy) {
+      // This may throw in Expo Go / builds without Skia; we catch and fallback to SVG.
+      FullColorWheelLazy = require('../components/FullColorWheel').default;
+      console.log('✅ FullColorWheel loaded successfully');
+    }
+    return FullColorWheelLazy;
+  } catch (e) {
+    console.warn('⚠️ Skia FullColorWheel unavailable, falling back to SVG wheel:', e?.message || e);
+    hasSkiaError = true;
+    return null;
+  }
+}
+
 const { width: screenWidth } = Dimensions.get('window');
 const WHEEL_SIZE = screenWidth * 0.8;
 const WHEEL_RADIUS = WHEEL_SIZE / 2;
 const WHEEL_STROKE_WIDTH = 40;
 
+// Fallback Color Wheel Component (SVG-based, no Skia dependency)
+const FallbackColorWheel = React.memo(({ size = 300, scheme = 'complementary', initialHex = '#FF6B6B' }) => {
+  console.log('🔄 Using FallbackColorWheel (SVG-based)');
+  
+  const wheelSize = size;
+  const center = wheelSize / 2;
+  const radius = wheelSize * 0.35;
+  
+  // Generate simple color stops for the wheel
+  const colorStops = [];
+  for (let i = 0; i < 12; i++) {
+    const hue = (i * 30) % 360;
+    const color = hslToHex(hue, 80, 60);
+    colorStops.push(color);
+  }
+  
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Svg width={wheelSize} height={wheelSize} style={{ backgroundColor: 'transparent' }}>
+        {/* Simple color wheel using circles */}
+        {colorStops.map((color, index) => {
+          const angle = (index * 30) * (Math.PI / 180);
+          const x = center + radius * Math.cos(angle);
+          const y = center + radius * Math.sin(angle);
+          
+          return (
+            <Circle
+              key={index}
+              cx={x}
+              cy={y}
+              r={15}
+              fill={color}
+              stroke="#fff"
+              strokeWidth={2}
+            />
+          );
+        })}
+        
+        {/* Center circle */}
+        <Circle
+          cx={center}
+          cy={center}
+          r={20}
+          fill={initialHex}
+          stroke="#fff"
+          strokeWidth={3}
+        />
+      </Svg>
+      
+      <Text style={{ 
+        marginTop: 10, 
+        fontSize: 12, 
+        color: '#666',
+        textAlign: 'center' 
+      }}>
+        Fallback Color Wheel{'\n'}(Skia unavailable)
+      </Text>
+    </View>
+  );
+});
+
 function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout }) {
   const route = useRoute();
   
-  // Add crash debugging
+  // Add crash debugging and safety checks
   console.log('🎨 ColorWheelScreen: Component initializing...');
   
+  // Safety checks for props
+  if (!navigation) {
+    console.error('🚨 ColorWheelScreen: navigation prop is missing');
+    return null;
+  }
+  
+  // Test color utility imports immediately to catch import errors
   try {
-    // Test color utility imports immediately
     const testColor = generateOklchScheme('#FF6B6B', 'complementary', 5);
     console.log('🎨 ColorWheelScreen: Color utilities working', testColor);
   } catch (error) {
@@ -512,26 +585,41 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
           )
         ) : (
           <>
-          {/* Color Wheel */}
+          {/* Color Wheel - Safe Loading with Fallback */}
           <View style={{ alignItems: 'center', paddingVertical: 10 }}>
-            <FullColorWheel
-              size={300}
-              scheme={selectedScheme}
-              initialHex={selectedColor}
-              onColorsChange={(colors) => {
-                if (Array.isArray(colors) && colors.length) setPalette(colors);
-              }}
-              onHexChange={(hex) => {
-                if (hex) setSelectedColor(hex);
-              }}
-              onImageSelected={(asset) => {
-                if (!asset) return;
-                const uri = asset.uri || asset?.assets?.[0]?.uri;
-                if (!uri) return;
-                setSelectedImageUri(uri);
-                setShowExtractor(true);
-              }}
-            />
+            {(() => {
+              const SafeFullColorWheel = getFullColorWheelSafe();
+              
+              if (SafeFullColorWheel) {
+                try {
+                  return (
+                    <SafeFullColorWheel
+                      size={300}
+                      scheme={selectedScheme}
+                      initialHex={selectedColor}
+                      onColorsChange={(colors) => {
+                        if (Array.isArray(colors) && colors.length) setPalette(colors);
+                      }}
+                      onHexChange={(hex) => {
+                        if (hex) setSelectedColor(hex);
+                      }}
+                      onImageSelected={(asset) => {
+                        if (!asset) return;
+                        const uri = asset.uri || asset?.assets?.[0]?.uri;
+                        if (!uri) return;
+                        setSelectedImageUri(uri);
+                        setShowExtractor(true);
+                      }}
+                    />
+                  );
+                } catch (renderError) {
+                  console.error('🚨 FullColorWheel render error:', renderError);
+                  return <FallbackColorWheel />;
+                }
+              }
+              
+              return <FallbackColorWheel />;
+            })()}
           </View>
 
           <View style={{ flexDirection: 'row', justifyContent: 'space-evenly', marginHorizontal: 18, marginTop: 10 }}>
