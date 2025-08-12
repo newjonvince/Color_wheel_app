@@ -91,7 +91,12 @@ async function getPaletteFromBuffer(buffer) {
 router.post('/extract-colors', upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({ error: 'No image uploaded' });
+      return res.status(400).json({ error: 'No image provided', field: 'image' });
+    }
+
+    // Guard against HEIC if sharp doesn't support it
+    if (req.file.mimetype === 'image/heic' || req.file.originalname?.toLowerCase().endsWith('.heic')) {
+      return res.status(415).json({ error: 'HEIC format not supported. Please use JPEG, PNG, or WebP.' });
     }
 
     // Normalize to sRGB, rotate by EXIF, keep alpha, store as PNG for sampling accuracy

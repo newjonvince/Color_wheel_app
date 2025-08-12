@@ -136,8 +136,9 @@ IMPROVEMENTS MADE:
     }, [fetchPage]);
 
     useEffect(() => {
+      if (!ApiService.getToken()) return; // ← wait for auth
       loadInitial();
-    }, [loadInitial]);
+    }, [loadInitial, ApiService.getToken()]);
 
     const onRefresh = useCallback(async () => {
       setRefreshing(true);

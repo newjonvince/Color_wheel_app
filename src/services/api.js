@@ -5,6 +5,7 @@
 // - Correct payloads for legacy images endpoints
 
 import axios from 'axios';
+import * as ImageManipulator from 'expo-image-manipulator';
 
 const base =
   process.env.EXPO_PUBLIC_API_BASE_URL ||
@@ -74,8 +75,17 @@ export const startImageExtractSession = async (imageUri, {
   onProgress,
 } = {}) => {
   if (!imageUri) throw new Error('imageUri is required');
+  
+  // Normalize to JPEG to avoid HEIC/HEIF issues on backend
+  const normalized = await ImageManipulator.manipulateAsync(
+    imageUri,
+    [],                                  // no transform, just re-encode
+    { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
+  );
+  const normalizedUri = normalized.uri;
+  
   const form = new FormData();
-  form.append('image', { uri: imageUri, name: fileName, type: mime });
+  form.append('image', { uri: normalizedUri, name: 'upload.jpg', type: 'image/jpeg' });
   form.append('maxWidth', String(maxWidth));
   form.append('maxHeight', String(maxHeight));
 
@@ -122,8 +132,16 @@ export const closeImageExtractSession = async (sessionId) => {
 };
 
 export const extractColorsFromImage = async (imageUri, opts = {}) => {
+  // Normalize to JPEG to avoid HEIC/HEIF issues on backend
+  const normalized = await ImageManipulator.manipulateAsync(
+    imageUri,
+    [],                                  // no transform, just re-encode
+    { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
+  );
+  const normalizedUri = normalized.uri;
+  
   const form = new FormData();
-  form.append('image', { uri: imageUri, name: 'upload.jpg', type: 'image/jpeg' });
+  form.append('image', { uri: normalizedUri, name: 'upload.jpg', type: 'image/jpeg' });
   if (opts.maxWidth) form.append('maxWidth', String(opts.maxWidth));
   if (opts.maxHeight) form.append('maxHeight', String(opts.maxHeight));
   const { data } = await _postMultipart('/images/extract-colors', form);
