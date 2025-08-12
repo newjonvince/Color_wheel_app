@@ -24,10 +24,24 @@ import Animated, {
   runOnJS,
   withSpring,
 } from 'react-native-reanimated';
-import FullColorWheel from '../components/FullColorWheel';
 import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 import ColorCollageCreator from '../components/ColorCollageCreator';
 import ApiService from '../services/api';
+
+// Lazily require the Skia wheel so we don't crash when @shopify/react-native-skia isn't available.
+let FullColorWheelLazy = null;
+function getFullColorWheelSafe() {
+  try {
+    if (!FullColorWheelLazy) {
+      // This may throw in Expo Go / builds without Skia; we catch and fallback to SVG.
+      FullColorWheelLazy = require('../components/FullColorWheel').default;
+    }
+    return FullColorWheelLazy;
+  } catch (e) {
+    console.warn('Skia FullColorWheel unavailable, falling back to SVG wheel:', e?.message || e);
+    return null;
+  }
+}
 import { 
   hslToHex, 
   hexToHsl, 
@@ -51,6 +65,20 @@ const WHEEL_STROKE_WIDTH = 40;
 
 function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout }) {
   const route = useRoute();
+  
+  // Add crash debugging
+  console.log('🎨 ColorWheelScreen: Component initializing...');
+  
+  try {
+    // Test color utility imports immediately
+    const testColor = generateOklchScheme('#FF6B6B', 'complementary', 5);
+    console.log('🎨 ColorWheelScreen: Color utilities working', testColor);
+  } catch (error) {
+    console.error('🚨 ColorWheelScreen: Color utility import error:', error);
+    Alert.alert('Error', 'Color utilities failed to load. Please restart the app.');
+    return null;
+  }
+  
   const [selectedColor, setSelectedColor] = useState('#FF6B6B');
   const [baseHex, setBaseHex] = useState('#FF6B6B');
   const [angle, setAngle] = useState(0);
@@ -342,6 +370,28 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
   }, []);
 
   const openGallery = useCallback(async () => {
+  // Precompute 360° ring segments once (improves perf and avoids mid-gesture jank)
+  const wheelSegments = useMemo(() => {
+    const segs = [];
+    for (let i = 0; i < 360; i++) {
+      const startAngle = i * (Math.PI / 180);
+      const endAngle = (i + 1) * (Math.PI / 180);
+      const color = hslToHex(i, 100, 50);
+      
+      const x1 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.cos(startAngle);
+      const y1 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.sin(startAngle);
+      const x2 = WHEEL_RADIUS + WHEEL_RADIUS * Math.cos(startAngle);
+      const y2 = WHEEL_RADIUS + WHEEL_RADIUS * Math.sin(startAngle);
+      const x3 = WHEEL_RADIUS + WHEEL_RADIUS * Math.cos(endAngle);
+      const y3 = WHEEL_RADIUS + WHEEL_RADIUS * Math.sin(endAngle);
+      const x4 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.cos(endAngle);
+      const y4 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.sin(endAngle);
+      
+      segs.push({ d: `M ${x1} ${y1} L ${x2} ${y2} L ${x3} ${y3} L ${x4} ${y4} Z`, fill: color });
+    }
+    return segs;
+  }, []);
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') return;
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: false, quality: 0.9 });
@@ -410,26 +460,9 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
             </Defs>
             
             {/* Color wheel segments */}
-            {Array.from({ length: 360 }, (_, i) => {
-              const startAngle = i * (Math.PI / 180);
-              const endAngle = (i + 1) * (Math.PI / 180);
-              const color = hslToHex(i, 100, 50);
-              
-              const x1 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.cos(startAngle);
-              const y1 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.sin(startAngle);
-              const x2 = WHEEL_RADIUS + WHEEL_RADIUS * Math.cos(startAngle);
-              const y2 = WHEEL_RADIUS + WHEEL_RADIUS * Math.sin(startAngle);
-              const x3 = WHEEL_RADIUS + WHEEL_RADIUS * Math.cos(endAngle);
-              const y3 = WHEEL_RADIUS + WHEEL_RADIUS * Math.sin(endAngle);
-              const x4 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.cos(endAngle);
-              const y4 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.sin(endAngle);
-              
+            {wheelSegments.map((seg, i) => {
               return (
-                <Path
-                  key={i}
-                  d={`M ${x1} ${y1} L ${x2} ${y2} L ${x3} ${y3} L ${x4} ${y4} Z`}
-                  fill={color}
-                />
+                <Path key={i} d={seg.d} fill={seg.fill} />
               );
             })}
             
@@ -483,24 +516,20 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
           <View style={{ alignItems: 'center', paddingVertical: 10 }}>
             <FullColorWheel
               size={300}
-              scheme={selectedScheme}            // keep your state value
-              initialHex={selectedColor}       // keep your state value
-
-              // callbacks FROM the wheel TO the screen
+              scheme={selectedScheme}
+              initialHex={selectedColor}
               onColorsChange={(colors) => {
                 if (Array.isArray(colors) && colors.length) setPalette(colors);
               }}
               onHexChange={(hex) => {
                 if (hex) setSelectedColor(hex);
               }}
-
-              // when the wheel (or its center buttons) picks an image
               onImageSelected={(asset) => {
                 if (!asset) return;
                 const uri = asset.uri || asset?.assets?.[0]?.uri;
                 if (!uri) return;
                 setSelectedImageUri(uri);
-                setShowExtractor(true);  // opens CoolorsColorExtractor modal
+                setShowExtractor(true);
               }}
             />
           </View>
