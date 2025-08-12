@@ -6,7 +6,7 @@ const logger = require('./utils/logger');
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
-const { router: colorRoutes } = require('./routes/colors');
+const colorRoutes = require('./routes/colors');
 const boardRoutes = require('./routes/boards');
 const userRoutes = require('./routes/users');
 const communityRoutes = require('./routes/community');
@@ -21,7 +21,7 @@ const PORT = process.env.PORT || 3000;
 app.set('trust proxy', 1);
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 
 // CORS configuration - safe parsing + TestFlight/Expo web support
 const parseOrigins = (raw) =>
@@ -46,7 +46,24 @@ const corsOptions = {
   optionsSuccessStatus: 200,
 };
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // handle preflight everywhere
+app.options('*', cors(corsOptions)); 
+app.use('/api', (req, res, next) => {
+  const redacted = { ...req.headers };
+  if (redacted.authorization) redacted.authorization = 'Bearer ***';
+  if (redacted.cookie) redacted.cookie = '***';
+  console.log(`🔍 ${req.method} ${req.originalUrl} from ${req.ip}`);
+  console.log('🔍 Headers:', JSON.stringify(redacted, null, 2));
+  if (req.is('application/json') && req.body && Object.keys(req.body).length) {
+    const masked = JSON.parse(JSON.stringify(req.body));
+    ['password','newPassword','token'].forEach(k => { if (masked[k]) masked[k] = '***'; });
+    console.log('🔍 Body:', JSON.stringify(masked, null, 2));
+  } else if (!req.is('application/json')) {
+    console.log('🔍 Body: [non-JSON or multipart body]');
+  }
+  next();
+});
+
+// handle preflight everywhere
 
 // Rate limiting middleware (apply speedLimiter before generalLimiter)
 const { speedLimiter, generalLimiter } = require('./middleware/rateLimiting');

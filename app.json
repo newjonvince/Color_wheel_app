@@ -1,99 +1,42 @@
 {
   "expo": {
-    "name": "Color Fashion Wheel",
+    "name": "ColorFashionWheel",
     "slug": "color-fashion-wheel",
+    "scheme": "colorwheel",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "newArchEnabled": false,
-    "description": "Transform your fashion sense with AI-powered color analysis. Extract colors from photos, create stunning color collages, discover perfect outfit combinations, and share your style inspiration with our interactive color wheel technology.",
-    "platforms": [
-      "ios",
-      "android"
-    ],
-    "scheme": "colorwheel",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#f8f9fa"
+      "backgroundColor": "#0B0B0C"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
+    "extra": {
+      "eas": { "projectId": "bdda9f6e-8e60-4d2f-882a-e1c37085af9b" }
+    },
     "ios": {
-      "supportsTablet": true,
       "bundleIdentifier": "com.fashioncolorwheel.app",
-      "buildNumber": "1.0.0",
-      "requireFullScreen": false,
+      "buildNumber": "50",
+      "supportsTablet": false,
       "infoPlist": {
-        "NSCameraUsageDescription": "Fashion Color Wheel uses the camera to capture colors from your outfits and surroundings for personalized color analysis.",
-        "NSPhotoLibraryUsageDescription": "Fashion Color Wheel needs access to your photos to extract and analyze colors for your personal color palette.",
-        "NSPhotoLibraryAddUsageDescription": "Fashion Color Wheel saves your color palettes and style collages to your photo library for easy access.",
-        "NSMicrophoneUsageDescription": "Fashion Color Wheel uses the microphone only when recording style videos or tutorials.",
-        "ITSAppUsesNonExemptEncryption": false,
-        "NSAppTransportSecurity": {
-          "NSAllowsArbitraryLoads": false,
-          "NSExceptionDomains": {
-            "colorwheelapp-production.up.railway.app": {
-              "NSExceptionAllowsInsecureHTTPLoads": false,
-              "NSExceptionMinimumTLSVersion": "1.2",
-              "NSIncludesSubdomains": true
-            }
-          }
-        }
+        "NSCameraUsageDescription": "Allow camera access to sample colors from photos.",
+        "NSPhotoLibraryUsageDescription": "Allow photo library access to import images.",
+        "NSPhotoLibraryAddUsageDescription": "Allow saving palettes/images to your library."
       }
     },
     "android": {
       "package": "com.fashioncolorwheel.app",
-      "versionCode": 1,
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#f8f9fa"
-      },
-      "edgeToEdgeEnabled": true,
+      "versionCode": 50,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_MEDIA_VIDEO",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.READ_MEDIA_IMAGES"
       ]
     },
-    "web": {
-      "favicon": "./assets/favicon.png",
-      "bundler": "metro"
-    },
     "plugins": [
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Allow Fashion Color Wheel to access your camera to capture colors from clothing and surroundings."
-        }
-      ],
-      [
-        "expo-image-picker",
-        {
-          "photosPermission": "Allow Fashion Color Wheel to access your photos to extract colors for analysis."
-        }
-      ],
-      "expo-media-library",
-      "expo-secure-store",
-      "expo-mail-composer",
-      "expo-font",
-      "expo-build-properties"
+      "expo-image-picker",
+      ["expo-build-properties", { "ios": { "deploymentTarget": "14.0" } }]
     ],
-    "runtimeVersion": {
-      "policy": "sdkVersion"
-    },
-    "updates": {
-      "fallbackToCacheTimeout": 0
-    },
-    "extra": {
-      "eas": {
-        "projectId": "6e03a055-6c53-4d35-b62f-8472a8cae381"
-      },
-      "EXPO_PUBLIC_API_BASE_URL": "https://colorwheelapp-production.up.railway.app"
-    }
+    "runtimeVersion": { "policy": "sdkVersion" }
   }
 }
