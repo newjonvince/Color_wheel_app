@@ -76,7 +76,7 @@ const logger = {
   // Child logger with context prefix
   child(ctx = {}) {
     const prefix = Object.keys(ctx).length ? JSON.stringify(ctx) : '';
-    const wrap = (fn) => (...args) => fn(prefix ? `${prefix}`, ...args);
+    const wrap = (fn) => (...args) => fn(prefix ? `${prefix}` : '', ...args);
     return {
       error: wrap(this.error),
       warn: wrap(this.warn),
