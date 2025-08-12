@@ -5,7 +5,11 @@
 
 import axios from 'axios';
 
-const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000/api';
+const base =
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  process.env.API_BASE_URL ||
+  'http://localhost:3000';
+const API_BASE = base.endsWith('/api') ? base : `${base}/api`;
 
 const api = axios.create({
   baseURL: API_BASE,

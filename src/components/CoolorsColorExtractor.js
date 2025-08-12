@@ -193,7 +193,7 @@ export default function CoolorsColorExtractor({
       onSaveToBoard(resultData);
     } else if (navigateOnActions && navigation) {
       // Navigation flow
-      navigation.navigate('BoardScreen', {
+      navigation.navigate('Profile', {
         imageUri: resultData.imageUri,
         palette: resultData.slots,
         dominant: resultData.dominant,

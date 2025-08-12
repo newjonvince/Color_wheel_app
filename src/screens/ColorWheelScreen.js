@@ -671,7 +671,7 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
               }}
               onSaveToBoard={({ imageUri, slots, dominant }) => {
                 // Optional: if you want to hop to BoardScreen after saving
-                navigation.navigate('BoardScreen', { imageUri, palette: slots, dominant });
+                navigation.navigate('Profile', { imageUri, palette: slots, dominant });
                 setShowExtractor(false);
               }}
               onClose={() => setShowExtractor(false)}
