@@ -1,6 +1,7 @@
 const express = require('express'); 
-const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { query } = require('../config/database');
 const { registerValidation, loginValidation, idValidation } = require('../middleware/validation');
 const { 
@@ -10,6 +11,8 @@ const {
   passwordResetLimiter, 
   emailVerificationLimiter 
 } = require('../middleware/rateLimiting');
+const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
+const { generateSecureToken, createSessionData } = require('../utils/jwt');
 const emailService = require('../services/emailService');
 const router = express.Router();
 
@@ -63,15 +66,23 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
       Array(10).fill(user.id)
     );
 
-    const token = jwt.sign(
-      { userId: user.id, email: user.email },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' }
+    // Generate secure JWT with JTI and enhanced security
+    const { token, jti, expiresAt } = generateSecureToken(
+      { userId: user.id, email: user.email }
     );
 
+    // Create session data with JTI for secure lookup
+    const sessionData = createSessionData({
+      userId: user.id,
+      jti,
+      expiresAt,
+      ipAddress: req.ip,
+      userAgent: req.get('User-Agent')
+    });
+
     await query(
-      'INSERT INTO user_sessions (user_id, session_token, expires_at) VALUES (?, ?, ?)',
-      [user.id, token, new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)]
+      'INSERT INTO user_sessions (user_id, jti, expires_at, ip_address, user_agent, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [sessionData.user_id, sessionData.jti, sessionData.expires_at, sessionData.ip_address, sessionData.user_agent, sessionData.created_at, sessionData.revoked_at]
     );
 
     try {
