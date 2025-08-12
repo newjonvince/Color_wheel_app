@@ -1,7 +1,8 @@
-// services/api.js — fixed & compatible
-// - Supports both new session endpoints and legacy ones
-// - Correct payloads for /images/sample-color and /images/close-session
-// - Provides color match + validate helpers
+// services/api.js — fixed for community + extractor
+// - Uses EXPO_PUBLIC_API_BASE_URL (falls back to API_BASE_URL), appends /api if missing
+// - Adds generic http helpers: get/post/put/delete used by Community screens
+// - Keeps session-based image extractor helpers
+// - Correct payloads for legacy images endpoints
 
 import axios from 'axios';
 
@@ -9,7 +10,8 @@ const base =
   process.env.EXPO_PUBLIC_API_BASE_URL ||
   process.env.API_BASE_URL ||
   'http://localhost:3000';
-const API_BASE = base.endsWith('/api') ? base : `${base}/api`;
+
+export const API_BASE = base.endsWith('/api') ? base : `${base}/api`;
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -26,7 +28,28 @@ function withAuthHeaders(extra = {}) {
   return { ...extra, headers };
 }
 
-// ---- Compat helpers for images endpoints (support both server styles) ----
+// ---- Generic HTTP helpers (used by Community screens) ----
+export const get = async (url, config = {}) => {
+  const { data } = await api.get(url, withAuthHeaders(config));
+  return data;
+};
+export const post = async (url, body = {}, config = {}) => {
+  const { data } = await api.post(url, body, withAuthHeaders(config));
+  return data;
+};
+export const put = async (url, body = {}, config = {}) => {
+  const { data } = await api.put(url, body, withAuthHeaders(config));
+  return data;
+};
+export const del = async (url, config = {}) => {
+  const { data } = await api.delete(url, withAuthHeaders(config));
+  return data;
+};
+
+// Back-compat aliases (some code may call ApiService.delete)
+export const _delete = del;
+
+// ---- Multipart helper & dual-endpoint try/fallback ----
 async function _postMultipart(url, form, cfg) {
   return api.post(url, form, {
     headers: { 'Content-Type': 'multipart/form-data', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
@@ -42,7 +65,7 @@ async function _try(primary, fallback) {
   }
 }
 
-// ---------------- Images: session-based extractor ----------------
+// ---- Image extractor (session flow) ----
 export const startImageExtractSession = async (imageUri, {
   mime = 'image/jpeg',
   fileName = 'upload.jpg',
@@ -51,7 +74,6 @@ export const startImageExtractSession = async (imageUri, {
   onProgress,
 } = {}) => {
   if (!imageUri) throw new Error('imageUri is required');
-
   const form = new FormData();
   form.append('image', { uri: imageUri, name: fileName, type: mime });
   form.append('maxWidth', String(maxWidth));
@@ -108,25 +130,35 @@ export const extractColorsFromImage = async (imageUri, opts = {}) => {
   return data;
 };
 
+// ---- Colors endpoints ----
 export const createColorMatch = async (body) => {
   const { data } = await api.post('/colors/matches', body, withAuthHeaders());
   return data;
 };
-
 export const validateHex = async (hex) => {
   const { data } = await api.post('/colors/validate', { hex }, withAuthHeaders());
   return data;
 };
 
-export const getCommunityFeed = async () => {
-  const { data } = await api.get('/community/posts/community', withAuthHeaders());
+// ---- Community convenience (optional) ----
+export const getCommunityFeed = async (cursor = null) => {
+  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+  const { data } = await api.get(`/community/posts/community${qs}`, withAuthHeaders());
   return data;
 };
 
+// ---- Export default object ----
 const ApiService = {
-  setToken, getToken,
+  // env
+  API_BASE, setToken, getToken,
+  // generic
+  get, post, put, delete: del, _delete,
+  // images
   startImageExtractSession, sampleImageColor, closeImageExtractSession, extractColorsFromImage,
-  createColorMatch, validateHex, getCommunityFeed,
+  // colors
+  createColorMatch, validateHex,
+  // community
+  getCommunityFeed,
 };
 
 export default ApiService;

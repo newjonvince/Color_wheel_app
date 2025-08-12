@@ -91,25 +91,36 @@ IMPROVEMENTS MADE:
     }, []);
 
     const fetchPage = useCallback(async (cursor = null, replace = false) => {
-      const params = cursor ? { cursor } : {};
-      const qs = new URLSearchParams(params).toString();
-      const endpoint = `/community/posts/community${qs ? `?${qs}` : ''}`;
-      const res = await ApiService.get(endpoint);
+      try {
+        const params = cursor ? { cursor } : {};
+        const qs = new URLSearchParams(params).toString();
+        const endpoint = `/community/posts/community${qs ? `?${qs}` : ''}`;
+        const res = await ApiService.get(endpoint);
 
-      const data = (res?.data ?? res) || [];
-      const next = res?.nextCursor ?? null;
+        const data = (res?.data ?? res) || [];
+        const next = res?.nextCursor ?? null;
 
-      const normalized = data.map((p) => ({
-        ...p,
-        colors: parseColors(p.colors),
-        is_liked: Boolean(p.is_liked),
-        likes_count: Number(p.likes_count ?? 0),
-        comments_count: Number(p.comments_count ?? 0),
-      }));
+        const normalized = data.map((p) => ({
+          ...p,
+          colors: parseColors(p.colors),
+          is_liked: Boolean(p.is_liked),
+          likes_count: Number(p.likes_count ?? 0),
+          comments_count: Number(p.comments_count ?? 0),
+        }));
 
-      setPosts((prev) => (replace ? normalized : [...prev, ...normalized]));
-      setPageCursor(next);
-      setHasMore(Boolean(next) && normalized.length > 0);
+        setPosts((prev) => (replace ? normalized : [...prev, ...normalized]));
+        setPageCursor(next);
+        setHasMore(Boolean(next) && normalized.length > 0);
+      } catch (error) {
+        console.error('Error fetching community page:', error);
+        // On error, ensure we don't break pagination state
+        if (replace) {
+          setPosts([]);
+          setPageCursor(null);
+          setHasMore(false);
+        }
+        throw error; // Re-throw so calling functions can handle it
+      }
     }, [parseColors]);
 
     const loadInitial = useCallback(async () => {
