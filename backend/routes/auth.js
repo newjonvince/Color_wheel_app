@@ -234,8 +234,8 @@ router.post('/demo-login', authLimiter, async (req, res) => {
     });
 
     await query(
-      'INSERT INTO user_sessions (user_id, jti, expires_at, ip_address, user_agent, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [sessionData.user_id, sessionData.jti, sessionData.expires_at, sessionData.ip_address, sessionData.user_agent, sessionData.created_at, sessionData.revoked_at]
+      'INSERT INTO user_sessions (user_id, session_token, jti, expires_at, ip_address, user_agent, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [sessionData.user_id, token, sessionData.jti, sessionData.expires_at, sessionData.ip_address, sessionData.user_agent, sessionData.created_at, sessionData.revoked_at]
     );
 
     res.json({
@@ -308,8 +308,8 @@ router.get('/demo-login', authLimiter, async (req, res) => {
     });
 
     await query(
-      'INSERT INTO user_sessions (user_id, jti, expires_at, ip_address, user_agent, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [sessionData.user_id, sessionData.jti, sessionData.expires_at, sessionData.ip_address, sessionData.user_agent, sessionData.created_at, sessionData.revoked_at]
+      'INSERT INTO user_sessions (user_id, session_token, jti, expires_at, ip_address, user_agent, created_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [sessionData.user_id, token, sessionData.jti, sessionData.expires_at, sessionData.ip_address, sessionData.user_agent, sessionData.created_at, sessionData.revoked_at]
     );
 
     res.json({
