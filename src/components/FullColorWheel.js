@@ -361,16 +361,3 @@ export default forwardRef(function FullColorWheel({
     </GestureDetector>
   );
 }
-            </SkiaCircle>
-          ) : null}
-        </Canvas>
-
-        {/* Markers (show only what the scheme needs) */}
-        <Animated.View style={[useMemo(() => markerStyle(0), []), { zIndex: 4 }]} />
-        {(SCHEME_COUNTS[scheme] || 1) >= 2 && <Animated.View style={[useMemo(() => markerStyle(1), []), { zIndex: 3 }]} />}
-        {(SCHEME_COUNTS[scheme] || 1) >= 3 && <Animated.View style={[useMemo(() => markerStyle(2), []), { zIndex: 2 }]} />}
-        {(SCHEME_COUNTS[scheme] || 1) >= 4 && <Animated.View style={[useMemo(() => markerStyle(3), []), { zIndex: 1 }]} />}
-      </View>
-    </GestureDetector>
-  );
-}
