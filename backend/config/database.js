@@ -304,6 +304,23 @@ async function initializeTables() {
       ) ENGINE=InnoDB
     `);
 
+    // User preferences table for app settings
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_preferences (
+        id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        theme VARCHAR(20) DEFAULT 'light',
+        notifications_enabled TINYINT(1) DEFAULT 1,
+        privacy_level VARCHAR(20) DEFAULT 'public',
+        language VARCHAR(10) DEFAULT 'en',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_user_preferences (user_id),
+        INDEX idx_user_preferences_user_id (user_id)
+      ) ENGINE=InnoDB
+    `);
+
     // User sessions for JWT token management (matching Railway schema)
     await query(`
       CREATE TABLE IF NOT EXISTS user_sessions (

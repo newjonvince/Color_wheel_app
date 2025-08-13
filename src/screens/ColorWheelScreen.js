@@ -2,38 +2,11 @@
 // Screen that hosts the wheel + controls: link/unlink, H/S/L inputs, reset, randomize, and shows scheme swatches.
 
 import React, { useMemo, useRef, useState } from 'react';
-import { Dimensions, Platform, View, Text, TextInput, Pressable } from 'react-native';
+import { Dimensions, Platform, View, Text, TextInput, Pressable, TouchableOpacity } from 'react-native';
+import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { getColorScheme, hexToHsl, hslToHex } from '../utils/color';
-
-// Safe import of FullColorWheel with fallback
-let FullColorWheel, SCHEME_COUNTS, SCHEME_OFFSETS;
-try {
-  const FullColorWheelModule = require('../components/FullColorWheel');
-  FullColorWheel = FullColorWheelModule.default;
-  SCHEME_COUNTS = FullColorWheelModule.SCHEME_COUNTS;
-  SCHEME_OFFSETS = FullColorWheelModule.SCHEME_OFFSETS;
-} catch (error) {
-  console.warn('FullColorWheel failed to load, using fallback:', error);
-  // Fallback component
-  FullColorWheel = React.forwardRef((props, ref) => (
-    <View style={{ 
-      width: props.size || 300, 
-      height: props.size || 300, 
-      borderRadius: (props.size || 300) / 2,
-      backgroundColor: '#f0f0f0',
-      justifyContent: 'center',
-      alignItems: 'center',
-      borderWidth: 2,
-      borderColor: '#ddd'
-    }}>
-      <Text style={{ color: '#666', textAlign: 'center' }}>
-        Color Wheel{'\n'}Loading...
-      </Text>
-    </View>
-  ));
-  SCHEME_COUNTS = { complementary: 2, analogous: 3, triadic: 3, tetradic: 4, monochromatic: 4 };
-  SCHEME_OFFSETS = { complementary: [0, 180], analogous: [0, 30, 60], triadic: [0, 120, 240], tetradic: [0, 90, 180, 270], monochromatic: [0, 0, 0, 0] };
-}
+import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
+import FullColorWheel, { SCHEME_COUNTS, SCHEME_OFFSETS } from '../components/FullColorWheel';
 
 const { width: screenWidth } = Dimensions.get('window');
 const WHEEL_SIZE = Math.min(screenWidth * 0.9, 380);
@@ -50,6 +23,10 @@ export default function ColorWheelScreen() {
   const [baseHex, setBaseHex] = useState('#FF6B6B'); // new: decoupled from selectedColor
   const [linked, setLinked] = useState(true);
   const [activeIdx, setActiveIdx] = useState(0);
+  
+  // Camera/Gallery extractor modal state
+  const [showExtractor, setShowExtractor] = useState(false);
+  const [extractorImageUri, setExtractorImageUri] = useState(null);
 
   // HSL input state is derived from Selected Color (active handle will update wheel though)
   const hsl = hexToHsl(selectedColor) || { h: 0, s: 100, l: 50 };
@@ -97,6 +74,40 @@ export default function ColorWheelScreen() {
     resetScheme(hex); // pass the new hex explicitly to avoid stale state
   };
 
+  // Camera/Gallery handlers
+  const openCamera = () => {
+    if (wheelRef.current?.openCamera) {
+      wheelRef.current.openCamera();
+    } else {
+      // Fallback: open extractor modal for camera
+      setExtractorImageUri(null);
+      setShowExtractor(true);
+    }
+  };
+
+  const openGallery = () => {
+    if (wheelRef.current?.openGallery) {
+      wheelRef.current.openGallery();
+    } else {
+      // Fallback: open extractor modal for gallery
+      setExtractorImageUri(null);
+      setShowExtractor(true);
+    }
+  };
+
+  // Handle extractor completion
+  const handleExtractorComplete = (extractedPalette) => {
+    if (extractedPalette && extractedPalette.length > 0) {
+      const newBaseHex = extractedPalette[0];
+      setBaseHex(newBaseHex);
+      setSelectedColor(newBaseHex);
+      setPalette(extractedPalette);
+      resetScheme(newBaseHex);
+    }
+    setShowExtractor(false);
+    setExtractorImageUri(null);
+  };
+
   // Prefer live palette from wheel; otherwise derive
   const schemeColors = useMemo(() => {
     if (Array.isArray(palette) && palette.length > 0) return palette;
@@ -105,23 +116,72 @@ export default function ColorWheelScreen() {
 
   return (
     <View style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 12 }}>
-      {/* Wheel */}
-      <FullColorWheel
-        ref={wheelRef}
-        selectedFollowsActive={selectedFollowsActive}
-        size={WHEEL_SIZE}
-        scheme={selectedScheme}
-        initialHex={baseHex} // use baseHex, not selectedColor
-        linked={linked}
-        onToggleLinked={() => setLinked(v => !v)}
-        onColorsChange={(colors) => {
-          if (Array.isArray(colors) && colors.length) setPalette(colors);
-        }}
-        onHexChange={(hex) => {
-          if (hex) setSelectedColor(hex);
-        }}
-        onActiveHandleChange={(i) => setActiveIdx(i)}
-      />
+      {/* Wheel with Camera/Gallery Icons */}
+      <View style={{ position: 'relative', alignItems: 'center' }}>
+        <FullColorWheel
+          ref={wheelRef}
+          selectedFollowsActive={selectedFollowsActive}
+          size={WHEEL_SIZE}
+          scheme={selectedScheme}
+          initialHex={baseHex} // use baseHex, not selectedColor
+          linked={linked}
+          onToggleLinked={() => setLinked(v => !v)}
+          onColorsChange={(colors) => {
+            if (Array.isArray(colors) && colors.length) setPalette(colors);
+          }}
+          onHexChange={(hex) => {
+            if (hex) setSelectedColor(hex);
+          }}
+          onActiveHandleChange={(i) => setActiveIdx(i)}
+        />
+        
+        {/* Camera and Gallery Icons */}
+        <View style={{ 
+          position: 'absolute', 
+          bottom: -20, 
+          flexDirection: 'row', 
+          justifyContent: 'center',
+          gap: 20
+        }}>
+          <TouchableOpacity
+            onPress={openCamera}
+            style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+              borderRadius: 25,
+              width: 50,
+              height: 50,
+              justifyContent: 'center',
+              alignItems: 'center',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.25,
+              shadowRadius: 3.84,
+              elevation: 5,
+            }}
+          >
+            <MaterialIcons name="photo-camera" size={24} color="#333" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            onPress={openGallery}
+            style={{
+              backgroundColor: 'rgba(255, 255, 255, 0.9)',
+              borderRadius: 25,
+              width: 50,
+              height: 50,
+              justifyContent: 'center',
+              alignItems: 'center',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.25,
+              shadowRadius: 3.84,
+              elevation: 5,
+            }}
+          >
+            <Feather name="image" size={24} color="#333" />
+          </TouchableOpacity>
+        </View>
+      </View>
 
       {/* Controls row */}
       <View style={{ width: '92%', maxWidth: 520, marginTop: 12 }}>
@@ -206,6 +266,21 @@ export default function ColorWheelScreen() {
           ))}
         </View>
       </View>
+
+      {/* Color Extractor Modal */}
+      {showExtractor && (
+        <CoolorsColorExtractor
+          visible={showExtractor}
+          initialImageUri={extractorImageUri}
+          initialSlots={4}
+          navigateOnActions={false}
+          onComplete={handleExtractorComplete}
+          onCancel={() => {
+            setShowExtractor(false);
+            setExtractorImageUri(null);
+          }}
+        />
+      )}
     </View>
   );
 }

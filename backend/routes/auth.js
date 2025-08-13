@@ -471,4 +471,40 @@ router.post('/reset-password', passwordResetLimiter, async (req, res) => {
   }
 });
 
+// Profile endpoint alias for frontend compatibility
+router.get('/profile', authenticateToken, async (req, res) => {
+  try {
+    const user = await query(
+      'SELECT id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at, email_verified FROM users WHERE id = ?',
+      [req.user.userId]
+    );
+    
+    if (user.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userData = user.rows[0];
+    res.json({
+      success: true,
+      user: {
+        id: userData.id,
+        email: userData.email,
+        username: userData.username,
+        location: userData.location,
+        birthday: {
+          month: userData.birthday_month,
+          day: userData.birthday_day,
+          year: userData.birthday_year
+        },
+        gender: userData.gender,
+        createdAt: userData.created_at,
+        emailVerified: userData.email_verified || false
+      }
+    });
+  } catch (error) {
+    console.error('Profile fetch error:', error);
+    res.status(500).json({ error: 'Failed to fetch user profile' });
+  }
+});
+
 module.exports = router;

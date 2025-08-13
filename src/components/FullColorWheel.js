@@ -293,6 +293,7 @@ export default forwardRef(function FullColorWheel({
       emitPalette();
     })
     .onChange((e) => {
+      'worklet';
       const idx = activeIdx.value;
       const ang = (Math.atan2(e.y - cy, e.x - cx) * 180) / Math.PI;
       let deg = mod(ang + 450, 360);
@@ -309,6 +310,7 @@ export default forwardRef(function FullColorWheel({
       emitPalette();
     })
     .onFinalize((e) => {
+      'worklet';
       const idx = activeIdx.value;
       const ang = (Math.atan2(e.y - cy, e.x - cx) * 180) / Math.PI;
       const deg = mod(ang + 450, 360);
