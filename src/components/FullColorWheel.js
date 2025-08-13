@@ -1,257 +1,376 @@
-// FullColorWheel.js
-import React, { forwardRef, useImperativeHandle, useMemo, useCallback } from 'react';
-import * as ImagePicker from 'expo-image-picker';
-import { View, StyleSheet } from 'react-native';
-import Animated, { useSharedValue, useDerivedValue, useAnimatedStyle, withTiming, runOnJS, useAnimatedReaction } from 'react-native-reanimated';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-// Safe Skia import with fallback
-let Canvas, SkiaCircle, SweepGradient, vec, Paint, Path;
+// components/FullColorWheel.js
+// Big-disk color wheel with multi-handle support (2–4), link/unlink, snapping (web), keyboard nudges (web).
+// Crash-safe: Skia optional, all runOnJS guarded.
+
+import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
+import { View, Platform } from 'react-native';
+import { Gesture, GestureDetector, TapGestureHandler } from 'react-native-gesture-handler';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  runOnJS,
+} from 'react-native-reanimated';
+
+// Try Skia; fall back gracefully if not present
+let Canvas, SkiaCircle, SweepGradient, RadialGradient, vec;
 try {
-  const SkiaModule = require('@shopify/react-native-skia');
-  Canvas = SkiaModule.Canvas;
-  SkiaCircle = SkiaModule.Circle;
-  SweepGradient = SkiaModule.SweepGradient;
-  vec = SkiaModule.vec;
-  Paint = SkiaModule.Paint;
-  Path = SkiaModule.Path;
-} catch (error) {
-  console.warn('Skia not available, using fallback rendering');
-  // Fallback components
+  const Skia = require('@shopify/react-native-skia');
+  Canvas = Skia.Canvas;
+  SkiaCircle = Skia.Circle;
+  SweepGradient = Skia.SweepGradient;
+  RadialGradient = Skia.RadialGradient;
+  vec = Skia.vec;
+} catch (e) {
+  console.warn('Skia not available, using fallback views');
   Canvas = View;
   SkiaCircle = () => null;
   SweepGradient = () => null;
+  RadialGradient = () => null;
   vec = () => null;
-  Paint = () => null;
-  Path = () => null;
-}
-import Svg, { Circle, Path as SvgPath } from 'react-native-svg';
-import { generateOklchScheme, hexToOklch, oklchToHexClamped } from '../utils/color';
-
-const TAU = Math.PI * 2;
-
-function hslToHex(h, s, l) { // fallback only
-  l /= 100;
-  const a = (s * Math.min(l, 1 - l)) / 100;
-  const f = (n) => {
-    const k = (n + h / 30) % 12;
-    const c = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-    return Math.round(255 * c).toString(16).padStart(2, '0');
-  };
-  return `#${f(0)}${f(8)}${f(4)}`.toUpperCase();
 }
 
-const SCHEME_OFFSETS = {
+// Use your existing color helpers (kept compatible with your colors.js)
+import { hslToHex, hexToHsl } from '../utils/color';
+
+// === Color-harmony definitions ===
+export const SCHEME_OFFSETS = {
   complementary: [0, 180],
   analogous: [0, 30, -30],
   triadic: [0, 120, 240],
   tetradic: [0, 90, 180, 270],
-  monochromatic: [0],
   'split-complementary': [0, 150, -150],
+  monochromatic: [0, 0, 0], // same hue; L will vary (handled by screen)
 };
 
-const FullColorWheel = forwardRef(function FullColorWheel({
+export const SCHEME_COUNTS = {
+  complementary: 2,
+  analogous: 3,
+  triadic: 3,
+  tetradic: 4,
+  'split-complementary': 3,
+  monochromatic: 3,
+};
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const mod = (a, n) => ((a % n) + n) % n;
+
+// Web-only snapping/keyboard state (shift for snap; arrows for nudge)
+const globalWebState = { snap: false };
+
+export default forwardRef(function FullColorWheel({
+  selectedFollowsActive = true,
   size,
-  strokeWidth = 40,
   scheme = 'analogous',
-  initialHex = '#FF00AA',
-  onColorsChange,
-  onHexChange,
-  onImageSelected,
+  initialHex = '#FF6B6B',
+  linked = true,              // if true, secondary handles follow #0 until “freed”
+  freedIndices = [],          // indices that are already independent (set by screen)
+  onToggleLinked,             // optional
+  onColorsChange,             // (hex[]) palette in handle order
+  onHexChange,                // (hex) selected color (handle #0)
+  onActiveHandleChange,       // (index) which handle is focused (for numeric inputs)
 }, ref) {
   const radius = size / 2;
-  const ringR = radius - strokeWidth / 2;
-  const center = { x: radius, y: radius };
-
-  // baseAngle is the hue anchor in degrees
-  const baseAngle = useSharedValue(0);
-  
-  // Keep base L,C values from initialHex
-  const baseLC = useSharedValue(hexToOklch(initialHex));
-
-  // Camera and Gallery methods exposed via ref
-  const openCamera = async () => {
-    try {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      if (status !== 'granted') {
-        alert('Camera permission is required to take photos');
-        return;
-      }
-
-      const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets?.[0]) {
-        const imageUri = result.assets[0].uri;
-        if (onImageSelected) onImageSelected({ uri: imageUri });
-      }
-    } catch (error) {
-      console.error('Camera error:', error);
-      alert('Failed to open camera');
-    }
-  };
-
-  const openGallery = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        alert('Gallery permission is required to select photos');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-
-      if (!result.canceled && result.assets?.[0]) {
-        const imageUri = result.assets[0].uri;
-        if (onImageSelected) onImageSelected({ uri: imageUri });
-      }
-    } catch (error) {
-      console.error('Gallery error:', error);
-      alert('Failed to open gallery');
-    }
-  };
-
-  // Expose methods via ref
-  useImperativeHandle(ref, () => ({
-    openCamera,
-    openGallery,
-  }));
-
-  // When initialHex changes, refresh baseLC once
+  const followActive = useSharedValue(selectedFollowsActive ? 1 : 0);
   React.useEffect(() => {
-    baseLC.value = hexToOklch(initialHex);
-    const { hues, colors } = generateOklchScheme(initialHex, scheme);
-    const h = hues[0] || 0;
-    baseAngle.value = h;
-    onColorsChange && onColorsChange(colors);
-    onHexChange && onHexChange(colors[0]);
+    followActive.value = selectedFollowsActive ? 1 : 0;
+    emitPalette();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFollowsActive]);
+
+  const cx = radius;
+  const cy = radius;
+
+  const count = SCHEME_COUNTS[scheme] || 1;
+  const offsets = SCHEME_OFFSETS[scheme] || [0];
+
+  // 4 handles max (pre-allocated for stability)
+  const handleAngles = [
+    useSharedValue(0),
+    useSharedValue(30),
+    useSharedValue(120),
+    useSharedValue(210),
+  ];
+  const handleSats = [
+    useSharedValue(1),
+    useSharedValue(1),
+    useSharedValue(1),
+    useSharedValue(1),
+  ];
+
+  // L(ightness) lives here for completeness; default 50% (editable from screen)
+  const handleLights = [
+    useSharedValue(50),
+    useSharedValue(50),
+    useSharedValue(50),
+    useSharedValue(50),
+  ];
+
+  const activeIdx = useSharedValue(0);
+  const freed = useRef(new Set(freedIndices || []));
+
+  // Web-only: register key listeners once
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const keydown = (e) => {
+      if (e.key === 'Shift') globalWebState.snap = true;
+      // Arrow nudges
+      const idx = activeIdx.value;
+      let delta = 0;
+      if (e.key === 'ArrowLeft') delta = - (e.shiftKey ? 5 : 1);
+      if (e.key === 'ArrowRight') delta = + (e.shiftKey ? 5 : 1);
+      if (delta !== 0) {
+        const a = mod(handleAngles[idx].value + delta, 360);
+        handleAngles[idx].value = a;
+        emitPalette();
+      }
+      // Saturation via up/down
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        const d = e.shiftKey ? 0.05 : 0.01;
+        const sign = e.key === 'ArrowUp' ? +1 : -1;
+        const s = clamp01(handleSats[idx].value + sign * d);
+        handleSats[idx].value = s;
+        emitPalette();
+      }
+    };
+    const keyup = (e) => {
+      if (e.key === 'Shift') globalWebState.snap = false;
+    };
+    window.addEventListener('keydown', keydown);
+    window.addEventListener('keyup', keyup);
+    return () => {
+      window.removeEventListener('keydown', keydown);
+      window.removeEventListener('keyup', keyup);
+    };
+  }, []);
+
+  // Init from initialHex + scheme (place other handles by offsets)
+  useEffect(() => {
+    const { h = 0, s = 100, l = 50 } = hexToHsl(initialHex) || {};
+    const sat = clamp01(s / 100);
+    const light = l ?? 50;
+
+    handleAngles[0].value = h;
+    handleSats[0].value  = sat;
+    handleLights[0].value = light;
+
+    // reset freed set when scheme changes (they re-link)
+    freed.current = new Set(freedIndices || []);
+
+    for (let i = 1; i < 4; i++) {
+      const off = offsets[i] ?? (i * (360 / (offsets.length || 1)));
+      const angle = mod(h + off, 360);
+      handleAngles[i].value = angle;
+      handleSats[i].value = sat;
+      handleLights[i].value = light;
+    }
+    emitPalette();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialHex, scheme]);
 
-  // markers derived from baseAngle + offsets
-  const markers = useDerivedValue(() => {
-    const offsets = SCHEME_OFFSETS[scheme] || [0];
-    return offsets.map((off, i) => {
-      const a = (baseAngle.value + off + 360) % 360;
-      const rad = (a - 90) * (Math.PI / 180);
-      const x = center.x + Math.cos(rad) * ringR;
-      const y = center.y + Math.sin(rad) * ringR;
-      return { a, x, y, i };
-    });
-  }, [scheme, ringR]);
-
-  // Create a JS callback to handle palette generation safely
-  const updatePalette = useCallback((angle) => {
-    const offsets = SCHEME_OFFSETS[scheme] || [0];
-    const hues = offsets.map(off => (angle + off + 360) % 360);
-    const baseLCValue = baseLC.value;
-    const palette = hues.map(h => oklchToHexClamped(baseLCValue.L, baseLCValue.C, h));
-    
-    // Guard callbacks before calling to prevent crashes
-    if (typeof onColorsChange === 'function') {
-      onColorsChange(palette);
-    }
-    if (typeof onHexChange === 'function') {
-      onHexChange(palette[0]);
-    }
-  }, [scheme, onColorsChange, onHexChange]);
-
-  // Use useAnimatedReaction with only UI thread safe operations
-  useAnimatedReaction(
-    () => baseAngle.value, // Only track the angle value
-    (angle) => {
-      // Guard the callback before calling runOnJS to prevent native crashes
-      if (typeof updatePalette === 'function') {
-        runOnJS(updatePalette)(angle);
+  // If linked, keep non-freed handles aligned to base during re-renders
+  useEffect(() => {
+    if (!linked) return;
+    const base = handleAngles[0].value;
+    const sat0 = handleSats[0].value;
+    for (let i = 1; i < count; i++) {
+      if (!freed.current.has(i)) {
+        handleAngles[i].value = mod(base + offsets[i], 360);
+        handleSats[i].value = sat0;
       }
-    },
-    [updatePalette]
-  );
+    }
+    emitPalette();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linked, scheme]);
 
-  // gesture: set directly during drag, smooth only on release
-  const startAngle = useSharedValue(0);
-  const gesture = Gesture.Pan()
-    .onBegin((e) => {
-      const dx = e.x - center.x;
-      const dy = e.y - center.y;
-      const ang = (Math.atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;
-      startAngle.value = ang;
-      baseAngle.value = ang; // immediate response
-    })
-    .onChange((e) => {
-      const dx = e.x - center.x;
-      const dy = e.y - center.y;
-      const ang = (Math.atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;
-      baseAngle.value = ang; // direct update during drag
-    })
-    .onFinalize((e) => {
-      const dx = e.x - center.x;
-      const dy = e.y - center.y;
-      const ang = (Math.atan2(dy, dx) * 180 / Math.PI + 90 + 360) % 360;
-      baseAngle.value = withTiming(ang, { duration: 140 }); // smooth to final
-    });
+  const polarToHex = (ang, sat01, light) => hslToHex(ang, sat01 * 100, light);
 
-  // marker animated styles - use pre-computed offsets
-  const markerStyles = new Array(4).fill(0).map((_, idx) =>
+  const emitPalette = () => {
+    'worklet';
+    const c = SCHEME_COUNTS[scheme] || 1;
+    const result = [];
+    for (let i = 0; i < c; i++) {
+      const ang = handleAngles[i].value;
+      const sat = handleSats[i].value;
+      const lig = handleLights[i].value;
+      result.push(polarToHex(ang, sat, lig));
+    }
+    if (typeof onColorsChange === 'function') runOnJS(onColorsChange)(result);
+    if (typeof onHexChange === 'function') {
+      const sel = followActive.value ? Math.min(Math.max(activeIdx.value,0), result.length-1) : 0;
+      runOnJS(onHexChange)(result[sel]);
+    }
+  };
+
+  // Marker visuals
+  const markerStyle = (idx) =>
     useAnimatedStyle(() => {
-      const offsets = SCHEME_OFFSETS[scheme] || [0];
-      if (idx >= offsets.length) return { opacity: 0 };
-      const a = (baseAngle.value + offsets[idx] + 360) % 360;
-      const rad = (a - 90) * (Math.PI / 180);
+      const rad = ((handleAngles[idx].value - 90) * Math.PI) / 180;
+      const r = radius * clamp01(handleSats[idx].value);
       return {
         position: 'absolute',
-        left: center.x - 8 + Math.cos(rad) * ringR,
-        top: center.y - 8 + Math.sin(rad) * ringR,
-        width: 16, height: 16,
-        borderRadius: 8,
+        left: cx - 10 + Math.cos(rad) * r,
+        top: cy - 10 + Math.sin(rad) * r,
+        width: 20,
+        height: 20,
+        borderRadius: 10,
         backgroundColor: '#fff',
         borderWidth: 3,
         borderColor: '#00000022',
       };
-    })
-  );
+    });
 
-  // Skia wheel (fast) - sweep gradient
-  const skiaGradientColors = useMemo(() => {
-    const arr = [];
-    for (let i=0; i<=360; i+=10) {
-      arr.push(hslToHex(i, 100, 50));
+  const m0 = markerStyle(0);
+  const m1 = markerStyle(1);
+  const m2 = markerStyle(2);
+  const m3 = markerStyle(3);
+
+  // Choose nearest handle by screen point
+  const nearestHandle = (x, y) => {
+    'worklet';
+    const c = SCHEME_COUNTS[scheme] || 1;
+    let best = 0;
+    let bestDist = 1e9;
+    for (let i = 0; i < c; i++) {
+      const ang = ((handleAngles[i].value - 90) * Math.PI) / 180;
+      const r = radius * clamp01(handleSats[i].value);
+      const hx = cx + Math.cos(ang) * r;
+      const hy = cy + Math.sin(ang) * r;
+      const d = Math.hypot(x - hx, y - hy);
+      if (d < bestDist) { bestDist = d; best = i; }
     }
-    return arr;
-  }, []);
+    return best;
+  };
 
+  // Tapping a handle focuses it (for numeric inputs / keyboard nudges)
+  const tap = Gesture.Tap().onStart((e) => {
+    const idx = nearestHandle(e.x, e.y);
+    activeIdx.value = idx;
+    if (typeof onActiveHandleChange === 'function') runOnJS(onActiveHandleChange)(idx);
+    emitPalette();
+    // Update Selected Color to follow the focused handle
+    emitPalette();
+  });
+
+  // Pan gesture updates angle + saturation of active handle
+  const gesture = Gesture.Pan()
+    .onBegin((e) => {
+      const idx = nearestHandle(e.x, e.y);
+      activeIdx.value = idx;
+      if (typeof onActiveHandleChange === 'function') runOnJS(onActiveHandleChange)(idx);
+    emitPalette();
+    // Update Selected Color to follow the focused handle
+    emitPalette();
+
+      const ang = (Math.atan2(e.y - cy, e.x - cx) * 180) / Math.PI;
+      let deg = mod(ang + 450, 360);
+      if (Platform.OS === 'web' && globalWebState.snap) {
+        // Snap to common angles (0/30/60/90/etc.)
+        const step = 30; deg = Math.round(deg / step) * step;
+      }
+      const sat = clamp01(Math.hypot(e.x - cx, e.y - cy) / radius);
+
+      // Free this handle if we are linked and it's not the base
+      if (linked && idx !== 0) { freed.current.add(idx); }
+
+      handleAngles[idx].value = deg;
+      handleSats[idx].value = sat;
+      emitPalette();
+    })
+    .onChange((e) => {
+      const idx = activeIdx.value;
+      const ang = (Math.atan2(e.y - cy, e.x - cx) * 180) / Math.PI;
+      let deg = mod(ang + 450, 360);
+      if (Platform.OS === 'web' && globalWebState.snap) {
+        const step = 30; deg = Math.round(deg / step) * step;
+      }
+      const sat = clamp01(Math.hypot(e.x - cx, e.y - cy) / radius);
+
+      handleAngles[idx].value = deg;
+      handleSats[idx].value = sat;
+      emitPalette();
+    })
+    .onFinalize((e) => {
+      const idx = activeIdx.value;
+      const ang = (Math.atan2(e.y - cy, e.x - cx) * 180) / Math.PI;
+      const deg = mod(ang + 450, 360);
+      handleAngles[idx].value = withTiming(deg, { duration: 100 });
+    });
+
+  // Public setters (used by numeric inputs)
+  const setHandleHSL = (idx, h, s, l) => {
+    'worklet';
+    handleAngles[idx].value = mod(h, 360);
+    handleSats[idx].value = clamp01(s / 100);
+    handleLights[idx].value = Math.max(0, Math.min(100, l));
+    // If linked and idx==0, sync others that aren't freed
+    if (linked && idx === 0) {
+      const c = SCHEME_COUNTS[scheme] || 1;
+      for (let i = 1; i < c; i++) {
+        if (!freed.current.has(i)) {
+          handleAngles[i].value = mod(h + offsets[i], 360);
+          handleSats[i].value = clamp01(s / 100);
+          handleLights[i].value = Math.max(0, Math.min(100, l));
+        }
+      }
+    }
+    emitPalette();
+  };
+  // Expose imperative setters for numeric inputs (for live updates while typing)
+  useImperativeHandle(ref, () => ({
+    setActiveHandleHSL: (h, s, l) => {
+      try {
+        const idx = Math.min(Math.max(activeIdx.value, 0), (SCHEME_COUNTS[scheme] || 1) - 1);
+        setHandleHSL(idx, h, s, l);
+      } catch (e) { /* no-op */ }
+    },
+    setHandleHSL: (i, h, s, l) => {
+      try { setHandleHSL(i, h, s, l); } catch (e) { /* no-op */ }
+    }
+  }), [scheme]);
+
+
+  // Expose imperative API via ref? (kept simple: we call through props via onColorsChange/onHexChange)
+
+  // Render
   return (
-    <GestureDetector gesture={gesture}>
+    <GestureDetector gesture={Gesture.Simultaneous(tap, gesture)}>
       <View style={{ width: size, height: size }}>
         <Canvas style={{ width: size, height: size }}>
-          <SkiaCircle cx={center.x} cy={center.y} r={radius} color="white" />
-          <SkiaCircle cx={center.x} cy={center.y} r={radius}>
-            <SweepGradient c={vec(center.x, center.y)} colors={skiaGradientColors} />
+          {/* Color disk (sweep hue + radial desaturation) */}
+          <SkiaCircle cx={cx} cy={cy} r={radius}>
+            <SweepGradient c={vec(cx, cy)} colors={useMemo(() => {
+              const arr = [];
+              for (let i = 0; i <= 360; i += 10) arr.push(hslToHex(i, 100, 50));
+              return arr;
+            }, [])} />
           </SkiaCircle>
-          {/* cut inner hole for ring look */}
-          <Path
-            path={`M ${center.x} ${center.y - (radius - strokeWidth)} A ${radius - strokeWidth} ${radius - strokeWidth} 0 1 1 ${center.x - 0.01} ${center.y - (radius - strokeWidth)} Z`}
-            color="white"
-            style="stroke"
-            strokeWidth={strokeWidth}
-          />
+          {RadialGradient ? (
+            <SkiaCircle cx={cx} cy={cy} r={radius}>
+              <RadialGradient c={vec(cx, cy)} r={radius} colors={['#FFFFFFFF', '#FFFFFF00']} />
+            </SkiaCircle>
+          ) : null}
         </Canvas>
 
-        {/* Markers */}
-        <Animated.View style={markerStyles[0]} />
-        <Animated.View style={markerStyles[1]} />
-        <Animated.View style={markerStyles[2]} />
-        <Animated.View style={markerStyles[3]} />
+        {/* Markers (show only what the scheme needs) */}
+        <Animated.View style={[useMemo(() => markerStyle(0), []), { zIndex: 4 }]} />
+        {(SCHEME_COUNTS[scheme] || 1) >= 2 && <Animated.View style={[useMemo(() => markerStyle(1), []), { zIndex: 3 }]} />}
+        {(SCHEME_COUNTS[scheme] || 1) >= 3 && <Animated.View style={[useMemo(() => markerStyle(2), []), { zIndex: 2 }]} />}
+        {(SCHEME_COUNTS[scheme] || 1) >= 4 && <Animated.View style={[useMemo(() => markerStyle(3), []), { zIndex: 1 }]} />}
       </View>
     </GestureDetector>
   );
-});
+}
+            </SkiaCircle>
+          ) : null}
+        </Canvas>
 
-export default FullColorWheel;
+        {/* Markers (show only what the scheme needs) */}
+        <Animated.View style={[useMemo(() => markerStyle(0), []), { zIndex: 4 }]} />
+        {(SCHEME_COUNTS[scheme] || 1) >= 2 && <Animated.View style={[useMemo(() => markerStyle(1), []), { zIndex: 3 }]} />}
+        {(SCHEME_COUNTS[scheme] || 1) >= 3 && <Animated.View style={[useMemo(() => markerStyle(2), []), { zIndex: 2 }]} />}
+        {(SCHEME_COUNTS[scheme] || 1) >= 4 && <Animated.View style={[useMemo(() => markerStyle(3), []), { zIndex: 1 }]} />}
+      </View>
+    </GestureDetector>
+  );
+}

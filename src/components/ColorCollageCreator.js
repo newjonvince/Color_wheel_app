@@ -37,14 +37,13 @@ const ASPECT_RATIOS = [
 ];
 
 export default function ColorCollageCreator({
-  const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
-
   image,        // { uri, width?, height? }
   colors = [],  // ['#RRGGBB', ...]
   onClose,
   onExport,
 }) {
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
   const [selectedLayout, setSelectedLayout] = useState('bottom');
   const [selectedAspect, setSelectedAspect] = useState('original');
   const [isExporting, setIsExporting] = useState(false);
