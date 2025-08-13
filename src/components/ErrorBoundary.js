@@ -33,10 +33,17 @@ class ErrorBoundary extends React.Component {
   }
 
   async componentDidCatch(error, errorInfo) {
-    // Console for local debugging / device logs
-    console.error('🚨 ErrorBoundary caught:', error, errorInfo);
+    // Enhanced logging for debugging persistent crash
+    console.error('🚨 ErrorBoundary caught an error:', error, errorInfo);
+    console.error('🚨 Error name:', error?.name);
+    console.error('🚨 Error message:', error?.message);
+    console.error('🚨 Error stack:', error?.stack);
+    console.error('🚨 Component stack:', errorInfo?.componentStack);
+    console.error('🚨 Error toString:', String(error));
+    console.error('🚨 Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
 
     const errorDetails = {
+      name: error?.name,
       message: error?.message,
       stack: error?.stack,
       componentStack: errorInfo?.componentStack,

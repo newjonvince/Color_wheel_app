@@ -13,6 +13,7 @@ IMPROVEMENTS MADE:
 */
 
 const express = require('express');
+const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
 const { authenticateToken: authMiddleware } = require('../middleware/auth');
 const { communityLimiter } = require('../middleware/rateLimiting');
@@ -175,10 +176,11 @@ router.post('/users/:id/follow', authMiddleware, communityLimiter, async (req, r
       return res.status(400).json({ error: 'Already following this user' });
     }
     
-    // Create follow relationship
+    // Create follow relationship with app-generated UUID
+    const followId = uuidv4();
     await query(
-      'INSERT INTO follows (follower_id, following_id, created_at) VALUES (?, ?, NOW())',
-      [followerId, followingId]
+      'INSERT INTO follows (id, follower_id, following_id, created_at) VALUES (?, ?, ?, NOW())',
+      [followId, followerId, followingId]
     );
     
     res.json({ success: true, message: 'Successfully followed user' });

@@ -1,5 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 const router = express.Router();
@@ -133,10 +134,11 @@ router.post('/:boardId/items', [
       });
     }
 
-    // Add to board
+    // Add to board with app-generated UUID
+    const boardItemId = uuidv4();
     await query(
-      'INSERT INTO board_items (board_id, color_match_id) VALUES (?, ?)',
-      [boardId, colorMatchId]
+      'INSERT INTO board_items (id, board_id, color_match_id) VALUES (?, ?, ?)',
+      [boardItemId, boardId, colorMatchId]
     );
     
     // Get the newly created item

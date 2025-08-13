@@ -1,5 +1,6 @@
 // routes/colors.js — minor hardening + friendlier errors
 const express = require('express');
+const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
@@ -35,18 +36,219 @@ router.post('/matches', authenticateToken, async (req, res) => {
     if (cleaned.length !== colors.length) return res.status(400).json({ ok: false, error: 'colors contains invalid HEX' });
 
     const userId = req.user.userId;
+    // Generate UUID in app code for consistent behavior
+    const colorMatchId = uuidv4();
+    
     const insert = await query(
-      `INSERT INTO color_matches (user_id, base_color, scheme, colors, title, description, is_public, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [userId, base_color, scheme, JSON.stringify(cleaned), title || `${scheme} palette`, description || '', !!is_public]
+      `INSERT INTO color_matches (id, user_id, base_color, scheme, colors, title, description, is_public)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [colorMatchId, userId, base_color, scheme, JSON.stringify(cleaned), title || `${scheme} palette`, description || '', !!is_public]
     );
 
-    const [saved] = await query(`SELECT id, user_id, base_color, scheme, colors, title, description, is_public, created_at FROM color_matches WHERE id = ?`, [insert.insertId]);
+    const [saved] = await query(`SELECT id, user_id, base_color, scheme, colors, title, description, is_public, created_at, updated_at FROM color_matches WHERE id = ?`, [colorMatchId]);
     saved.colors = JSON.parse(saved.colors);
     res.status(201).json({ ok: true, data: saved });
   } catch (e) {
     console.error('save palette failed:', e);
     res.status(500).json({ ok: false, error: 'Failed to save color match' });
+  }
+});
+
+// GET /matches - Get user's color matches with pagination and filtering
+router.get('/matches', authenticateToken, async (req, res) => {
+  try {
+    const { limit = 20, offset = 0, is_public, scheme } = req.query;
+    const userId = req.user.userId;
+    
+    let whereClause = 'WHERE user_id = ?';
+    let params = [userId];
+    
+    if (is_public !== undefined) {
+      whereClause += ' AND is_public = ?';
+      params.push(is_public === 'true');
+    }
+    
+    if (scheme && ALLOWED_SCHEMES.has(scheme)) {
+      whereClause += ' AND scheme = ?';
+      params.push(scheme);
+    }
+    
+    const matches = await query(`
+      SELECT id, user_id, base_color, scheme, colors, title, description, is_public, created_at, updated_at 
+      FROM color_matches 
+      ${whereClause}
+      ORDER BY created_at DESC 
+      LIMIT ? OFFSET ?
+    `, [...params, parseInt(limit), parseInt(offset)]);
+    
+    // Parse JSON colors for each match
+    matches.rows.forEach(match => {
+      match.colors = JSON.parse(match.colors);
+    });
+    
+    res.json({ ok: true, data: matches.rows, count: matches.rows.length });
+  } catch (error) {
+    console.error('Get color matches error:', error);
+    res.status(500).json({ ok: false, error: 'Failed to get color matches' });
+  }
+});
+
+// GET /matches/:id - Get specific color match by ID
+router.get('/matches/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    
+    const result = await query(`
+      SELECT id, user_id, base_color, scheme, colors, title, description, is_public, created_at, updated_at 
+      FROM color_matches 
+      WHERE id = ? AND (user_id = ? OR is_public = true)
+    `, [id, userId]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Color match not found' });
+    }
+    
+    const match = result.rows[0];
+    match.colors = JSON.parse(match.colors);
+    
+    res.json({ ok: true, data: match });
+  } catch (error) {
+    console.error('Get color match error:', error);
+    res.status(500).json({ ok: false, error: 'Failed to get color match' });
+  }
+});
+
+// PUT /matches/:id - Update color match
+router.put('/matches/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    let { base_color, scheme, colors, title, description, is_public } = req.body || {};
+    
+    // Verify ownership
+    const existing = await query('SELECT user_id FROM color_matches WHERE id = ?', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Color match not found' });
+    }
+    if (existing.rows[0].user_id !== userId) {
+      return res.status(403).json({ ok: false, error: 'Not authorized to update this color match' });
+    }
+    
+    // Validate inputs if provided
+    if (base_color) {
+      base_color = base_color.toUpperCase();
+      if (!isValidHexColor(base_color)) {
+        return res.status(400).json({ ok: false, error: 'Invalid base_color HEX' });
+      }
+    }
+    
+    if (scheme && !ALLOWED_SCHEMES.has(scheme)) {
+      return res.status(400).json({ ok: false, error: 'Invalid scheme' });
+    }
+    
+    if (colors) {
+      if (!Array.isArray(colors) || colors.length === 0) {
+        return res.status(400).json({ ok: false, error: 'colors array is required' });
+      }
+      const cleaned = colors.map(c => (c || '').toUpperCase()).filter(isValidHexColor);
+      if (cleaned.length !== colors.length) {
+        return res.status(400).json({ ok: false, error: 'colors contains invalid HEX' });
+      }
+      colors = JSON.stringify(cleaned);
+    }
+    
+    // Build dynamic update query
+    const updates = [];
+    const params = [];
+    
+    if (base_color) { updates.push('base_color = ?'); params.push(base_color); }
+    if (scheme) { updates.push('scheme = ?'); params.push(scheme); }
+    if (colors) { updates.push('colors = ?'); params.push(colors); }
+    if (title !== undefined) { updates.push('title = ?'); params.push(title); }
+    if (description !== undefined) { updates.push('description = ?'); params.push(description); }
+    if (is_public !== undefined) { updates.push('is_public = ?'); params.push(!!is_public); }
+    
+    if (updates.length === 0) {
+      return res.status(400).json({ ok: false, error: 'No fields to update' });
+    }
+    
+    params.push(id);
+    
+    await query(`UPDATE color_matches SET ${updates.join(', ')} WHERE id = ?`, params);
+    
+    // Return updated record
+    const updated = await query(`
+      SELECT id, user_id, base_color, scheme, colors, title, description, is_public, created_at, updated_at 
+      FROM color_matches WHERE id = ?
+    `, [id]);
+    
+    const match = updated.rows[0];
+    match.colors = JSON.parse(match.colors);
+    
+    res.json({ ok: true, data: match });
+  } catch (error) {
+    console.error('Update color match error:', error);
+    res.status(500).json({ ok: false, error: 'Failed to update color match' });
+  }
+});
+
+// DELETE /matches/:id - Delete color match
+router.delete('/matches/:id', authenticateToken, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.userId;
+    
+    // Verify ownership
+    const existing = await query('SELECT user_id FROM color_matches WHERE id = ?', [id]);
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ ok: false, error: 'Color match not found' });
+    }
+    if (existing.rows[0].user_id !== userId) {
+      return res.status(403).json({ ok: false, error: 'Not authorized to delete this color match' });
+    }
+    
+    await query('DELETE FROM color_matches WHERE id = ?', [id]);
+    
+    res.json({ ok: true, message: 'Color match deleted successfully' });
+  } catch (error) {
+    console.error('Delete color match error:', error);
+    res.status(500).json({ ok: false, error: 'Failed to delete color match' });
+  }
+});
+
+// GET /public - Get public color matches for discovery
+router.get('/public', async (req, res) => {
+  try {
+    const { limit = 20, offset = 0, scheme } = req.query;
+    
+    let whereClause = 'WHERE is_public = true';
+    let params = [];
+    
+    if (scheme && ALLOWED_SCHEMES.has(scheme)) {
+      whereClause += ' AND scheme = ?';
+      params.push(scheme);
+    }
+    
+    const matches = await query(`
+      SELECT cm.id, cm.base_color, cm.scheme, cm.colors, cm.title, cm.description, cm.created_at,
+             u.username, u.id as user_id
+      FROM color_matches cm
+      JOIN users u ON cm.user_id = u.id
+      ${whereClause}
+      ORDER BY cm.created_at DESC 
+      LIMIT ? OFFSET ?
+    `, [...params, parseInt(limit), parseInt(offset)]);
+    
+    // Parse JSON colors for each match
+    matches.rows.forEach(match => {
+      match.colors = JSON.parse(match.colors);
+    });
+    
+    res.json({ ok: true, data: matches.rows, count: matches.rows.length });
+  } catch (error) {
+    console.error('Get public color matches error:', error);
+    res.status(500).json({ ok: false, error: 'Failed to get public color matches' });
   }
 });
 

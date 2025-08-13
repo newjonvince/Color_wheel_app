@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { StyleSheet, View, Text, AppState, Platform, LogBox } from 'react-native';
+import { StyleSheet, View, Text, AppState, Platform, LogBox, TouchableOpacity } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -97,13 +97,48 @@ if (!__DEV__) {
 }
 
 // --- Screens ---------------------------------------------------------------
-import ColorWheelScreen from './src/screens/ColorWheelScreen';
-import BoardsScreen from './src/screens/BoardsScreen';
-import DiscoverScreen from './src/screens/DiscoverScreen';
-import CommunityFeedScreen from './src/screens/CommunityFeedScreen';
-import LoginScreen from './src/screens/LoginScreen';
-import SignUpScreen from './src/screens/SignUpScreen';
-import UserSettingsScreen from './src/screens/UserSettingsScreen';
+// Enhanced import debugging for persistent crash
+console.log('🔍 App.js: Starting screen imports...');
+
+let ColorWheelScreen;
+try {
+  console.log('🔍 App.js: Importing ColorWheelScreen...');
+  ColorWheelScreen = require('./src/screens/ColorWheelScreen').default;
+  console.log('✅ App.js: ColorWheelScreen imported successfully');
+} catch (error) {
+  console.error('🚨 App.js: ColorWheelScreen import failed:', error);
+  console.error('🚨 App.js: Error details:', error?.message, error?.stack);
+  // Fallback component to prevent app crash
+  ColorWheelScreen = ({ onLogout }) => (
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+      <Text style={{ fontSize: 18, color: '#ff6b6b', textAlign: 'center', marginBottom: 20 }}>
+        Color Wheel Unavailable
+      </Text>
+      <Text style={{ fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20 }}>
+        The color wheel feature is temporarily unavailable. Please try restarting the app.
+      </Text>
+      <TouchableOpacity 
+        style={{ backgroundColor: '#007AFF', padding: 12, borderRadius: 8 }}
+        onPress={() => onLogout?.()}
+      >
+        <Text style={{ color: 'white', fontSize: 16 }}>Back to Login</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+try {
+  console.log('🔍 App.js: Importing other screens...');
+  var BoardsScreen = require('./src/screens/BoardsScreen').default;
+  var DiscoverScreen = require('./src/screens/DiscoverScreen').default;
+  var CommunityFeedScreen = require('./src/screens/CommunityFeedScreen').default;
+  var LoginScreen = require('./src/screens/LoginScreen').default;
+  var SignUpScreen = require('./src/screens/SignUpScreen').default;
+  var UserSettingsScreen = require('./src/screens/UserSettingsScreen').default;
+  console.log('✅ App.js: All other screens imported successfully');
+} catch (error) {
+  console.error('🚨 App.js: Other screens import failed:', error);
+}
 
 // Components
 import ErrorBoundary from './src/components/ErrorBoundary';
@@ -289,6 +324,23 @@ export default function App() {
     try {
       console.log('App: Saving color match:', colorMatch);
       
+      // Validate colorMatch structure to prevent crashes
+      if (!colorMatch || typeof colorMatch !== 'object') {
+        throw new Error('Invalid color match data: must be an object');
+      }
+      
+      if (!colorMatch.colors || !Array.isArray(colorMatch.colors) || colorMatch.colors.length === 0) {
+        throw new Error('Invalid color match data: colors array is required and must not be empty');
+      }
+      
+      if (!colorMatch.base_color || typeof colorMatch.base_color !== 'string') {
+        throw new Error('Invalid color match data: base_color is required and must be a string');
+      }
+      
+      if (!colorMatch.scheme || typeof colorMatch.scheme !== 'string') {
+        throw new Error('Invalid color match data: scheme is required and must be a string');
+      }
+      
       // Save to backend first
       try {
         const savedResp = await ApiService.createColorMatch({
@@ -326,11 +378,40 @@ export default function App() {
     }
   }, [user?.id, savedColorMatches]);
 
+  // Helper: normalize various callback shapes to a user object
+  const pickUser = (u) => {
+    console.log('🔍 App.js: pickUser called with:', u);
+    if (!u) return null;
+    return u?.user ? u.user : u;
+  };
+
   const handleLoginSuccess = useCallback(async (u) => {
-    const nextUser = pickUser(u);
-    // if the LoginScreen passes back a token, set it now
-    try { if (u && (u.token || u.authToken)) { ApiService.setToken?.(u.token || u.authToken); } } catch {}
-    setUser(nextUser);
+    console.log('🔍 App.js: handleLoginSuccess called with:', u);
+    
+    try {
+      const nextUser = pickUser(u);
+      console.log('🔍 App.js: pickUser result:', nextUser);
+      
+      // if the LoginScreen passes back a token, set it now
+      try { 
+        if (u && (u.token || u.authToken)) { 
+          console.log('🔍 App.js: Setting token from login response');
+          ApiService.setToken?.(u.token || u.authToken); 
+        } 
+      } catch (tokenError) {
+        console.error('🚨 App.js: Token setting error:', tokenError);
+      }
+      
+      console.log('🔍 App.js: Setting user state...');
+      setUser(nextUser);
+      console.log('🔍 App.js: User state set successfully');
+    } catch (error) {
+      console.error('🚨 App.js: handleLoginSuccess error:', error);
+      console.error('🚨 App.js: Error name:', error?.name);
+      console.error('🚨 App.js: Error message:', error?.message);
+      console.error('🚨 App.js: Error stack:', error?.stack);
+      throw error; // Re-throw to trigger ErrorBoundary
+    }
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
       await AsyncStorage.setItem('userData', JSON.stringify(nextUser));
@@ -458,10 +539,15 @@ export default function App() {
                 {(props) => (
                   <ColorWheelScreen
                     {...props}
-                    currentUser={user}
-                    onSaveColorMatch={saveColorMatch}
-                    onLogout={handleLogout}
-                    navigation={props.navigation}
+                    currentUser={user || null}
+                    onSaveColorMatch={saveColorMatch || (() => {
+                      console.warn('saveColorMatch not available');
+                      return Promise.resolve();
+                    })}
+                    onLogout={handleLogout || (() => {
+                      console.warn('handleLogout not available');
+                    })}
+                    navigation={props?.navigation}
                   />
                 )}
               </Tab.Screen>

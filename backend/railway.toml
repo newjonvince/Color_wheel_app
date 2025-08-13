@@ -3,10 +3,30 @@ builder = "NIXPACKS"
 
 [deploy]
 startCommand = "npm start"
-healthcheckPath = "/health"
+healthcheckPath = "/healthz"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
 [environments.production]
 variables = { NODE_ENV = "production" }
+
+# Optimized deployment settings
+[deploy.env]
+# Database connection optimization
+DB_CONN_LIMIT = "20"
+DB_ACQUIRE_TIMEOUT = "60000"
+DB_TIMEOUT = "60000"
+DB_LOG_SLOW_MS = "1000"
+
+# Performance tuning
+NODE_OPTIONS = "--max-old-space-size=512"
+UV_THREADPOOL_SIZE = "4"
+
+# Security headers
+HELMET_ENABLED = "true"
+CORS_ORIGIN = "https://your-frontend-domain.com"
+
+# Rate limiting
+RATE_LIMIT_WINDOW_MS = "900000"
+RATE_LIMIT_MAX = "100"

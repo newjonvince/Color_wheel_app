@@ -11,7 +11,7 @@ const boardRoutes = require('./routes/boards');
 const userRoutes = require('./routes/users');
 const communityRoutes = require('./routes/community');
 const imageRoutes = require('./routes/images');
-const { initializeTables } = require('./config/database');
+const { initializeTables, healthCheck } = require('./config/database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -107,6 +107,33 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     service: 'Fashion Color Wheel API'
   });
+});
+
+// Railway health check endpoint with database connectivity test
+app.get('/healthz', async (req, res) => {
+  try {
+    const isHealthy = await healthCheck();
+    if (isHealthy) {
+      res.status(200).json({
+        status: 'healthy',
+        database: 'connected',
+        timestamp: new Date().toISOString()
+      });
+    } else {
+      res.status(500).json({
+        status: 'unhealthy',
+        database: 'disconnected',
+        timestamp: new Date().toISOString()
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      status: 'unhealthy',
+      database: 'error',
+      error: error.message,
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Request logging middleware for debugging

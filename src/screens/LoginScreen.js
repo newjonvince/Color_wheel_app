@@ -73,14 +73,26 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
   const handleDemoLogin = useCallback(async () => {
     if (loading) return;
     setLoading(true);
+    
+    console.log('🔍 LoginScreen: Demo login started...');
+    
     try {
+      console.log('🔍 LoginScreen: Calling ApiService.demoLogin()...');
       const response = await ApiService.demoLogin();
+      console.log('🔍 LoginScreen: Demo login response received:', response);
+      
       const user = response?.user;
       const token = response?.token;
       
+      console.log('🔍 LoginScreen: Extracted user:', user);
+      console.log('🔍 LoginScreen: Extracted token:', !!token);
+      
       if (user && token) {
+        console.log('🔍 LoginScreen: Saving session...');
         await saveSession({ user, token });
+        console.log('🔍 LoginScreen: Session saved, calling onLoginSuccess...');
         onLoginSuccess?.(user);
+        console.log('🔍 LoginScreen: onLoginSuccess called successfully');
       } else {
         // Local fallback if backend demo login fails
         const demoUser = {

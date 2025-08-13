@@ -133,8 +133,15 @@ const FallbackColorWheel = React.memo(({ size = 300, scheme = 'complementary', i
 function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout }) {
   const route = useRoute();
   
-  // Add crash debugging and safety checks
+  // Enhanced crash debugging and safety checks
   console.log('🎨 ColorWheelScreen: Component initializing...');
+  console.log('🎨 ColorWheelScreen: Props received:', {
+    hasNavigation: !!navigation,
+    hasCurrentUser: !!currentUser,
+    hasOnSaveColorMatch: !!onSaveColorMatch,
+    hasOnLogout: !!onLogout,
+    routeParams: route?.params
+  });
   
   // Safety checks for props
   if (!navigation) {
@@ -144,13 +151,20 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
   
   // Test color utility imports immediately to catch import errors
   try {
-    const testColor = generateOklchScheme('#FF6B6B', 'complementary', 5);
+    console.log('🎨 ColorWheelScreen: Testing color utilities...');
+    const testColor = generateOklchScheme('#FF6B6B', 'complementary');
     console.log('🎨 ColorWheelScreen: Color utilities working', testColor);
   } catch (error) {
     console.error('🚨 ColorWheelScreen: Color utility import error:', error);
+    console.error('🚨 ColorWheelScreen: Error name:', error?.name);
+    console.error('🚨 ColorWheelScreen: Error message:', error?.message);
+    console.error('🚨 ColorWheelScreen: Error stack:', error?.stack);
     Alert.alert('Error', 'Color utilities failed to load. Please restart the app.');
     return null;
   }
+  
+  // Component state initialization with debugging
+  console.log('🎨 ColorWheelScreen: Starting component state initialization...');
   
   const [selectedColor, setSelectedColor] = useState('#FF6B6B');
   const [baseHex, setBaseHex] = useState('#FF6B6B');
@@ -170,6 +184,15 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
   const [showCollageCreator, setShowCollageCreator] = useState(false);
   const [selectedBoard, setSelectedBoard] = useState(null);
 
+  // Component cleanup ref to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+  
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Honor incoming navigation params from Export
   useEffect(() => {
     if (route?.params?.palette?.length) {
@@ -177,6 +200,63 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
       if (route.params.baseHex) setBaseHex(route.params.baseHex);
     }
   }, [route?.params]);
+
+  // Camera and Gallery functions - properly defined at component level (not inside callbacks)
+  const openCamera = useCallback(async () => {
+    try {
+      console.log('🔍 ColorWheelScreen: Opening camera...');
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Camera permission is required to take photos');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        const imageUri = result.assets[0].uri;
+        console.log('🔍 ColorWheelScreen: Camera image selected:', imageUri);
+        setSelectedImageUri(imageUri);
+        setShowExtractor(true);
+      }
+    } catch (error) {
+      console.error('🚨 ColorWheelScreen: Camera error:', error);
+      Alert.alert('Error', 'Failed to open camera');
+    }
+  }, []);
+
+  const openGallery = useCallback(async () => {
+    try {
+      console.log('🔍 ColorWheelScreen: Opening gallery...');
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Required', 'Gallery permission is required to select photos');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets?.[0]) {
+        const imageUri = result.assets[0].uri;
+        console.log('🔍 ColorWheelScreen: Gallery image selected:', imageUri);
+        setSelectedImageUri(imageUri);
+        setShowExtractor(true);
+      }
+    } catch (error) {
+      console.error('🚨 ColorWheelScreen: Gallery error:', error);
+      Alert.alert('Error', 'Failed to open gallery');
+    }
+  }, []);
 
   // Contrast calculation utilities for accessibility
   const getLuminance = (hex) => {
@@ -394,6 +474,7 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
     // Board selection optional — allow quick save without board
     // If you must enforce board selection, restore this guard.
     
+    if (!isMountedRef.current) return; // Prevent action if component unmounted
 
     setIsSaving(true);
     
@@ -406,6 +487,8 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
         description: '',
         is_public: false,
       });
+      
+      if (!isMountedRef.current) return; // Check again after async operation
       
       // Success haptic feedback
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -422,6 +505,8 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
         });
       }
     } catch (error) {
+      if (!isMountedRef.current) return; // Check before showing error
+      
       console.error('Error saving color match:', error);
       // Error haptic feedback
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -430,20 +515,14 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
       const errorMessage = error?.response?.data?.error || error?.message || 'Failed to save color match. Please try again.';
       Alert.alert('Save Failed', errorMessage);
     } finally {
-      setIsSaving(false);
+      if (isMountedRef.current) {
+        setIsSaving(false);
+      }
     }
   };
 
-  // Drop-in camera/gallery handlers
-  const openCamera = useCallback(async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') return;
-    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: false, quality: 0.9 });
-    if (!result.canceled && result.assets?.[0]) { setSelectedImageUri(result.assets[0].uri); setShowExtractor(true); }
-  }, []);
-
-  const openGallery = useCallback(async () => {
   // Precompute 360° ring segments once (improves perf and avoids mid-gesture jank)
+  // FIXED: Moved useMemo to component level to avoid React hook violation
   const wheelSegments = useMemo(() => {
     const segs = [];
     for (let i = 0; i < 360; i++) {
@@ -458,19 +537,12 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
       const x3 = WHEEL_RADIUS + WHEEL_RADIUS * Math.cos(endAngle);
       const y3 = WHEEL_RADIUS + WHEEL_RADIUS * Math.sin(endAngle);
       const x4 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.cos(endAngle);
-      const y4 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.sin(endAngle);
+      const y4 = WHEEL_RADIUS + (WHEEL_RADIUS - WHEEL_STROKE_WIDTH) * Math.cos(endAngle);
       
       segs.push({ d: `M ${x1} ${y1} L ${x2} ${y2} L ${x3} ${y3} L ${x4} ${y4} Z`, fill: color });
     }
     return segs;
   }, []);
-
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') return;
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: false, quality: 0.9 });
-    if (!result.canceled && result.assets?.[0]) { setSelectedImageUri(result.assets[0].uri); setShowExtractor(true); }
-  }, []);
-
 
 
   const renderColorWheel = () => {
@@ -573,16 +645,9 @@ function ColorWheelScreen({ navigation, currentUser, onSaveColorMatch, onLogout 
 
       {/* Conditional Rendering: Advanced vs Basic Color Wheel */}
       {useAdvancedMode ? (
-          (typeof AdvancedColorWheel !== 'undefined' && AdvancedColorWheel) ? (
-            <AdvancedColorWheel 
-              currentUser={currentUser}
-              onSaveColorMatch={onSaveColorMatch}
-            />
-          ) : (
             <View style={{ padding: 16 }}>
               <Text style={{ color: '#444' }}>Advanced mode coming soon.</Text>
             </View>
-          )
         ) : (
           <>
           {/* Color Wheel - Safe Loading with Fallback */}

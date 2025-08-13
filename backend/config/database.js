@@ -1,107 +1,177 @@
 'use strict';
 
 /**
- * config/database.js (MySQL2)
- * Pooled MySQL connection for Railway (or any MySQL host).
- * - Uses mysql2/promise
- * - Named placeholders (:id, :limit) for readability
- * - Returns { rows } to match prior Postgres-style callers
- * - Includes helpers for transactions and optional slow-query logging
+ * config/database.optimized.js (MySQL2, Railway-friendly)
+ *
+ * Key improvements versus your current version:
+ * - Auto-detects Railway env vars (MYSQLHOST/MYSQLUSER/...) and DATABASE_URL.
+ * - Optional TLS via DB_SSL=true or DATABASE_URL?ssl=true (uses secure defaults).
+ * - Uses mysql2's native named placeholders (no manual :param replacement).
+ * - Adds acquireTimeout, multipleStatements=false, big number safety.
+ * - Graceful shutdown hook to close the pool on SIGTERM/HMR.
+ * - Small helpers: healthCheck(), withConnection().
+ * - Keeps the same { rows } return shape for compatibility.
  */
 
 const mysql = require('mysql2/promise');
+const { URL } = require('url');
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-
-  // Pool tuning
-  waitForConnections: true,
-  connectionLimit: Number(process.env.DB_CONN_LIMIT || 10),
-  maxIdle: 10,
-  idleTimeout: 60_000,
-  queueLimit: 0,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 0,
-
-  // Timeouts (ms)
-  connectTimeout: 10_000,
-
-  // Quality-of-life
-  namedPlaceholders: true, // allows :id, :limit, etc.
-  dateStrings: true,       // avoid TZ conversion surprises for DATETIME/TIMESTAMP
-  decimalNumbers: true,    // parse DECIMAL as numbers
-
-  // If your provider requires TLS, uncomment:
-  // ssl: { rejectUnauthorized: true },
-});
+/** Helpers **/
+const bool = (v, def = false) => {
+  if (v === undefined || v === null || v === '') return def;
+  const s = String(v).toLowerCase();
+  return ['1', 'true', 'yes', 'y', 'on'].includes(s);
+};
 
 /**
- * Basic query helper.
- * Keeps the { rows } response to be compatible with prior callers.
+ * Parse a MySQL connection string like:
+ *   mysql://user:pass@host:3306/dbname?ssl=true
  */
-async function query(sql, params) {
-  // Hybrid compatibility: handle both positional (?) and named (:param) placeholders
-  let finalSql = sql;
-  let finalParams = params;
-  
-  // If params is an array, it's positional placeholders (?)
-  if (Array.isArray(params)) {
-    // Keep as-is for positional placeholders
-    finalParams = params;
-  } 
-  // If params is an object, it's named placeholders (:param)
-  else if (params && typeof params === 'object') {
-    // Convert named placeholders to positional for mysql2
-    const paramNames = [];
-    const paramValues = [];
-    
-    // Replace :param with ? and collect values in order
-    finalSql = sql.replace(/:(\w+)/g, (match, paramName) => {
-      paramNames.push(paramName);
-      paramValues.push(params[paramName]);
-      return '?';
-    });
-    
-    finalParams = paramValues;
-  }
-  // If no params provided, use empty array
-  else {
-    finalParams = [];
-  }
-  
-  const [rows] = await pool.execute(finalSql, finalParams);
-  return { rows }; // keep .rows for caller compatibility
+function parseMysqlUrl(urlString) {
+  const u = new URL(urlString);
+  const sslParam = u.searchParams.get('ssl') || u.searchParams.get('sslmode');
+  return {
+    host: u.hostname,
+    port: Number(u.port || 3306),
+    user: decodeURIComponent(u.username || ''),
+    password: decodeURIComponent(u.password || ''),
+    database: (u.pathname || '').replace(/^\//, ''),
+    ssl: sslParam && ['true', 'require', 'on'].includes(sslParam.toLowerCase()),
+  };
 }
 
 /**
- * Same as query, but logs queries that exceed SLOW_MS.
- * Enable by setting DB_LOG_SLOW_MS (defaults to 0 = disabled).
+ * Resolve config from common envs:
+ * - Railway default MYSQL* envs
+ * - Fallback DB_* envs (your current usage)
+ * - DATABASE_URL (mysql://...)
  */
+function resolveConfigFromEnv(env) {
+  let cfg = null;
+
+  // 1) DATABASE_URL takes precedence if provided
+  if (env.DATABASE_URL && env.DATABASE_URL.startsWith('mysql://')) {
+    const u = parseMysqlUrl(env.DATABASE_URL);
+    cfg = {
+      host: u.host,
+      port: u.port,
+      user: u.user,
+      password: u.password,
+      database: u.database,
+      ssl: u.ssl,
+    };
+  }
+
+  // 2) Railway defaults
+  if (!cfg && env.MYSQLHOST) {
+    cfg = {
+      host: env.MYSQLHOST,
+      port: Number(env.MYSQLPORT || 3306),
+      user: env.MYSQLUSER,
+      password: env.MYSQLPASSWORD,
+      database: env.MYSQLDATABASE,
+      // Let DB_SSL override (Railway typically allows non-SSL inside its network,
+      // but enable if you egress from elsewhere or want TLS in transit).
+      ssl: bool(env.DB_SSL, false),
+    };
+  }
+
+  // 3) Your original DB_* names
+  if (!cfg && env.DB_HOST) {
+    cfg = {
+      host: env.DB_HOST,
+      port: Number(env.DB_PORT || 3306),
+      user: env.DB_USER,
+      password: env.DB_PASSWORD,
+      database: env.DB_NAME,
+      ssl: bool(env.DB_SSL, false),
+    };
+  }
+
+  // 4) Last-resort defaults
+  if (!cfg) {
+    cfg = {
+      host: '127.0.0.1',
+      port: 3306,
+      user: 'root',
+      password: '',
+      database: 'app',
+      ssl: false,
+    };
+  }
+
+  // Normalize SSL config for mysql2
+  const ssl =
+    cfg.ssl
+      ? { rejectUnauthorized: bool(env.DB_SSL_REJECT_UNAUTHORIZED, true), minVersion: 'TLSv1.2' }
+      : undefined;
+
+  return {
+    host: cfg.host,
+    port: cfg.port,
+    user: cfg.user,
+    password: cfg.password,
+    database: cfg.database,
+
+    // Pool tuning
+    waitForConnections: true,
+    connectionLimit: Number(env.DB_CONN_LIMIT || env.MYSQL_CONNECTION_LIMIT || 10),
+    maxIdle: 10,
+    idleTimeout: 60_000,
+    queueLimit: 0,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 0,
+
+    // Timeouts
+    connectTimeout: 10_000,
+    acquireTimeout: 10_000,
+
+    // Safety / QoL
+    namedPlaceholders: true,  // native named placeholders
+    multipleStatements: false, // explicit hardening
+    dateStrings: true,         // avoid TZ conversion surprises
+    decimalNumbers: true,      // parse DECIMAL as numbers
+    supportBigNumbers: true,   // handle BIGINT/DECIMAL safely
+    bigNumberStrings: true,    // avoid precision loss for > JS safe int
+
+    // TLS (optional)
+    ssl,
+  };
+}
+
+const poolConfig = resolveConfigFromEnv(process.env);
+const pool = mysql.createPool(poolConfig);
+
+/** Basic query helper. Accepts either positional array or named object. */
+async function query(sql, params = []) {
+  const [rows] = await pool.execute(sql, params);
+  return { rows };
+}
+
+/** Timed query helper for slow-query logging. */
 const SLOW_MS = Number(process.env.DB_LOG_SLOW_MS || 0);
-async function timedQuery(sql, params = {}) {
+async function timedQuery(sql, params = []) {
   const t0 = Date.now();
   const result = await query(sql, params);
   const ms = Date.now() - t0;
   if (SLOW_MS && ms >= SLOW_MS) {
-    // Note: Be careful not to log sensitive values in production
-    console.warn(`🐌 Slow query (${ms}ms)`, { sql, paramsPreview: Object.keys(params) });
+    const preview = Array.isArray(params) ? { positionalCount: params.length } : { keys: Object.keys(params || {}) };
+    console.warn(`🐌 Slow query (${ms}ms)`, { sql, paramsPreview: preview });
   }
   return result;
 }
 
-/**
- * Transaction helper.
- * Usage:
- *   const result = await inTransaction(async (conn) => {
- *     const [r1] = await conn.execute('UPDATE ...', {...});
- *     const [r2] = await conn.execute('INSERT ...', {...});
- *     return { ok: true };
- *   });
- */
+/** Get a dedicated connection without a transaction (handy for batches). */
+async function withConnection(fn) {
+  const conn = await pool.getConnection();
+  try {
+    return await fn(conn);
+  } finally {
+    conn.release();
+  }
+}
+
+/** Transaction helper. */
 async function inTransaction(fn) {
   const conn = await pool.getConnection();
   try {
@@ -117,49 +187,75 @@ async function inTransaction(fn) {
   }
 }
 
-/**
- * Optional: run an initialization step on each new connection
- * (e.g., enforce UTC at connection level).
- */
+/** Optional per-connection init (uncomment to enforce UTC). */
 pool.on('connection', async (conn) => {
   try {
-    // Uncomment if you want to force UTC at the session level:
     // await conn.query("SET time_zone = '+00:00'");
   } catch (e) {
-    // Non-fatal; just log
     console.warn('DB connection init error:', e?.message || e);
   }
 });
 
+/** Basic health check for readiness probes. */
+async function healthCheck() {
+  try {
+    await query('SELECT 1 as ok');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Initialize database tables - creates missing tables automatically
+ * Initialize database tables (id columns use CHAR(36) UUID).
+ * Note: MySQL 8.0+ supports DEFAULT (UUID()); if your instance is older,
+ * you can set the UUID in application code instead.
  */
 async function initializeTables() {
   try {
     console.log('🔧 Initializing database tables...');
-    
-    // Test database connection first
     await query('SELECT 1 as test');
     console.log('✅ Database connection verified');
-    
-    // Create follows table for community features
+
+    // Complete users table schema with all required columns
+    await query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id CHAR(36) PRIMARY KEY,
+        username VARCHAR(50) UNIQUE NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        password_hash VARCHAR(255) NOT NULL,
+        location VARCHAR(100),
+        birthday_month INT,
+        birthday_day INT,
+        birthday_year INT,
+        gender VARCHAR(20),
+        email_verified BOOLEAN DEFAULT FALSE,
+        notifications BOOLEAN DEFAULT TRUE,
+        share_usage BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_email (email),
+        INDEX idx_username (username),
+        INDEX idx_created (created_at)
+      ) ENGINE=InnoDB
+    `);
+
     await query(`
       CREATE TABLE IF NOT EXISTS follows (
-        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
-        follower_id VARCHAR(36) NOT NULL,
-        following_id VARCHAR(36) NOT NULL,
+        id CHAR(36) PRIMARY KEY,
+        follower_id CHAR(36) NOT NULL,
+        following_id CHAR(36) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
         FOREIGN KEY (following_id) REFERENCES users(id) ON DELETE CASCADE,
         UNIQUE KEY unique_follow (follower_id, following_id)
-      )
+      ) ENGINE=InnoDB
     `);
 
-    // Create color_matches table for saving palettes
     await query(`
       CREATE TABLE IF NOT EXISTS color_matches (
-        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
-        user_id VARCHAR(36) NOT NULL,
+        id CHAR(36) PRIMARY KEY,
+        user_id CHAR(36) NOT NULL,
         base_color VARCHAR(7) NOT NULL,
         scheme VARCHAR(50) NOT NULL,
         colors JSON NOT NULL,
@@ -171,28 +267,98 @@ async function initializeTables() {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         INDEX idx_user_created (user_id, created_at),
         INDEX idx_public_created (is_public, created_at)
-      )
+      ) ENGINE=InnoDB
+    `);
+
+    // Boards table for organizing color collections
+    await query(`
+      CREATE TABLE IF NOT EXISTS boards (
+        id CHAR(36) PRIMARY KEY,
+        user_id CHAR(36) NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        type ENUM('private', 'public') DEFAULT 'private',
+        scheme VARCHAR(50),
+        description TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_user_type (user_id, type),
+        INDEX idx_scheme (scheme)
+      ) ENGINE=InnoDB
+    `);
+
+    // Board items linking color matches to boards
+    await query(`
+      CREATE TABLE IF NOT EXISTS board_items (
+        id CHAR(36) PRIMARY KEY,
+        board_id CHAR(36) NOT NULL,
+        color_match_id CHAR(36) NOT NULL,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
+        FOREIGN KEY (color_match_id) REFERENCES color_matches(id) ON DELETE CASCADE,
+        UNIQUE KEY unique_board_item (board_id, color_match_id),
+        INDEX idx_board_added (board_id, added_at)
+      ) ENGINE=InnoDB
+    `);
+
+    // User sessions for JWT token management
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_sessions (
+        id CHAR(36) PRIMARY KEY,
+        user_id CHAR(36) NOT NULL,
+        jti CHAR(36) UNIQUE NOT NULL,
+        session_token VARCHAR(255),
+        expires_at TIMESTAMP NOT NULL,
+        ip_address VARCHAR(45),
+        user_agent TEXT,
+        revoked_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_user_expires (user_id, expires_at),
+        INDEX idx_jti (jti),
+        INDEX idx_expires (expires_at)
+      ) ENGINE=InnoDB
     `);
 
     console.log('✅ Database tables initialized successfully');
   } catch (error) {
     console.error('❌ Database table initialization error:', error.message);
     console.error('❌ Stack:', error.stack);
-    
-    // Check if it's a connection issue
     if (error.code === 'ECONNREFUSED' || error.code === 'ER_ACCESS_DENIED_ERROR') {
       console.error('❌ Database connection failed - check Railway MySQL service and environment variables');
     }
-    
-    // Don't throw - let the app continue even if table creation fails
-    // The app should still serve API requests even without the follows table
+    // Non-fatal: allow the app to continue serving if initialization fails
   }
 }
+
+/** Graceful shutdown (Railway will send SIGTERM on redeploy/scale-down). */
+let _exitHookInstalled = false;
+function installExitHookOnce() {
+  if (_exitHookInstalled) return;
+  _exitHookInstalled = true;
+  const shutdown = async (signal) => {
+    try {
+      await pool.end();
+      // eslint-disable-next-line no-console
+      console.log(`[db] pool closed on ${signal}`);
+    } catch (e) {
+      console.warn('[db] error closing pool:', e?.message || e);
+    } finally {
+      process.exit(0);
+    }
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+installExitHookOnce();
 
 module.exports = {
   pool,
   query,
   timedQuery,
+  withConnection,
   inTransaction,
   initializeTables,
+  healthCheck,
 };

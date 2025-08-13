@@ -26,6 +26,18 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import ApiService from '../services/api';
 
+// Safe wrapper to log real errors + stack traces from component layer
+const safe = (fn, context = 'unknown') => (...args) => {
+  try {
+    return fn(...args);
+  } catch (error) {
+    console.error(`🚨 CoolorsColorExtractor Error in ${context}:`, error);
+    console.error('Stack trace:', error.stack);
+    console.error('Args:', args);
+    throw error; // Re-throw to maintain error handling flow
+  }
+};
+
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 const MAGNIFIER_SIZE = 80;
 const DEFAULT_SLOTS = 5;
@@ -91,7 +103,11 @@ export default function CoolorsColorExtractor({
       if (ApiService?.sampleColorAt) {
         return await ApiService.sampleColorAt(uri, normX, normY, radius);
       }
-      const apiBase = ApiService.baseURL?.replace(/\/?$/, '');
+      // FIXED: Safe optional-chaining to prevent crashes if ApiService is undefined
+      const apiBase = ApiService?.baseURL?.replace(/\/?$/, '');
+      if (!apiBase) {
+        throw new Error('API base URL unavailable');
+      }
       const url = `${apiBase}/images/sample-color`;
       const form = new FormData();
       form.append('image', { uri, name: 'upload.jpg', type: 'image/jpeg' });
@@ -104,6 +120,9 @@ export default function CoolorsColorExtractor({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json(); // { hex }
     } catch (e) {
+      console.error('🚨 CoolorsColorExtractor Error in callServerSample:', e);
+      console.error('Stack trace:', e.stack);
+      console.error('Args:', { uri, normX, normY, radius });
       // fallback: snap to nearest server palette color
       const approx = nearestFromPalette(liveColor, serverPalette.length ? serverPalette : fallbackPalette);
       return { hex: approx };
@@ -155,7 +174,9 @@ export default function CoolorsColorExtractor({
       
       console.log('CoolorsColorExtractor: Image processed successfully, dominant:', dominant);
     } catch (e) {
-      console.error('CoolorsColorExtractor: processImage error', e);
+      console.error('🚨 CoolorsColorExtractor Error in processImage:', e);
+      console.error('Stack trace:', e.stack);
+      console.error('Asset:', asset);
       setServerPalette(fallbackPalette);
       fillSlotsFromPalette(fallbackPalette);
     } finally {
@@ -176,6 +197,8 @@ export default function CoolorsColorExtractor({
         onClose?.();
       }
     } catch (error) {
+      console.error('🚨 CoolorsColorExtractor Error in pickImage:', error);
+      console.error('Stack trace:', error.stack);
       Alert.alert('Error', 'Failed to select image');
       onClose?.();
     }
@@ -243,11 +266,16 @@ export default function CoolorsColorExtractor({
     }
   }, []);
 
-  // --- controls -----------------------------------------------------------------
-  const addSlot = () => setSlots(prev => [...prev, serverPalette[prev.length % serverPalette.length] || '#CCCCCC']);
-  const removeSlot = () => setSlots(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+  // --- controls with safe error logging -----------------------------------------------------------------
+  const addSlot = safe(() => {
+    setSlots(prev => [...prev, serverPalette[prev.length % serverPalette.length] || '#CCCCCC']);
+  }, 'addSlot');
 
-  const nextSlot = () => {
+  const removeSlot = safe(() => {
+    setSlots(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+  }, 'removeSlot');
+
+  const nextSlot = safe(() => {
     if (activeIndex < slots.length - 1) {
       setActiveIndex(i => i + 1);
     } else {
@@ -255,16 +283,16 @@ export default function CoolorsColorExtractor({
       onComplete?.({ imageUri: selectedImage?.uri, slots, activeIndex });
       onColorExtracted?.(slots[0]);
     }
-  };
+  }, 'nextSlot');
 
-  const handleUseOnWheel = () => {
+  const handleUseOnWheel = safe(() => {
     onColorExtracted?.(slots[0]);
     onComplete?.({ imageUri: selectedImage?.uri, slots, activeIndex });
-  };
+  }, 'handleUseOnWheel');
 
-  const handleCreateCollagePress = () => {
+  const handleCreateCollagePress = safe(() => {
     if (onCreateCollage && selectedImage) onCreateCollage(selectedImage, slots);
-  };
+  }, 'handleCreateCollagePress');
 
   // --- UI -----------------------------------------------------------------------
   if (isLoading) {

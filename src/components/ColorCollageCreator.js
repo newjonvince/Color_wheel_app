@@ -37,6 +37,9 @@ const ASPECT_RATIOS = [
 ];
 
 export default function ColorCollageCreator({
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+
   image,        // { uri, width?, height? }
   colors = [],  // ['#RRGGBB', ...]
   onClose,
@@ -321,10 +324,11 @@ export default function ColorCollageCreator({
   const handleExport = async () => {
     try {
       setIsExporting(true);
+      if (!collageRef.current) { Alert.alert('Please wait', 'Preview is still rendering.'); return; }
 
       // Photos permission
-      const { status } = await MediaLibrary.requestPermissionsAsync();
-      if (status !== 'granted') {
+      const { status, accessPrivileges } = await MediaLibrary.requestPermissionsAsync({ requestWritePermission: true });
+      if (status !== 'granted' && accessPrivileges !== 'limited') {
         Alert.alert('Permission needed', 'Enable Photos to save collages.', [
           { text: 'Cancel', style: 'cancel', onPress: () => setIsExporting(false) },
           { text: 'Open Settings', onPress: () => { setIsExporting(false); Linking.openSettings(); } },
@@ -334,8 +338,12 @@ export default function ColorCollageCreator({
 
       // Capture
       const uri = await captureRef(collageRef.current, {
-        format: 'png',  // could be 'jpg'
-        quality: 1,     // for jpg
+        format: 'png',
+        result: 'tmpfile',
+        fileName: 'color-collage',  // could be 'jpg'
+        quality: 1,
+        width: Math.min(computedDims.width, 2048),
+        height: Math.min(computedDims.height, 2048),     // for jpg
       });
 
       // Save
@@ -355,7 +363,7 @@ export default function ColorCollageCreator({
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       Alert.alert('Error', 'Failed to export collage. Please try again.');
     } finally {
-      setIsExporting(false);
+      if (mounted.current) setIsExporting(false);
     }
   };
 
@@ -368,7 +376,7 @@ return (
           <Ionicons name="close" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Create Collage</Text>
-        <TouchableOpacity onPress={handleExport} style={styles.headerButton} disabled={isExporting}>
+        <TouchableOpacity onPress={handleExport} style={styles.headerButton} disabled={isExporting || !image?.uri || !colors?.length}>
           <Text style={[styles.exportText, isExporting && styles.exportTextDisabled]}>
             {isExporting ? 'Saving…' : 'Export'}
           </Text>

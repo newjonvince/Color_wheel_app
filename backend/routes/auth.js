@@ -2,6 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
 const { registerValidation, loginValidation, idValidation } = require('../middleware/validation');
 const { 
@@ -38,13 +39,17 @@ router.post('/register', registrationLimiter, registerValidation, async (req, re
     }
 
     const hashedPassword = await bcrypt.hash(password, 12);
-    // Insert user; IDs are UUIDs in this schema, so insertId is not used.
+    // Generate UUID in app code for consistent behavior
+    const userId = uuidv4();
+    
+    // Insert user with app-generated UUID
     await query(
-      `INSERT INTO users (email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [email, username, hashedPassword, location, birthday_month, birthday_day, birthday_year, gender]
+      `INSERT INTO users (id, email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [userId, email, username, hashedPassword, location, birthday_month, birthday_day, birthday_year, gender]
     );
-    // Fetch by unique email to retrieve the newly created user (and its UUID id)
+    
+    // Fetch by unique email to retrieve the newly created user
     const userResult = await query(
       'SELECT id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at FROM users WHERE email = ?',
       [email]

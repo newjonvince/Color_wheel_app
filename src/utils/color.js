@@ -333,11 +333,14 @@ const isPointInColorWheelRing = (x, y, centerX, centerY, outerRadius, innerRadiu
 const generateColorWheelPath = (radius, strokeWidth) => {
   const outer = radius;
   const inner = radius - strokeWidth;
+  // Fixed: Proper donut path with correct winding direction
+  // Outer ring clockwise, inner ring counter-clockwise for proper fill-rule
   return `
     M ${outer} 0
     A ${outer} ${outer} 0 1 1 ${outer - 0.01} 0
-    L ${inner - 0.01} 0
-    A ${inner} ${inner} 0 1 0 ${inner} 0
+    Z
+    M ${inner} 0
+    A ${inner} ${inner} 0 1 0 ${inner - 0.01} 0
     Z
   `;
 };

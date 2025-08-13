@@ -112,7 +112,7 @@ const createColorMatchValidation = [
     .custom(isValidHexColor).withMessage('base_color must be valid hex color')
     .bail(),
   body('scheme')
-    .isIn(['complementary','analogous','triadic','tetradic','monochromatic'])
+    .isIn(['complementary','analogous','triadic','tetradic','monochromatic','split-complementary'])
     .withMessage('Invalid scheme')
     .bail(),
   body('colors')
