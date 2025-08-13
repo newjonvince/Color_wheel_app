@@ -4,7 +4,7 @@
 
 import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import { View, Platform } from 'react-native';
-import { Gesture, GestureDetector, TapGestureHandler } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -58,6 +58,17 @@ const mod = (a, n) => ((a % n) + n) % n;
 // Web-only snapping/keyboard state (shift for snap; arrows for nudge)
 const globalWebState = { snap: false };
 
+// Helper for safe runOnJS calls from both worklet and JS contexts
+const callJS = (fn, ...args) => {
+  'worklet';
+  if (typeof fn !== 'function') return;
+  if (typeof __WORKLET__ !== 'undefined' && __WORKLET__) {
+    runOnJS(fn)(...args);
+  } else {
+    fn(...args);
+  }
+};
+
 export default forwardRef(function FullColorWheel({
   selectedFollowsActive = true,
   size,
@@ -109,6 +120,13 @@ export default forwardRef(function FullColorWheel({
   const activeIdx = useSharedValue(0);
   const freed = useRef(new Set(freedIndices || []));
 
+  // Pre-compute hue sweep colors for performance
+  const hueSweepColors = useMemo(() => {
+    const arr = [];
+    for (let i = 0; i <= 360; i += 10) arr.push(hslToHex(i, 100, 50));
+    return arr;
+  }, []);
+
   // Web-only: register key listeners once
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -146,27 +164,37 @@ export default forwardRef(function FullColorWheel({
 
   // Init from initialHex + scheme (place other handles by offsets)
   useEffect(() => {
-    const { h = 0, s = 100, l = 50 } = hexToHsl(initialHex) || {};
-    const sat = clamp01(s / 100);
-    const light = l ?? 50;
-
-    handleAngles[0].value = h;
-    handleSats[0].value  = sat;
+    const { h: hue = 0, s: sat = 100, l: light = 50 } = hexToHsl(initialHex) || {};
+    const sat01 = sat / 100;
+    handleAngles[0].value = hue;
+    handleSats[0].value = sat01;
     handleLights[0].value = light;
 
-    // reset freed set when scheme changes (they re-link)
-    freed.current = new Set(freedIndices || []);
-
-    for (let i = 1; i < 4; i++) {
-      const off = offsets[i] ?? (i * (360 / (offsets.length || 1)));
-      const angle = mod(h + off, 360);
-      handleAngles[i].value = angle;
-      handleSats[i].value = sat;
+    for (let i = 1; i < count; i++) {
+      if (!freed.current.has(i)) {
+        const ang = mod(hue + (offsets[i] ?? 0), 360);
+        handleAngles[i].value = ang;
+        handleSats[i].value = sat01;
+      }
       handleLights[i].value = light;
     }
     emitPalette();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialHex, scheme]);
+  }, [initialHex]);
+
+  // Reset freed handles only when scheme changes, not on color changes
+  useEffect(() => {
+    freed.current.clear(); // Reset freed handles on scheme change
+    const { h: hue = 0, s: sat = 100, l: light = 50 } = hexToHsl(initialHex) || {};
+    const sat01 = sat / 100;
+    
+    for (let i = 1; i < count; i++) {
+      const ang = mod(hue + (offsets[i] ?? 0), 360);
+      handleAngles[i].value = ang;
+      handleSats[i].value = sat01;
+      handleLights[i].value = light;
+    }
+    emitPalette();
+  }, [scheme]);
 
   // If linked, keep non-freed handles aligned to base during re-renders
   useEffect(() => {
@@ -187,18 +215,22 @@ export default forwardRef(function FullColorWheel({
 
   const emitPalette = () => {
     'worklet';
-    const c = SCHEME_COUNTS[scheme] || 1;
-    const result = [];
-    for (let i = 0; i < c; i++) {
-      const ang = handleAngles[i].value;
-      const sat = handleSats[i].value;
-      const lig = handleLights[i].value;
-      result.push(polarToHex(ang, sat, lig));
-    }
-    if (typeof onColorsChange === 'function') runOnJS(onColorsChange)(result);
-    if (typeof onHexChange === 'function') {
-      const sel = followActive.value ? Math.min(Math.max(activeIdx.value,0), result.length-1) : 0;
-      runOnJS(onHexChange)(result[sel]);
+    try {
+      const c = SCHEME_COUNTS[scheme] || 1;
+      const result = [];
+      for (let i = 0; i < c; i++) {
+        const ang = handleAngles[i].value;
+        const sat = handleSats[i].value;
+        const lig = handleLights[i].value;
+        result.push(polarToHex(ang, sat, lig));
+      }
+      if (onColorsChange) callJS(onColorsChange, result);
+      if (onHexChange) {
+        const sel = followActive.value ? Math.min(Math.max(activeIdx.value,0), result.length-1) : 0;
+        callJS(onHexChange, result[sel]);
+      }
+    } catch (e) {
+      console.warn('emitPalette error:', e);
     }
   };
 
@@ -248,8 +280,6 @@ export default forwardRef(function FullColorWheel({
     activeIdx.value = idx;
     if (typeof onActiveHandleChange === 'function') runOnJS(onActiveHandleChange)(idx);
     emitPalette();
-    // Update Selected Color to follow the focused handle
-    emitPalette();
   });
 
   // Pan gesture updates angle + saturation of active handle
@@ -258,23 +288,6 @@ export default forwardRef(function FullColorWheel({
       const idx = nearestHandle(e.x, e.y);
       activeIdx.value = idx;
       if (typeof onActiveHandleChange === 'function') runOnJS(onActiveHandleChange)(idx);
-    emitPalette();
-    // Update Selected Color to follow the focused handle
-    emitPalette();
-
-      const ang = (Math.atan2(e.y - cy, e.x - cx) * 180) / Math.PI;
-      let deg = mod(ang + 450, 360);
-      if (Platform.OS === 'web' && globalWebState.snap) {
-        // Snap to common angles (0/30/60/90/etc.)
-        const step = 30; deg = Math.round(deg / step) * step;
-      }
-      const sat = clamp01(Math.hypot(e.x - cx, e.y - cy) / radius);
-
-      // Free this handle if we are linked and it's not the base
-      if (linked && idx !== 0) { freed.current.add(idx); }
-
-      handleAngles[idx].value = deg;
-      handleSats[idx].value = sat;
       emitPalette();
     })
     .onChange((e) => {
@@ -285,6 +298,9 @@ export default forwardRef(function FullColorWheel({
         const step = 30; deg = Math.round(deg / step) * step;
       }
       const sat = clamp01(Math.hypot(e.x - cx, e.y - cy) / radius);
+
+      // Free this handle if we are linked and it's not the base
+      if (linked && idx !== 0) { freed.current.add(idx); }
 
       handleAngles[idx].value = deg;
       handleSats[idx].value = sat;
@@ -339,11 +355,7 @@ export default forwardRef(function FullColorWheel({
         <Canvas style={{ width: size, height: size }}>
           {/* Color disk (sweep hue + radial desaturation) */}
           <SkiaCircle cx={cx} cy={cy} r={radius}>
-            <SweepGradient c={vec(cx, cy)} colors={useMemo(() => {
-              const arr = [];
-              for (let i = 0; i <= 360; i += 10) arr.push(hslToHex(i, 100, 50));
-              return arr;
-            }, [])} />
+            <SweepGradient c={vec(cx, cy)} colors={hueSweepColors} />
           </SkiaCircle>
           {RadialGradient ? (
             <SkiaCircle cx={cx} cy={cy} r={radius}>
@@ -353,11 +365,11 @@ export default forwardRef(function FullColorWheel({
         </Canvas>
 
         {/* Markers (show only what the scheme needs) */}
-        <Animated.View style={[useMemo(() => markerStyle(0), []), { zIndex: 4 }]} />
-        {(SCHEME_COUNTS[scheme] || 1) >= 2 && <Animated.View style={[useMemo(() => markerStyle(1), []), { zIndex: 3 }]} />}
-        {(SCHEME_COUNTS[scheme] || 1) >= 3 && <Animated.View style={[useMemo(() => markerStyle(2), []), { zIndex: 2 }]} />}
-        {(SCHEME_COUNTS[scheme] || 1) >= 4 && <Animated.View style={[useMemo(() => markerStyle(3), []), { zIndex: 1 }]} />}
+        <Animated.View pointerEvents="none" style={[m0, { zIndex: 4 }]} />
+        {(SCHEME_COUNTS[scheme] || 1) >= 2 && <Animated.View pointerEvents="none" style={[m1, { zIndex: 3 }]} />}
+        {(SCHEME_COUNTS[scheme] || 1) >= 3 && <Animated.View pointerEvents="none" style={[m2, { zIndex: 2 }]} />}
+        {(SCHEME_COUNTS[scheme] || 1) >= 4 && <Animated.View pointerEvents="none" style={[m3, { zIndex: 1 }]} />}
       </View>
     </GestureDetector>
   );
-}
+});

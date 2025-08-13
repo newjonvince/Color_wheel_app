@@ -18,6 +18,7 @@ export default function ColorWheelScreen() {
   const [selectedScheme, setSelectedScheme] = useState('complementary');
   const [palette, setPalette] = useState(['#FF6B6B']);
   const [selectedColor, setSelectedColor] = useState('#FF6B6B');
+  const [baseHex, setBaseHex] = useState('#FF6B6B'); // new: decoupled from selectedColor
   const [linked, setLinked] = useState(true);
   const [activeIdx, setActiveIdx] = useState(0);
 
@@ -36,29 +37,24 @@ export default function ColorWheelScreen() {
   }, [selectedColor]);
 
   const applyNumericInputs = () => {
-    // Move active handle to these HSL values; FullColorWheel uses onHexChange/onColorsChange
     const H = mod(parseFloat(hIn) || 0, 360);
     const S = Math.max(0, Math.min(100, parseFloat(sIn) || 0));
     const L = Math.max(0, Math.min(100, parseFloat(lIn) || 0));
-    // Selected color preview updates immediately
     setSelectedColor(hslToHex(H, S, L));
-    // The wheel listens via initialHex only on mount; since it’s expensive to plumb full imperative refs,
-    // we’ll update the palette locally (Selected Color) and let onColorsChange next drag refresh everything.
-    // (If you want full imperative numeric control, we can expose a ref API in the wheel next pass.)
+    // Use the ref to keep wheel in sync on blur
+    wheelRef.current?.setActiveHandleHSL?.(H, S, L);
   };
 
-  const resetScheme = () => {
-    // Reset to canonical offsets from current base hue
-    const { h=0, s=100, l=50 } = hexToHsl(selectedColor) || {};
+  const resetScheme = (anchorHex = selectedColor) => {
+    // Reset to canonical offsets from anchor hue
+    const { h=0, s=100, l=50 } = hexToHsl(anchorHex) || {};
     const c = SCHEME_COUNTS[selectedScheme] || 1;
     const offs = SCHEME_OFFSETS[selectedScheme] || [0];
-    const sat01 = s / 100;
-    const result = [];
-    for (let i=0;i<c;i++) {
-      const ang = mod(h + (offs[i] ?? 0), 360);
-      result.push(hslToHex(ang, sat01*100, l));
-    }
+    const result = Array.from({ length: c }, (_, i) =>
+      hslToHex(mod(h + (offs[i] ?? 0), 360), s, l)
+    );
     setPalette(result);
+    setBaseHex(anchorHex); // anchor the wheel to this hex
     setLinked(true);
   };
 
@@ -66,8 +62,10 @@ export default function ColorWheelScreen() {
     const h = Math.floor(Math.random()*360);
     const s = 60 + Math.floor(Math.random()*40); // 60–100%
     const l = 45 + Math.floor(Math.random()*10); // 45–55%
-    setSelectedColor(hslToHex(h, s, l));
-    resetScheme();
+    const hex = hslToHex(h, s, l);
+    setSelectedColor(hex);
+    setBaseHex(hex); // anchor the wheel to the same hex
+    resetScheme(hex); // pass the new hex explicitly to avoid stale state
   };
 
   // Prefer live palette from wheel; otherwise derive
@@ -84,7 +82,7 @@ export default function ColorWheelScreen() {
         selectedFollowsActive={selectedFollowsActive}
         size={WHEEL_SIZE}
         scheme={selectedScheme}
-        initialHex={selectedColor}
+        initialHex={baseHex} // use baseHex, not selectedColor
         linked={linked}
         onToggleLinked={() => setLinked(v => !v)}
         onColorsChange={(colors) => {
@@ -116,8 +114,8 @@ export default function ColorWheelScreen() {
           </Pressable>
 
           {/* Reset & Random */}
-          <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Pressable onPress={resetScheme} style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#999' }}>
+          <View style={{ flexDirection: 'row', marginLeft: 8, marginRight: 8 }}>
+            <Pressable onPress={resetScheme} style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#999', marginRight: 8 }}>
               <Text>Reset</Text>
             </Pressable>
             <Pressable onPress={randomize} style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#999' }}>
@@ -127,8 +125,8 @@ export default function ColorWheelScreen() {
         </View>
 
         {/* Numeric H/S/L */}
-        <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-          <View style={{ flex: 1 }}>
+        <View style={{ flexDirection: 'row', marginTop: 10, marginLeft: 8, marginRight: 8 }}>
+          <View style={{ flex: 1, marginRight: 4 }}>
             <Text style={{ fontSize: 12, color: '#555' }}>H</Text>
             <TextInput
               value={hIn}
@@ -139,7 +137,7 @@ export default function ColorWheelScreen() {
               placeholder="0–360"
             />
           </View>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, marginLeft: 4, marginRight: 4 }}>
             <Text style={{ fontSize: 12, color: '#555' }}>S (%)</Text>
             <TextInput
               value={sIn}
@@ -150,7 +148,7 @@ export default function ColorWheelScreen() {
               placeholder="0–100"
             />
           </View>
-          <View style={{ flex: 1 }}>
+          <View style={{ flex: 1, marginLeft: 4 }}>
             <Text style={{ fontSize: 12, color: '#555' }}>L (%)</Text>
             <TextInput
               value={lIn}
@@ -169,11 +167,12 @@ export default function ColorWheelScreen() {
         <Text style={{ fontWeight: '700', marginBottom: 6 }}>Selected Color</Text>
         <View style={{ width: '100%', height: 44, borderRadius: 8, backgroundColor: selectedColor, borderWidth: 1, borderColor: '#ddd' }} />
         <Text style={{ fontWeight: '700', marginTop: 16, marginBottom: 6 }}>{selectedScheme[0].toUpperCase() + selectedScheme.slice(1)} swatches</Text>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
+        <View style={{ flexDirection: 'row' }}>
           {schemeColors.map((c, i) => (
             <View key={i} style={{
               flex: 1, height: 40, borderRadius: 8, backgroundColor: c, borderWidth: 1, borderColor: '#ddd',
-              opacity: i === activeIdx ? 1 : 0.95
+              opacity: i === activeIdx ? 1 : 0.95,
+              marginRight: i < schemeColors.length - 1 ? 8 : 0
             }} />
           ))}
         </View>
