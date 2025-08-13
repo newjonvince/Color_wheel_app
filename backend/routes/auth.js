@@ -12,6 +12,7 @@ const {
   passwordResetLimiter, 
   emailVerificationLimiter 
 } = require('../middleware/rateLimiting');
+const { authenticateToken } = require('../middleware/auth');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
 const { generateSecureToken, createSessionData } = require('../utils/jwt');
 const emailService = require('../services/emailService');
