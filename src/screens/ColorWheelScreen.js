@@ -3,8 +3,37 @@
 
 import React, { useMemo, useRef, useState } from 'react';
 import { Dimensions, Platform, View, Text, TextInput, Pressable } from 'react-native';
-import FullColorWheel, { SCHEME_COUNTS, SCHEME_OFFSETS } from '../components/FullColorWheel';
 import { getColorScheme, hexToHsl, hslToHex } from '../utils/color';
+
+// Safe import of FullColorWheel with fallback
+let FullColorWheel, SCHEME_COUNTS, SCHEME_OFFSETS;
+try {
+  const FullColorWheelModule = require('../components/FullColorWheel');
+  FullColorWheel = FullColorWheelModule.default;
+  SCHEME_COUNTS = FullColorWheelModule.SCHEME_COUNTS;
+  SCHEME_OFFSETS = FullColorWheelModule.SCHEME_OFFSETS;
+} catch (error) {
+  console.warn('FullColorWheel failed to load, using fallback:', error);
+  // Fallback component
+  FullColorWheel = React.forwardRef((props, ref) => (
+    <View style={{ 
+      width: props.size || 300, 
+      height: props.size || 300, 
+      borderRadius: (props.size || 300) / 2,
+      backgroundColor: '#f0f0f0',
+      justifyContent: 'center',
+      alignItems: 'center',
+      borderWidth: 2,
+      borderColor: '#ddd'
+    }}>
+      <Text style={{ color: '#666', textAlign: 'center' }}>
+        Color Wheel{'\n'}Loading...
+      </Text>
+    </View>
+  ));
+  SCHEME_COUNTS = { complementary: 2, analogous: 3, triadic: 3, tetradic: 4, monochromatic: 4 };
+  SCHEME_OFFSETS = { complementary: [0, 180], analogous: [0, 30, 60], triadic: [0, 120, 240], tetradic: [0, 90, 180, 270], monochromatic: [0, 0, 0, 0] };
+}
 
 const { width: screenWidth } = Dimensions.get('window');
 const WHEEL_SIZE = Math.min(screenWidth * 0.9, 380);
