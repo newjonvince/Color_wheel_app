@@ -49,7 +49,8 @@ router.post('/matches', authenticateToken, async (req, res) => {
       [colorMatchId, userId, base_color, scheme, JSON.stringify(cleaned), title || `${scheme} palette`, description || '', privacy, is_locked, locked_color]
     );
 
-    const [saved] = await query(`SELECT id, user_id, base_color, scheme, colors, title, description, privacy, is_locked, locked_color, created_at, updated_at FROM color_matches WHERE id = ?`, [colorMatchId]);
+    const result = await query(`SELECT id, user_id, base_color, scheme, colors, title, description, privacy, is_locked, locked_color, created_at, updated_at FROM color_matches WHERE id = ?`, [colorMatchId]);
+    const saved = result.rows[0];
     saved.colors = JSON.parse(saved.colors);
     res.status(201).json({ ok: true, data: saved });
   } catch (e) {

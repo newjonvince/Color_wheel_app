@@ -5,11 +5,13 @@
 // - Correct payloads for legacy images endpoints
 
 import axios from 'axios';
+import * as SecureStore from 'expo-secure-store';
 
+// Prioritize production API URL for device builds
 const base =
   process.env.EXPO_PUBLIC_API_BASE_URL ||
   process.env.API_BASE_URL ||
-  'http://localhost:3000';
+  (__DEV__ ? 'http://localhost:3000' : 'https://fashion-color-wheel-production.up.railway.app');
 
 export const API_BASE = base.endsWith('/api') ? base : `${base}/api`;
 
@@ -18,8 +20,38 @@ const api = axios.create({
   timeout: 20000,
 });
 
+const TOKEN_KEY = 'fashion_color_wheel_auth_token';
+
 let authToken = null;
-export const setToken = (t) => { authToken = t; };
+
+// Initialize token from secure storage on app start
+const initializeToken = async () => {
+  try {
+    const storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
+    if (storedToken) {
+      authToken = storedToken;
+    }
+  } catch (error) {
+    console.warn('Failed to load stored auth token:', error);
+  }
+};
+
+// Initialize token on module load
+initializeToken();
+
+export const setToken = async (t) => { 
+  authToken = t; 
+  try {
+    if (t) {
+      await SecureStore.setItemAsync(TOKEN_KEY, t);
+    } else {
+      await SecureStore.deleteItemAsync(TOKEN_KEY);
+    }
+  } catch (error) {
+    console.warn('Failed to store auth token:', error);
+  }
+};
+
 export const getToken = () => authToken;
 
 function withAuthHeaders(extra = {}) {
@@ -170,11 +202,30 @@ export const getCommunityFeed = async (cursor = null) => {
   return data;
 };
 
+// ---- Feature health check ----
+export const ping = async () => {
+  try {
+    // Quick health check: test auth profile + colors endpoint
+    const healthPromises = [
+      api.get('/health', withAuthHeaders()).catch(() => ({ data: { status: 'offline' } })),
+      api.get('/colors/validate', { hex: '#FF0000' }, withAuthHeaders()).catch(() => ({ data: { valid: false } }))
+    ];
+    
+    const [healthResult] = await Promise.allSettled(healthPromises);
+    return {
+      online: healthResult.status === 'fulfilled' && healthResult.value?.data?.status !== 'offline',
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    return { online: false, error: error.message, timestamp: new Date().toISOString() };
+  }
+};
+
 // ---- Authentication endpoints ----
 export const login = async (email, password) => {
   const { data } = await api.post('/auth/login', { email, password });
   if (data.token) {
-    setToken(data.token);
+    await setToken(data.token);
   }
   return data;
 };
@@ -182,7 +233,7 @@ export const login = async (email, password) => {
 export const register = async (userData) => {
   const { data } = await api.post('/auth/register', userData);
   if (data.token) {
-    setToken(data.token);
+    await setToken(data.token);
   }
   return data;
 };
@@ -190,7 +241,7 @@ export const register = async (userData) => {
 export const demoLogin = async () => {
   const { data } = await api.post('/auth/demo-login');
   if (data.token) {
-    setToken(data.token);
+    await setToken(data.token);
   }
   return data;
 };
@@ -201,7 +252,7 @@ export const logout = async () => {
   } catch (error) {
     console.warn('Logout API call failed:', error);
   }
-  setToken(null);
+  await setToken(null);
 };
 
 export const getUserProfile = async () => {
@@ -209,8 +260,8 @@ export const getUserProfile = async () => {
   return data;
 };
 
-export const clearToken = () => {
-  setToken(null);
+export const clearToken = async () => {
+  await setToken(null);
 };
 
 // ---- Export default object ----
@@ -219,6 +270,8 @@ const ApiService = {
   API_BASE, setToken, getToken, clearToken,
   // generic
   get, post, put, delete: del, _delete,
+  // health
+  ping,
   // auth
   login, register, demoLogin, logout, getUserProfile,
   // images

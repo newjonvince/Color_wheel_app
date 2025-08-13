@@ -276,18 +276,20 @@ export default forwardRef(function FullColorWheel({
 
   // Tapping a handle focuses it (for numeric inputs / keyboard nudges)
   const tap = Gesture.Tap().onStart((e) => {
+    'worklet';
     const idx = nearestHandle(e.x, e.y);
     activeIdx.value = idx;
-    if (typeof onActiveHandleChange === 'function') runOnJS(onActiveHandleChange)(idx);
+    if (typeof onActiveHandleChange === 'function') callJS(onActiveHandleChange, idx);
     emitPalette();
   });
 
   // Pan gesture updates angle + saturation of active handle
   const gesture = Gesture.Pan()
     .onBegin((e) => {
+      'worklet';
       const idx = nearestHandle(e.x, e.y);
       activeIdx.value = idx;
-      if (typeof onActiveHandleChange === 'function') runOnJS(onActiveHandleChange)(idx);
+      if (typeof onActiveHandleChange === 'function') callJS(onActiveHandleChange, idx);
       emitPalette();
     })
     .onChange((e) => {
