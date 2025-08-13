@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
 require('dotenv').config();
@@ -15,13 +16,21 @@ const { initializeTables, healthCheck } = require('./config/database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const HOST = process.env.HOST || '0.0.0.0'; // Railway requires binding to 0.0.0.0
 
 // CRITICAL: Trust proxy for Railway deployment
 // Without this, req.ip will be the proxy's IP and all users share limits
 app.set('trust proxy', 1);
 
+// Railway optimizations
+app.set('x-powered-by', false); // Remove Express signature for security
+app.set('etag', 'strong'); // Enable strong ETags for better caching
+
 // Security middleware
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+
+// Response compression for better performance (Railway optimization)
+app.use(compression());
 
 // CORS configuration - safe parsing + TestFlight/Expo web support
 const parseOrigins = (raw) =>
@@ -136,15 +145,7 @@ app.get('/healthz', async (req, res) => {
   }
 });
 
-// Request logging middleware for debugging
-app.use('/api', (req, res, next) => {
-  console.log(`🔍 API Request: ${req.method} ${req.originalUrl} from ${req.ip}`);
-  console.log(`🔍 Headers:`, JSON.stringify(req.headers, null, 2));
-  if (req.body && Object.keys(req.body).length > 0) {
-    console.log(`🔍 Body:`, JSON.stringify(req.body, null, 2));
-  }
-  next();
-});
+// Duplicate logging middleware removed - already handled above
 
 // API routes
 app.use('/api/auth', authRoutes);
@@ -178,14 +179,14 @@ app.use((err, req, res, next) => {
 });
 
 // Start server with graceful shutdown (Railway)
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, HOST, () => {
   console.log('// Fashion Color Wheel Backend Server');
   console.log('// Production-ready Express.js API with MySQL, authentication, and rate limiting');
-  console.log('// Updated: All Railway deployment warnings fixed');
+  console.log('// Updated: All Railway deployment warnings fixed + Database schema aligned');
   console.log('📱 Environment:', process.env.NODE_ENV);
   console.log('🔗 Health check: http://localhost:' + PORT + '/health');
-  console.log('✨ All warnings fixed - clean deployment!');
-  console.log(`🚀 API up on ${PORT}`);
+  console.log('✨ All warnings fixed + schema aligned - clean deployment!');
+  console.log(`🚀 API up on ${HOST}:${PORT}`);
   
   // Initialize database tables asynchronously (non-blocking with timeout)
   const dbInitTimeout = setTimeout(() => {

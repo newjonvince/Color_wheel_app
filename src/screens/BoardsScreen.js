@@ -70,8 +70,8 @@ export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch,
   }, [loadBoardsAndMatches]);
 
   // Memoized privacy partitions
-  const publicMatches = useMemo(() => colorMatches.filter(m => (m.isPublic ?? (m.privacy === 'public'))), [colorMatches]);
-  const privateMatches = useMemo(() => colorMatches.filter(m => !(m.isPublic ?? (m.privacy === 'public'))), [colorMatches]);
+  const publicMatches = useMemo(() => colorMatches.filter(m => m.privacy === 'public'), [colorMatches]);
+  const privateMatches = useMemo(() => colorMatches.filter(m => m.privacy === 'private'), [colorMatches]);
 
   const getMainFolderColorMatches = useCallback((privacy) => (
     privacy === 'public' ? publicMatches : privateMatches
@@ -147,7 +147,7 @@ export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch,
       const colorMatch = {
         baseColor,
         scheme: uploadScheme,
-        isPublic: uploadPrivacy === 'public',
+
         colors: extractedPalette, // Use actual extracted colors
         title: uploadTitle || 'Extracted Color Match',
         image: selectedImageUri,

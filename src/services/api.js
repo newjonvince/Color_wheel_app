@@ -135,6 +135,29 @@ export const createColorMatch = async (body) => {
   const { data } = await api.post('/colors/matches', body, withAuthHeaders());
   return data;
 };
+
+export const getColorMatches = async (params = {}) => {
+  const queryString = new URLSearchParams(params).toString();
+  const url = `/colors/matches${queryString ? `?${queryString}` : ''}`;
+  const { data } = await api.get(url, withAuthHeaders());
+  return data;
+};
+
+export const getColorMatch = async (id) => {
+  const { data } = await api.get(`/colors/matches/${id}`, withAuthHeaders());
+  return data;
+};
+
+export const updateColorMatch = async (id, body) => {
+  const { data } = await api.put(`/colors/matches/${id}`, body, withAuthHeaders());
+  return data;
+};
+
+export const deleteColorMatch = async (id) => {
+  const { data } = await api.delete(`/colors/matches/${id}`, withAuthHeaders());
+  return data;
+};
+
 export const validateHex = async (hex) => {
   const { data } = await api.post('/colors/validate', { hex }, withAuthHeaders());
   return data;
@@ -201,7 +224,7 @@ const ApiService = {
   // images
   startImageExtractSession, sampleImageColor, closeImageExtractSession, extractColorsFromImage,
   // colors
-  createColorMatch, validateHex,
+  createColorMatch, getColorMatches, getColorMatch, updateColorMatch, deleteColorMatch, validateHex,
   // community
   getCommunityFeed,
 };

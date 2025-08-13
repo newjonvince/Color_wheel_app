@@ -22,10 +22,14 @@ router.post('/validate', (req, res) => {
 
 router.post('/matches', authenticateToken, async (req, res) => {
   try {
-    let { base_color, scheme, colors, title, description, is_public } = req.body || {};
-    if (typeof is_public !== 'boolean' && typeof req.body?.privacy === 'string') {
-      is_public = req.body.privacy === 'public';
+    let { base_color, scheme, colors, title, description, isPublic, privacy, isLocked, lockedColor } = req.body || {};
+    
+    // Map frontend fields to database schema
+    if (typeof privacy !== 'string') {
+      privacy = (isPublic === true || isPublic === 'true') ? 'public' : 'private';
     }
+    const is_locked = isLocked === true || isLocked === 'true' ? 1 : 0;
+    const locked_color = lockedColor || null;
 
     base_color = (base_color || '').toUpperCase();
     if (!isValidHexColor(base_color)) return res.status(400).json({ ok: false, error: 'Invalid base_color HEX' });
@@ -40,12 +44,12 @@ router.post('/matches', authenticateToken, async (req, res) => {
     const colorMatchId = uuidv4();
     
     const insert = await query(
-      `INSERT INTO color_matches (id, user_id, base_color, scheme, colors, title, description, is_public)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [colorMatchId, userId, base_color, scheme, JSON.stringify(cleaned), title || `${scheme} palette`, description || '', !!is_public]
+      `INSERT INTO color_matches (id, user_id, base_color, scheme, colors, title, description, privacy, is_locked, locked_color)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [colorMatchId, userId, base_color, scheme, JSON.stringify(cleaned), title || `${scheme} palette`, description || '', privacy, is_locked, locked_color]
     );
 
-    const [saved] = await query(`SELECT id, user_id, base_color, scheme, colors, title, description, is_public, created_at, updated_at FROM color_matches WHERE id = ?`, [colorMatchId]);
+    const [saved] = await query(`SELECT id, user_id, base_color, scheme, colors, title, description, privacy, is_locked, locked_color, created_at, updated_at FROM color_matches WHERE id = ?`, [colorMatchId]);
     saved.colors = JSON.parse(saved.colors);
     res.status(201).json({ ok: true, data: saved });
   } catch (e) {
@@ -64,8 +68,9 @@ router.get('/matches', authenticateToken, async (req, res) => {
     let params = [userId];
     
     if (is_public !== undefined) {
-      whereClause += ' AND is_public = ?';
-      params.push(is_public === 'true');
+      const privacy_filter = is_public === 'true' ? 'public' : 'private';
+      whereClause += ' AND privacy = ?';
+      params.push(privacy_filter);
     }
     
     if (scheme && ALLOWED_SCHEMES.has(scheme)) {
@@ -74,7 +79,7 @@ router.get('/matches', authenticateToken, async (req, res) => {
     }
     
     const matches = await query(`
-      SELECT id, user_id, base_color, scheme, colors, title, description, is_public, created_at, updated_at 
+      SELECT id, user_id, base_color, scheme, colors, title, description, privacy, is_locked, locked_color, created_at, updated_at 
       FROM color_matches 
       ${whereClause}
       ORDER BY created_at DESC 
@@ -100,9 +105,9 @@ router.get('/matches/:id', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     
     const result = await query(`
-      SELECT id, user_id, base_color, scheme, colors, title, description, is_public, created_at, updated_at 
+      SELECT id, user_id, base_color, scheme, colors, title, description, privacy, is_locked, locked_color, created_at, updated_at 
       FROM color_matches 
-      WHERE id = ? AND (user_id = ? OR is_public = true)
+      WHERE id = ? AND (user_id = ? OR privacy = 'public')
     `, [id, userId]);
     
     if (result.rows.length === 0) {
@@ -124,7 +129,14 @@ router.put('/matches/:id', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.user.userId;
-    let { base_color, scheme, colors, title, description, is_public } = req.body || {};
+    let { base_color, scheme, colors, title, description, isPublic, privacy, isLocked, lockedColor } = req.body || {};
+    
+    // Map frontend fields to database schema
+    if (typeof privacy !== 'string' && isPublic !== undefined) {
+      privacy = (isPublic === true || isPublic === 'true') ? 'public' : 'private';
+    }
+    const is_locked = isLocked === true || isLocked === 'true' ? 1 : 0;
+    const locked_color = lockedColor || null;
     
     // Verify ownership
     const existing = await query('SELECT user_id FROM color_matches WHERE id = ?', [id]);
@@ -167,7 +179,9 @@ router.put('/matches/:id', authenticateToken, async (req, res) => {
     if (colors) { updates.push('colors = ?'); params.push(colors); }
     if (title !== undefined) { updates.push('title = ?'); params.push(title); }
     if (description !== undefined) { updates.push('description = ?'); params.push(description); }
-    if (is_public !== undefined) { updates.push('is_public = ?'); params.push(!!is_public); }
+    if (privacy !== undefined) { updates.push('privacy = ?'); params.push(privacy); }
+    if (isLocked !== undefined) { updates.push('is_locked = ?'); params.push(is_locked); }
+    if (lockedColor !== undefined) { updates.push('locked_color = ?'); params.push(locked_color); }
     
     if (updates.length === 0) {
       return res.status(400).json({ ok: false, error: 'No fields to update' });
@@ -179,7 +193,7 @@ router.put('/matches/:id', authenticateToken, async (req, res) => {
     
     // Return updated record
     const updated = await query(`
-      SELECT id, user_id, base_color, scheme, colors, title, description, is_public, created_at, updated_at 
+      SELECT id, user_id, base_color, scheme, colors, title, description, privacy, is_locked, locked_color, created_at, updated_at 
       FROM color_matches WHERE id = ?
     `, [id]);
     
@@ -222,7 +236,7 @@ router.get('/public', async (req, res) => {
   try {
     const { limit = 20, offset = 0, scheme } = req.query;
     
-    let whereClause = 'WHERE is_public = true';
+    let whereClause = 'WHERE privacy = \'public\'';
     let params = [];
     
     if (scheme && ALLOWED_SCHEMES.has(scheme)) {
@@ -231,7 +245,7 @@ router.get('/public', async (req, res) => {
     }
     
     const matches = await query(`
-      SELECT cm.id, cm.base_color, cm.scheme, cm.colors, cm.title, cm.description, cm.created_at,
+      SELECT cm.id, cm.base_color, cm.scheme, cm.colors, cm.title, cm.description, cm.privacy, cm.is_locked, cm.locked_color, cm.created_at,
              u.username, u.id as user_id
       FROM color_matches cm
       JOIN users u ON cm.user_id = u.id

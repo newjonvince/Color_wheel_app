@@ -217,26 +217,27 @@ async function initializeTables() {
     await query('SELECT 1 as test');
     console.log('✅ Database connection verified');
 
-    // Complete users table schema with all required columns
+    // Complete users table schema matching Railway production
     await query(`
       CREATE TABLE IF NOT EXISTS users (
-        id CHAR(36) PRIMARY KEY,
-        username VARCHAR(50) UNIQUE NOT NULL,
-        email VARCHAR(255) UNIQUE NOT NULL,
+        id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
+        email VARCHAR(255) NOT NULL,
+        username VARCHAR(50) NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         location VARCHAR(100),
-        birthday_month INT,
+        birthday_month VARCHAR(20),
         birthday_day INT,
         birthday_year INT,
-        gender VARCHAR(20),
-        email_verified BOOLEAN DEFAULT FALSE,
-        notifications BOOLEAN DEFAULT TRUE,
-        share_usage BOOLEAN DEFAULT FALSE,
+        gender VARCHAR(50),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_email (email),
-        INDEX idx_username (username),
-        INDEX idx_created (created_at)
+        is_active TINYINT(1) DEFAULT 1,
+        email_verified TINYINT(1) DEFAULT 0,
+        email_verified_at TIMESTAMP NULL,
+        UNIQUE KEY email (email),
+        UNIQUE KEY username (username),
+        INDEX idx_users_email (email),
+        INDEX idx_users_username (username)
       ) ENGINE=InnoDB
     `);
 
@@ -254,70 +255,75 @@ async function initializeTables() {
 
     await query(`
       CREATE TABLE IF NOT EXISTS color_matches (
-        id CHAR(36) PRIMARY KEY,
-        user_id CHAR(36) NOT NULL,
+        id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
         base_color VARCHAR(7) NOT NULL,
-        scheme VARCHAR(50) NOT NULL,
+        scheme VARCHAR(20) NOT NULL,
         colors JSON NOT NULL,
         title VARCHAR(255),
         description TEXT,
-        is_public BOOLEAN DEFAULT FALSE,
+        privacy VARCHAR(10) DEFAULT 'private',
+        is_locked TINYINT(1) DEFAULT 0,
+        locked_color VARCHAR(7),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        INDEX idx_user_created (user_id, created_at),
-        INDEX idx_public_created (is_public, created_at)
+        INDEX idx_color_matches_user_id (user_id),
+        INDEX idx_color_matches_privacy (privacy),
+        INDEX idx_color_matches_created_at (created_at)
       ) ENGINE=InnoDB
     `);
 
-    // Boards table for organizing color collections
+    // Boards table for organizing color collections (matching Railway schema)
     await query(`
       CREATE TABLE IF NOT EXISTS boards (
-        id CHAR(36) PRIMARY KEY,
-        user_id CHAR(36) NOT NULL,
+        id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
         name VARCHAR(100) NOT NULL,
-        type ENUM('private', 'public') DEFAULT 'private',
-        scheme VARCHAR(50),
+        type VARCHAR(20) NOT NULL,
+        scheme VARCHAR(20),
         description TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        INDEX idx_user_type (user_id, type),
-        INDEX idx_scheme (scheme)
+        INDEX idx_boards_user_id (user_id)
       ) ENGINE=InnoDB
     `);
 
-    // Board items linking color matches to boards
+    // Board items linking color matches to boards (matching Railway schema)
     await query(`
       CREATE TABLE IF NOT EXISTS board_items (
-        id CHAR(36) PRIMARY KEY,
-        board_id CHAR(36) NOT NULL,
-        color_match_id CHAR(36) NOT NULL,
+        id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
+        board_id VARCHAR(36) NOT NULL,
+        color_match_id VARCHAR(36) NOT NULL,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (board_id) REFERENCES boards(id) ON DELETE CASCADE,
         FOREIGN KEY (color_match_id) REFERENCES color_matches(id) ON DELETE CASCADE,
-        UNIQUE KEY unique_board_item (board_id, color_match_id),
-        INDEX idx_board_added (board_id, added_at)
+        INDEX color_match_id (color_match_id),
+        INDEX idx_board_items_board_id (board_id)
       ) ENGINE=InnoDB
     `);
 
-    // User sessions for JWT token management
+    // User sessions for JWT token management (matching Railway schema)
     await query(`
       CREATE TABLE IF NOT EXISTS user_sessions (
-        id CHAR(36) PRIMARY KEY,
-        user_id CHAR(36) NOT NULL,
-        jti CHAR(36) UNIQUE NOT NULL,
-        session_token VARCHAR(255),
+        id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        session_token VARCHAR(255) NOT NULL,
         expires_at TIMESTAMP NOT NULL,
-        ip_address VARCHAR(45),
-        user_agent TEXT,
-        revoked_at TIMESTAMP NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-        INDEX idx_user_expires (user_id, expires_at),
-        INDEX idx_jti (jti),
-        INDEX idx_expires (expires_at)
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        jti VARCHAR(36) NOT NULL,
+        revoked_at TIMESTAMP NULL COMMENT 'When session was revoked (NULL = active)',
+        ip_address VARCHAR(45) NULL COMMENT 'IP address when session was created',
+        user_agent TEXT NULL COMMENT 'User agent when session was created',
+        CONSTRAINT uk_user_sessions_jti UNIQUE (jti),
+        CONSTRAINT fk_user_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE,
+        INDEX idx_user_sessions_auth (jti, user_id, expires_at, revoked_at),
+        INDEX idx_user_sessions_cleanup (expires_at, revoked_at),
+        INDEX idx_user_sessions_expires_at (expires_at),
+        INDEX idx_user_sessions_jti (jti),
+        INDEX idx_user_sessions_token (session_token),
+        INDEX idx_user_sessions_user_id (user_id)
       ) ENGINE=InnoDB
     `);
 
