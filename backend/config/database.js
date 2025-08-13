@@ -339,8 +339,40 @@ async function initializeTables() {
         INDEX idx_user_sessions_cleanup (expires_at, revoked_at),
         INDEX idx_user_sessions_expires_at (expires_at),
         INDEX idx_user_sessions_jti (jti),
-        INDEX idx_user_sessions_token (session_token),
         INDEX idx_user_sessions_user_id (user_id)
+      ) ENGINE=InnoDB
+    `);
+
+    // Email verifications table (required by verify-email endpoint)
+    await query(`
+      CREATE TABLE IF NOT EXISTS email_verifications (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id VARCHAR(36) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        token VARCHAR(255) NOT NULL UNIQUE,
+        expires_at TIMESTAMP NOT NULL,
+        verified_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        CONSTRAINT fk_email_verifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE,
+        INDEX idx_email_verifications_token (token),
+        INDEX idx_email_verifications_user_id (user_id),
+        INDEX idx_email_verifications_expires_at (expires_at)
+      ) ENGINE=InnoDB
+    `);
+
+    // Password resets table (for completeness)
+    await query(`
+      CREATE TABLE IF NOT EXISTS password_resets (
+        id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
+        user_id VARCHAR(36) NOT NULL,
+        token VARCHAR(255) NOT NULL UNIQUE,
+        expires_at TIMESTAMP NOT NULL,
+        used_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
+        CONSTRAINT fk_password_resets_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE,
+        INDEX idx_password_resets_token (token),
+        INDEX idx_password_resets_user_id (user_id),
+        INDEX idx_password_resets_expires_at (expires_at)
       ) ENGINE=InnoDB
     `);
 
