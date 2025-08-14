@@ -1,38 +1,73 @@
-// services/api.js — fixed for community + extractor
+// services/api.js — updated for session-based image extraction
 // - Uses EXPO_PUBLIC_API_BASE_URL (falls back to API_BASE_URL), appends /api if missing
-// - Adds generic http helpers: get/post/put/delete used by Community screens
-// - Keeps session-based image extractor helpers
-// - Correct payloads for legacy images endpoints
+// - Adds session-based image extractor helpers
+// - Correct payloads for backend endpoints
 
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-// Prioritize production API URL for device builds
-const base =
-  process.env.EXPO_PUBLIC_API_BASE_URL ||
-  process.env.API_BASE_URL ||
-  (__DEV__ ? 'http://localhost:3000' : 'https://fashion-color-wheel-production.up.railway.app');
+const HOST = (process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || '').replace(/\/+$/, '');
+const API_ROOT = /\/api$/.test(HOST) ? HOST : `${HOST}/api`;
+let _token = null;
+export function setAuthToken(t){ _token = t; }
+function auth(){ const h={Accept:'application/json'}; if(_token)h.Authorization=`Bearer ${_token}`; return h; }
 
-export const API_BASE = base.endsWith('/api') ? base : `${base}/api`;
+export async function extractColorsFromImage(uri){
+  const form = new FormData();
+  form.append('image', { uri, name: 'upload.jpg', type: 'image/jpeg' });
+  const res = await fetch(`${API_ROOT}/images/extract-colors`, { method:'POST', headers:auth(), body:form });
+  if(!res.ok) throw new Error(`extract-colors ${res.status}`);
+  return res.json(); // { dominant, palette, imageId, ... }
+}
+
+export async function sampleColorAt(imageId, nx, ny, radius=0.02){
+  const res = await fetch(`${API_ROOT}/images/sample-color`, {
+    method:'POST',
+    headers:{ ...auth(), 'Content-Type':'application/json' },
+    body: JSON.stringify({ imageId, x:nx, y:ny, units:'norm', radius })
+  });
+  if(!res.ok) throw new Error(`sample-color ${res.status}`);
+  return res.json(); // { hex }
+}
+
+export async function closeImageSession(imageId){
+  try{
+    await fetch(`${API_ROOT}/images/close-session`, {
+      method:'POST', headers:{ ...auth(), 'Content-Type':'application/json' },
+      body: JSON.stringify({ imageId })
+    });
+  } catch(_) {}
+}
 
 const api = axios.create({
-  baseURL: API_BASE,
+  baseURL: API_ROOT,
   timeout: 20000,
 });
 
 const TOKEN_KEY = 'fashion_color_wheel_auth_token';
+const LEGACY_TOKEN_KEY = 'authToken'; // App.js legacy key
 
 let authToken = null;
 
-// Initialize token from secure storage on app start
+// Initialize token from secure storage on app start - read both keys, prefer new one
 const initializeToken = async () => {
   try {
-    const storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
+    // Try new key first
+    let storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
+    if (!storedToken) {
+      // Fallback to legacy key from App.js
+      storedToken = await SecureStore.getItemAsync(LEGACY_TOKEN_KEY);
+      if (storedToken) {
+        // Migrate to new key
+        await SecureStore.setItemAsync(TOKEN_KEY, storedToken);
+        await SecureStore.deleteItemAsync(LEGACY_TOKEN_KEY);
+      }
+    }
     if (storedToken) {
       authToken = storedToken;
     }
   } catch (error) {
-    console.warn('Failed to load stored auth token:', error);
+    if (__DEV__) console.warn('Failed to load stored auth token:', error);
   }
 };
 
@@ -45,10 +80,12 @@ export const setToken = async (t) => {
     if (t) {
       await SecureStore.setItemAsync(TOKEN_KEY, t);
     } else {
+      // Clear both keys on logout to prevent silent logout state
       await SecureStore.deleteItemAsync(TOKEN_KEY);
+      await SecureStore.deleteItemAsync(LEGACY_TOKEN_KEY);
     }
   } catch (error) {
-    console.warn('Failed to store auth token:', error);
+    if (__DEV__) console.warn('Failed to store auth token:', error);
   }
 };
 
@@ -118,8 +155,8 @@ export const startImageExtractSession = async (imageUri, {
   };
 
   const { data } = await _try(
-    () => _postMultipart('/images/extract-session', form, uploadCfg),
-    () => _postMultipart('/images/extract-colors', form, uploadCfg),
+    () => _postMultipart('/api/images/extract-session', form, uploadCfg),
+    () => _postMultipart('/api/images/extract-colors', form, uploadCfg),
   );
 
   const token = data.imageId || data.sessionId || data.token;
@@ -136,10 +173,10 @@ export const sampleImageColor = async (sessionToken, {
   else { throw new Error('Provide either {x,y} or normalized {nx,ny}'); }
 
   const bodyA = { sessionToken, x: sx, y: sy, normalized: useNormalized };
-  const doA = () => api.post('/images/extract-sample', bodyA, withAuthHeaders());
+  const doA = () => api.post('/api/images/extract-sample', bodyA, withAuthHeaders());
 
   const bodyB = { imageId: sessionToken, x: sx, y: sy, units: useNormalized ? 'normalized' : 'px' };
-  const doB = () => api.post('/images/sample-color', bodyB, withAuthHeaders());
+  const doB = () => api.post('/api/images/sample-color', bodyB, withAuthHeaders());
 
   const { data } = await _try(doA, doB);
   return data;
@@ -147,8 +184,8 @@ export const sampleImageColor = async (sessionToken, {
 
 export const closeImageExtractSession = async (sessionId) => {
   if (!sessionId) return { ok: true };
-  const doA = () => api.post(`/images/extract-session/${encodeURIComponent(sessionId)}/close`, {}, withAuthHeaders());
-  const doB = () => api.post('/images/close-session', { imageId: sessionId }, withAuthHeaders());
+  const doA = () => api.post(`/api/images/extract-session/${encodeURIComponent(sessionId)}/close`, {}, withAuthHeaders());
+  const doB = () => api.post('/api/images/close-session', { imageId: sessionId }, withAuthHeaders());
   const { data } = await _try(doA, doB);
   return data;
 };
@@ -173,6 +210,14 @@ export const getColorMatches = async (params = {}) => {
   const url = `/colors/matches${queryString ? `?${queryString}` : ''}`;
   const { data } = await api.get(url, withAuthHeaders());
   return data;
+};
+
+// App.js expects an array; provide a thin alias that unwraps { ok, data }
+export const getUserColorMatches = async (params = {}) => {
+  const queryString = new URLSearchParams(params).toString();
+  const url = `/colors/matches${queryString ? `?${queryString}` : ''}`;
+  const { data } = await api.get(url, withAuthHeaders());
+  return Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
 };
 
 export const getColorMatch = async (id) => {
@@ -267,19 +312,25 @@ export const clearToken = async () => {
 // ---- Export default object ----
 const ApiService = {
   // env
-  API_BASE, setToken, getToken, clearToken,
+  baseURL: API_ROOT, setToken, getToken, clearToken,
+  // auth token management
+  setAuthToken,
   // generic
   get, post, put, delete: del, _delete,
   // health
   ping,
   // auth
   login, register, demoLogin, logout, getUserProfile,
-  // images
-  startImageExtractSession, sampleImageColor, closeImageExtractSession, extractColorsFromImage,
+  // session-based image extraction (new)
+  extractColorsFromImage, sampleColorAt, closeImageSession,
+  // legacy image methods (preserved)
+  startImageExtractSession, sampleImageColor, closeImageExtractSession,
   // colors
-  createColorMatch, getColorMatches, getColorMatch, updateColorMatch, deleteColorMatch, validateHex,
+  createColorMatch, getColorMatches, getUserColorMatches, getColorMatch, updateColorMatch, deleteColorMatch, validateHex,
   // community
   getCommunityFeed,
 };
+
+// getUserColorMatches is now defined above with proper parameter support
 
 export default ApiService;

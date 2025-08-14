@@ -9,22 +9,12 @@
 //  - initialSlots?: number (default 5)
 //  - onComplete?(result: { imageUri, slots: string[], activeIndex: number }): void
 //  - onColorExtracted?(hex: string): void  // kept for backward-compat (uses slots[0])
-//  - onCreateCollage?(imageAssetOrUri, slotsArray): void
-//  - onClose(): void
 //
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  Image,
-  Dimensions,
-  Alert,
-  PanResponder,
-} from 'react-native';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { View, Text, Image, TouchableOpacity, Alert, StyleSheet, Dimensions, PanResponder } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import ApiService from '../services/api';
+import * as Haptics from 'expo-haptics';
+import ApiService from '../services/api'; // <- uses the new file
 
 // Safe wrapper to log real errors + stack traces from component layer
 const safe = (fn, context = 'unknown') => (...args) => {
@@ -39,7 +29,8 @@ const safe = (fn, context = 'unknown') => (...args) => {
 };
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-const MAGNIFIER_SIZE = 80;
+// Match your screenshots (large lens) while staying responsive
+const MAGNIFIER_SIZE = Math.max(110, Math.min(Math.round(screenWidth * 0.28), 160));
 const DEFAULT_SLOTS = 5;
 
 // Small throttle helper (leading, trailing last call after delay)
@@ -63,33 +54,75 @@ function useThrottle(fn, ms) {
 }
 
 export default function CoolorsColorExtractor({
+  mode = 'gallery',                // 'camera' | 'gallery'
   initialImageUri,
   initialSlots = DEFAULT_SLOTS,
   onComplete,
-  onColorExtracted,
+  onColorExtracted,                // optional: uses slots[0]
   onCreateCollage,
   onClose,
 }) {
-  const [selectedImage, setSelectedImage] = useState(null); // { uri, width?, height? }
+  const [selectedImage, setSelectedImage] = useState(null); // { uri }
   const [isLoading, setIsLoading] = useState(false);
 
-  // layout state
-  const [imageLayout, setImageLayout] = useState({ width: 0, height: 0, x: 0, y: 0 });
+  const [serverPalette, setServerPalette] = useState([]); // reference palette from the server
+  const [imageToken, setImageToken] = useState(null);     // <-- session id from backend
+  const [sampleRadius, setSampleRadius] = useState(0.02); // 2% of min dimension
+
+  // layout and magnifier
+  const [imageLayout, setImageLayout] = useState({ width: 0, height: 0 });
   const [magnifierPosition, setMagnifierPosition] = useState({ x: screenWidth / 2, y: screenHeight / 2 });
 
   // palette & slots
-  const [serverPalette, setServerPalette] = useState([]); // reference palette from the server
   const [slots, setSlots] = useState(Array.from({ length: initialSlots }, () => '#CCCCCC'));
   const [activeIndex, setActiveIndex] = useState(0);
 
-  // current color under magnifier (not yet committed unless we are on active slot)
-  const [liveColor, setLiveColor] = useState('#FF6B6B'); // color under magnifier
-  const [magnifierColor, setMagnifierColor] = useState('#FF6B6B'); // actual magnifier display colors
+  // live color under magnifier
+  const [magnifierColor, setMagnifierColor] = useState('#FF6B6B');
+  const [liveColor, setLiveColor] = useState('#FF6B6B');
+  const [previousColor, setPreviousColor] = useState('#FF6B6B');
 
-  // --- helpers -----------------------------------------------------------------
   const fallbackPalette = useMemo(() => (
     ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FECA57','#FF9FF3','#54A0FF','#5F27CD','#00D2D3','#FF9F43','#10AC84','#EE5A24','#0984E3','#A29BFE','#6C5CE7']
   ), []);
+
+  const fillSlots = useCallback((paletteArr) => {
+    const base = Array.from({ length: Math.max(initialSlots, 1) }, (_, i) => paletteArr[i % paletteArr.length] || '#CCCCCC');
+    setSlots(base);
+    setMagnifierColor(base[0] || '#808080');
+  }, [initialSlots]);
+
+  // --- permissions and picking --------------------------------------------------
+  const ensurePermissions = useCallback(async () => {
+    if (initialImageUri) return true;
+    if (mode === 'camera') {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Camera permission is required to take a photo.');
+        return false;
+      }
+    } else {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Photo library permission is required to pick an image.');
+        return false;
+      }
+    }
+    return true;
+  }, [mode, initialImageUri]);
+
+  const launchPicker = useCallback(async () => {
+    if (initialImageUri) {
+      return { cancelled: false, assets: [{ uri: initialImageUri }] };
+    }
+    if (mode === 'camera') {
+      return await ImagePicker.launchCameraAsync({ quality: 0.9 });
+    }
+    return await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.9,
+    });
+  }, [mode, initialImageUri]);
 
   const fillSlotsFromPalette = useCallback((paletteArr) => {
     const base = Array.from({ length: Math.max(initialSlots, 1) }, (_, i) => paletteArr[i % paletteArr.length] || '#CCCCCC');
@@ -97,50 +130,65 @@ export default function CoolorsColorExtractor({
     setLiveColor(base[0] || '#808080');
   }, [initialSlots]);
 
-  const callServerSample = useCallback(async (uri, normX, normY, radius = 0.02) => {
+  const callServerSample = useCallback(async (imageId, normX, normY, radius = 0.02) => {
     // Throttled elsewhere; keep this fast.
     try {
+      if (!imageId) throw new Error('No image session');
       if (ApiService?.sampleColorAt) {
-        return await ApiService.sampleColorAt(uri, normX, normY, radius);
+        return await ApiService.sampleColorAt(imageId, normX, normY, radius);
       }
-      // FIXED: Safe optional-chaining to prevent crashes if ApiService is undefined
+      // Safe optional-chaining to prevent crashes if ApiService is undefined
       const apiBase = ApiService?.baseURL?.replace(/\/?$/, '');
       if (!apiBase) {
         throw new Error('API base URL unavailable');
       }
-      const url = `${apiBase}/images/sample-color`;
-      const form = new FormData();
-      form.append('image', { uri, name: 'upload.jpg', type: 'image/jpeg' });
-      form.append('x', String(normX));
-      form.append('y', String(normY));
-      form.append('radius', String(radius));
-      const headers = { Accept: 'application/json' };
-      if (ApiService.token) headers['Authorization'] = `Bearer ${ApiService.token}`;
-      const res = await fetch(url, { method: 'POST', headers, body: form });
+      const url = `${apiBase}/api/images/sample-color`;
+      const headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
+      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ imageId, x: normX, y: normY, units:'norm', radius }) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json(); // { hex }
     } catch (e) {
       console.error('🚨 CoolorsColorExtractor Error in callServerSample:', e);
       console.error('Stack trace:', e.stack);
-      console.error('Args:', { uri, normX, normY, radius });
+      console.error('Args:', { imageId, normX, normY, radius });
+      
+      // Check for session expiration (404 error)
+      if (e.message && e.message.includes('404')) {
+        Alert.alert(
+          'Session expired',
+          'Session expired — Reopen image',
+          [
+            { text: 'OK', onPress: () => onClose?.() }
+          ]
+        );
+        return { hex: liveColor }; // Return current color to avoid UI flicker
+      }
+      
       // fallback: snap to nearest server palette color
       const approx = nearestFromPalette(liveColor, serverPalette.length ? serverPalette : fallbackPalette);
       return { hex: approx };
     }
   }, [fallbackPalette, liveColor, serverPalette]);
 
-  // simple distance on RGB
   const hexToRgb = (hex) => {
     const h = hex.replace('#','');
     const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
     return {r,g,b};
   };
+
+  const deltaE = (hex1, hex2) => {
+    const rgb1 = hexToRgb(hex1);
+    const rgb2 = hexToRgb(hex2);
+    // Simple RGB distance (approximates Delta-E for haptic threshold)
+    return Math.sqrt((rgb1.r-rgb2.r)**2 + (rgb1.g-rgb2.g)**2 + (rgb1.b-rgb2.b)**2);
+  };
+
   const nearestFromPalette = (hex, palette) => {
     const {r, g, b} = hexToRgb(hex);
     let best = palette[0], bestD = Infinity;
     palette.forEach(p => {
-      const q = hexToRgb(p);
-      const d = (r-q.r)**2 + (g-q.g)**2 + (b-q.b)**2;
+      const {r:pr, g:pg, b:pb} = hexToRgb(p);
+      const d = Math.sqrt((r-pr)**2 + (g-pg)**2 + (b-pb)**2);
       if (d < bestD) { bestD = d; best = p; }
     });
     return best;
@@ -159,7 +207,8 @@ export default function CoolorsColorExtractor({
         }
       });
       
-      const { dominant, palette } = response;
+      const { dominant, palette, imageId } = response;
+      setImageToken(imageId || null);
       const basePalette = (Array.isArray(palette) && palette.length) ? palette : fallbackPalette;
       setServerPalette(basePalette);
       fillSlotsFromPalette(basePalette);
@@ -204,13 +253,33 @@ export default function CoolorsColorExtractor({
     }
   }, [onClose, processImage]);
 
-  // mount init
   useEffect(() => {
     (async () => {
-      if (initialImageUri) await processImage({ uri: initialImageUri });
-      else await pickImage();
+      if (initialImageUri) {
+        await processImage({ uri: initialImageUri });
+        return;
+      }
+      // Honor `mode` and request permissions
+      const perm = await (mode === 'camera'
+        ? ImagePicker.requestCameraPermissionsAsync()
+        : ImagePicker.requestMediaLibraryPermissionsAsync());
+      if (perm.status !== 'granted') {
+        Alert.alert('Permission needed', mode === 'camera'
+          ? 'Camera permission is required to take a photo.'
+          : 'Photo library permission is required to pick an image.');
+        onClose?.();
+        return;
+      }
+      const result = await (mode === 'camera'
+        ? ImagePicker.launchCameraAsync({ quality: 0.9 })
+        : ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.9 }));
+      if (!result?.canceled && result.assets?.[0]) await processImage(result.assets[0]);
+      else onClose?.();
     })();
-  }, [initialImageUri, pickImage, processImage]);
+  }, [initialImageUri, mode, onClose, processImage]);
+
+  // Close server session on unmount
+  useEffect(() => () => { if (imageToken) ApiService.closeImageSession(imageToken); }, [imageToken]);
 
   // --- magnifier interactions ---------------------------------------------------
   const updateActiveSlot = useCallback((hex) => {
@@ -224,14 +293,29 @@ export default function CoolorsColorExtractor({
 
   const throttledSample = useThrottle(async (nx, ny) => {
     if (!selectedImage) return;
-    const out = await callServerSample(selectedImage.uri, nx, ny, 0.02);
+    const out = await callServerSample(imageToken, nx, ny, sampleRadius);
     const hex = (out && out.hex) ? out.hex.toUpperCase() : liveColor;
+    
+    // Haptic feedback on significant color change (ΔE threshold)
+    const colorDelta = deltaE(hex, previousColor);
+    if (colorDelta > 30) { // Threshold for haptic tick (RGB distance ~30)
+      try {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (_) {} // Ignore haptic errors
+      setPreviousColor(hex);
+    }
     
     // Update both the magnifier display color and the active slot
     setMagnifierColor(hex);
     setLiveColor(hex);
-    updateActiveSlot(hex);
-  }, 120); // ~8 samples/sec
+    
+    // Update the active slot in the palette
+    setSlots(prev => {
+      const next = [...prev];
+      next[activeIndex] = hex;
+      return next;
+    });
+  }, 125); // ~8Hz
 
   const extractAt = useCallback((x, y) => {
     const w = imageLayout.width || 1;
@@ -330,7 +414,7 @@ export default function CoolorsColorExtractor({
             <View
               style={[styles.magnifier, { left: magnifierPosition.x - MAGNIFIER_SIZE / 2, top: magnifierPosition.y - MAGNIFIER_SIZE / 2 }]}
             >
-              <View style={[styles.magnifierInner, { borderColor: '#FFFFFF', borderWidth: 3 }]}>
+              <View style={[styles.magnifierInner, { borderColor: '#FFFFFF', borderWidth: 6 }]}>
                 {/* Colored center circle showing the sampled color */}
                 <View style={[styles.magnifierCenter, { backgroundColor: magnifierColor }]}>
                   <View style={styles.crosshair}>
@@ -338,6 +422,10 @@ export default function CoolorsColorExtractor({
                     <View style={[styles.crosshairVertical, { backgroundColor: '#FFFFFF' }]} />
                   </View>
                 </View>
+              </View>
+              {/* Hex readout below magnifier */}
+              <View style={styles.hexReadout}>
+                <Text style={styles.hexText}>{magnifierColor}</Text>
               </View>
             </View>
           </View>
@@ -395,6 +483,25 @@ const styles = StyleSheet.create({
   crosshair: { position: 'absolute', width: 22, height: 22, justifyContent: 'center', alignItems: 'center' },
   crosshairHorizontal: { position: 'absolute', width: 22, height: 2, backgroundColor: '#FFFFFF' },
   crosshairVertical: { position: 'absolute', width: 2, height: 22, backgroundColor: '#FFFFFF' },
+  
+  // Hex readout below magnifier
+  hexReadout: { 
+    position: 'absolute', 
+    top: MAGNIFIER_SIZE + 8, 
+    left: -20, 
+    right: -20, 
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.75)', 
+    borderRadius: 12, 
+    paddingVertical: 6, 
+    paddingHorizontal: 12 
+  },
+  hexText: { 
+    color: '#FFFFFF', 
+    fontSize: 14, 
+    fontWeight: '600', 
+    fontFamily: 'monospace' 
+  },
 
   paletteBar: { backgroundColor: '#fff', paddingVertical: 16, paddingHorizontal: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e6e6e6' },
   slotsRow: { flexDirection: 'row', alignItems: 'center' },

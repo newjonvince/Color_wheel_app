@@ -24,26 +24,9 @@ const linking = {
 };
 
 // --- Optional crash/error reporting (Sentry) -------------------------------
+// Removed conditional Sentry require to avoid Metro/package issues
+// To re-enable: install sentry-expo and uncomment the initialization code
 let sentryReady = false;
-try {
-  // Only attempt to load Sentry when DSN is set (Expo: app.json -> expo.extra.public.SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN)
-  const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
-  if (SENTRY_DSN) {
-    // Lazy require so local dev without the dep won't crash
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const Sentry = require('sentry-expo');
-    Sentry.init({
-      dsn: SENTRY_DSN,
-      enableInExpoDevelopment: true,
-      debug: __DEV__,
-      tracesSampleRate: 0.1,
-    });
-    sentryReady = true;
-    console.log('✅ Sentry initialized');
-  }
-} catch (e) {
-  console.warn('Sentry init skipped:', e?.message);
-}
 
 // --- Global JS error + unhandled rejection handling -----------------------
 let isErrorHandlerActive = false;
@@ -67,12 +50,12 @@ const setupErrorHandling = () => {
         }
       };
       ErrorUtils.setGlobalHandler(jsErrorHandler);
-      console.log('✅ JS error handler configured');
+      if (__DEV__) console.log('✅ JS error handler configured');
     } else {
-      console.warn('⚠️ ErrorUtils not available - JS error handling disabled');
+      if (__DEV__) console.warn('⚠️ ErrorUtils not available - JS error handling disabled');
     }
   } catch (setupError) {
-    console.error('Failed to setup error handling:', setupError);
+    if (__DEV__) console.error('Failed to setup error handling:', setupError);
   }
 
   // Unhandled promise rejections (helps catch silent network/auth errors)
@@ -80,12 +63,12 @@ const setupErrorHandling = () => {
     const onUnhandledRejection = (event) => {
       const reason = event?.reason || event;
       const msg = (reason && (reason.message || reason.toString?.())) || 'Unknown rejection';
-      console.error('🚨 Unhandled promise rejection:', msg);
+      if (__DEV__) console.error('🚨 Unhandled promise rejection:', msg);
     };
     // @ts-ignore - RN ships a DOM-like event API for globalThis in Hermes
     globalThis.addEventListener?.('unhandledrejection', onUnhandledRejection);
   } catch (e) {
-    console.warn('Unhandled rejection handler not installed:', e?.message);
+    if (__DEV__) console.warn('Unhandled rejection handler not installed:', e?.message);
   }
 };
 
@@ -98,16 +81,16 @@ if (!__DEV__) {
 
 // --- Screens ---------------------------------------------------------------
 // Enhanced import debugging for persistent crash
-console.log('🔍 App.js: Starting screen imports...');
+if (__DEV__) console.log('🔍 App.js: Starting screen imports...');
 
 let ColorWheelScreen;
 try {
-  console.log('🔍 App.js: Importing ColorWheelScreen...');
+  if (__DEV__) console.log('🔍 App.js: Importing ColorWheelScreen...');
   ColorWheelScreen = require('./src/screens/ColorWheelScreen').default;
-  console.log('✅ App.js: ColorWheelScreen imported successfully');
+  if (__DEV__) console.log('✅ App.js: ColorWheelScreen imported successfully');
 } catch (error) {
-  console.error('🚨 App.js: ColorWheelScreen import failed:', error);
-  console.error('🚨 App.js: Error details:', error?.message, error?.stack);
+  if (__DEV__) console.error('🚨 App.js: ColorWheelScreen import failed:', error);
+  if (__DEV__) console.error('🚨 App.js: Error details:', error?.message, error?.stack);
   // Fallback component to prevent app crash
   ColorWheelScreen = ({ onLogout }) => (
     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
@@ -127,18 +110,76 @@ try {
   );
 }
 
+// UnavailableScreen fallback component
+const UnavailableScreen = ({ screenName, onLogout }) => (
+  <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+    <Text style={{ fontSize: 18, color: '#ff6b6b', textAlign: 'center', marginBottom: 20 }}>
+      {screenName} Unavailable
+    </Text>
+    <Text style={{ fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20 }}>
+      This feature is temporarily unavailable. Please try restarting the app.
+    </Text>
+    <TouchableOpacity 
+      style={{ backgroundColor: '#007AFF', padding: 12, borderRadius: 8 }}
+      onPress={() => onLogout?.()}
+    >
+      <Text style={{ color: 'white', fontSize: 16 }}>Back to Login</Text>
+    </TouchableOpacity>
+  </View>
+);
+
+// Safe screen imports with fallbacks
+let BoardsScreen, DiscoverScreen, CommunityFeedScreen, LoginScreen, SignUpScreen, UserSettingsScreen;
+
 try {
-  console.log('🔍 App.js: Importing other screens...');
-  var BoardsScreen = require('./src/screens/BoardsScreen').default;
-  var DiscoverScreen = require('./src/screens/DiscoverScreen').default;
-  var CommunityFeedScreen = require('./src/screens/CommunityFeedScreen').default;
-  var LoginScreen = require('./src/screens/LoginScreen').default;
-  var SignUpScreen = require('./src/screens/SignUpScreen').default;
-  var UserSettingsScreen = require('./src/screens/UserSettingsScreen').default;
-  console.log('✅ App.js: All other screens imported successfully');
+  if (__DEV__) console.log('🔍 App.js: Importing BoardsScreen...');
+  BoardsScreen = require('./src/screens/BoardsScreen').default;
 } catch (error) {
-  console.error('🚨 App.js: Other screens import failed:', error);
+  if (__DEV__) console.error('🚨 App.js: BoardsScreen import failed:', error);
+  BoardsScreen = (props) => <UnavailableScreen screenName="Boards" {...props} />;
 }
+
+try {
+  if (__DEV__) console.log('🔍 App.js: Importing DiscoverScreen...');
+  DiscoverScreen = require('./src/screens/DiscoverScreen').default;
+} catch (error) {
+  if (__DEV__) console.error('🚨 App.js: DiscoverScreen import failed:', error);
+  DiscoverScreen = (props) => <UnavailableScreen screenName="Discover" {...props} />;
+}
+
+try {
+  if (__DEV__) console.log('🔍 App.js: Importing CommunityFeedScreen...');
+  CommunityFeedScreen = require('./src/screens/CommunityFeedScreen').default;
+} catch (error) {
+  if (__DEV__) console.error('🚨 App.js: CommunityFeedScreen import failed:', error);
+  CommunityFeedScreen = (props) => <UnavailableScreen screenName="Community" {...props} />;
+}
+
+try {
+  if (__DEV__) console.log('🔍 App.js: Importing LoginScreen...');
+  LoginScreen = require('./src/screens/LoginScreen').default;
+} catch (error) {
+  if (__DEV__) console.error('🚨 App.js: LoginScreen import failed:', error);
+  LoginScreen = (props) => <UnavailableScreen screenName="Login" {...props} />;
+}
+
+try {
+  if (__DEV__) console.log('🔍 App.js: Importing SignUpScreen...');
+  SignUpScreen = require('./src/screens/SignUpScreen').default;
+} catch (error) {
+  if (__DEV__) console.error('🚨 App.js: SignUpScreen import failed:', error);
+  SignUpScreen = (props) => <UnavailableScreen screenName="Sign Up" {...props} />;
+}
+
+try {
+  if (__DEV__) console.log('🔍 App.js: Importing UserSettingsScreen...');
+  UserSettingsScreen = require('./src/screens/UserSettingsScreen').default;
+} catch (error) {
+  if (__DEV__) console.error('🚨 App.js: UserSettingsScreen import failed:', error);
+  UserSettingsScreen = (props) => <UnavailableScreen screenName="Settings" {...props} />;
+}
+
+if (__DEV__) console.log('✅ App.js: All screens imported with fallbacks');
 
 // Components
 import ErrorBoundary from './src/components/ErrorBoundary';
@@ -186,17 +227,14 @@ export default function App() {
       // Give native modules a tick to be ready
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Read token from SecureStore first, fallback to AsyncStorage
+      // Read token from SecureStore first, fallback to AsyncStorage (handle old & new keys)
       let token = null;
       try {
-        if (SecureStore?.getItemAsync) {
-          token = await SecureStore.getItemAsync('authToken');
-        }
-        if (!token) {
-          token = await AsyncStorage.getItem('authToken');
-        }
+        token = await SecureStore?.getItemAsync?.('fashion_color_wheel_auth_token');
+        if (!token) token = await SecureStore?.getItemAsync?.('authToken');
+        if (!token) token = await AsyncStorage.getItem('authToken');
       } catch (storageError) {
-        console.error('📱 Storage access error:', storageError?.message);
+        if (__DEV__) console.error('📱 Storage access error:', storageError?.message);
         // Continue without token
       }
 
@@ -252,11 +290,12 @@ export default function App() {
   // Safe token clearing helper
   const clearStoredToken = async () => {
     try {
-      await SecureStore?.deleteItemAsync?.('authToken');
+      await SecureStore?.deleteItemAsync?.('fashion_color_wheel_auth_token');
+      await SecureStore?.deleteItemAsync?.('authToken'); // legacy
       await AsyncStorage.removeItem('authToken');
-      console.log('🗑️ Stored token cleared');
+      if (__DEV__) console.log('🗑️ Stored token cleared');
     } catch (error) {
-      console.error('Failed to clear token:', error?.message);
+      if (__DEV__) console.error('Failed to clear token:', error?.message);
     }
   };
 
@@ -286,17 +325,17 @@ export default function App() {
       // Try to load from backend first
       try {
         const backendMatches = typeof ApiService.getUserColorMatches === 'function'
-  ? await ApiService.getUserColorMatches()
-  : null;
-        if (backendMatches) {
-        console.log('App: Loaded', backendMatches?.length || 0, 'color matches from backend');
-        setSavedColorMatches(backendMatches || []);
-        // Also save to local storage as backup
-        if (backendMatches?.length > 0) {
-          await AsyncStorage.setItem(key, JSON.stringify(backendMatches));
+          ? await ApiService.getUserColorMatches()
+          : null;
+        if (Array.isArray(backendMatches)) {
+          if (__DEV__) console.log('App: Loaded', backendMatches.length, 'color matches from backend');
+          setSavedColorMatches(backendMatches);
+          // Also save to local storage as backup
+          if (backendMatches.length > 0) {
+            await AsyncStorage.setItem(key, JSON.stringify(backendMatches));
+          }
+          return;
         }
-        return;
-      }
       } catch (backendError) {
         console.warn('Backend load failed, falling back to local storage:', backendError);
       }

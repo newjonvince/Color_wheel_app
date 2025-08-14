@@ -26,6 +26,7 @@ export default function ColorWheelScreen() {
   
   // Camera/Gallery extractor modal state
   const [showExtractor, setShowExtractor] = useState(false);
+  const [extractorMode, setExtractorMode] = useState('gallery'); // 'camera' or 'gallery'
   const [extractorImageUri, setExtractorImageUri] = useState(null);
 
   // HSL input state is derived from Selected Color (active handle will update wheel though)
@@ -75,29 +76,14 @@ export default function ColorWheelScreen() {
   };
 
   // Camera/Gallery handlers
-  const openCamera = () => {
-    if (wheelRef.current?.openCamera) {
-      wheelRef.current.openCamera();
-    } else {
-      // Fallback: open extractor modal for camera
-      setExtractorImageUri(null);
-      setShowExtractor(true);
-    }
-  };
+  // Camera/Gallery handlers
+  const openCamera = () => { setExtractorMode('camera'); setExtractorImageUri(null); setShowExtractor(true); };
+  const openGallery = () => { setExtractorMode('gallery'); setExtractorImageUri(null); setShowExtractor(true); };
 
-  const openGallery = () => {
-    if (wheelRef.current?.openGallery) {
-      wheelRef.current.openGallery();
-    } else {
-      // Fallback: open extractor modal for gallery
-      setExtractorImageUri(null);
-      setShowExtractor(true);
-    }
-  };
-
-  // Handle extractor completion
-  const handleExtractorComplete = (extractedPalette) => {
-    if (extractedPalette && extractedPalette.length > 0) {
+  // Handle extractor completion (object with { imageUri, slots, activeIndex })
+  const handleExtractorComplete = (result) => {
+    const extractedPalette = Array.isArray(result?.slots) ? result.slots : [];
+    if (extractedPalette.length > 0) {
       const newBaseHex = extractedPalette[0];
       setBaseHex(newBaseHex);
       setSelectedColor(newBaseHex);
@@ -270,12 +256,17 @@ export default function ColorWheelScreen() {
       {/* Color Extractor Modal */}
       {showExtractor && (
         <CoolorsColorExtractor
-          visible={showExtractor}
+          visible={showExtractor}              // prop is harmless – component ignores unknown props
+          mode={extractorMode}                 // NEW
           initialImageUri={extractorImageUri}
-          initialSlots={4}
+          initialSlots={5}
           navigateOnActions={false}
           onComplete={handleExtractorComplete}
           onCancel={() => {
+            setShowExtractor(false);
+            setExtractorImageUri(null);
+          }}
+          onClose={() => {
             setShowExtractor(false);
             setExtractorImageUri(null);
           }}

@@ -131,7 +131,7 @@ router.post('/extract-colors', upload.single('image'), extractColorsHandler);
 
 router.post('/sample-color', express.json(), async (req, res) => {
   try {
-    const { imageId, x, y, units } = req.body || {};
+    const { imageId, x, y, units = 'norm', radius = 0 } = req.body || {};
     if (!imageId || (typeof x !== 'number') || (typeof y !== 'number')) return res.status(400).json({ error: 'Missing imageId, x, or y' });
     const rec = getImage(imageId);
     if (!rec) return res.status(404).json({ error: 'Image token not found or expired' });
@@ -140,18 +140,44 @@ router.post('/sample-color', express.json(), async (req, res) => {
     const isPx = units === 'px';
     const px = isPx ? x : x * width;
     const py = isPx ? y : y * height;
+    const rpx = Math.max(0, Math.min(
+      24, // hard cap for performance
+      Math.round(isPx ? radius : (radius || 0) * Math.min(width, height))
+    ));
 
     const left = Math.floor(clamp(px, 0, width - 1));
     const top  = Math.floor(clamp(py, 0, height - 1));
 
     if (rec.raw && rec.raw.length === width * height * 4) {
-      const idx = (top * width + left) * 4;
-      const hex = toHex(rec.raw[idx], rec.raw[idx+1], rec.raw[idx+2]);
-      return res.json({ hex, x: left, y: top, width, height });
+      if (rpx <= 1) {
+        const idx = (top * width + left) * 4;
+        const hex = toHex(rec.raw[idx], rec.raw[idx+1], rec.raw[idx+2]);
+        return res.json({ hex, x: left, y: top, width, height });
+      } else {
+        let rs=0, gs=0, bs=0, n=0;
+        for (let yy = top - rpx; yy <= top + rpx; yy++) {
+          if (yy < 0 || yy >= height) continue;
+          for (let xx = left - rpx; xx <= left + rpx; xx++) {
+            if (xx < 0 || xx >= width) continue;
+            const idx = (yy * width + xx) * 4;
+            rs += rec.raw[idx]; gs += rec.raw[idx+1]; bs += rec.raw[idx+2]; n++;
+          }
+        }
+        const hex = toHex(Math.round(rs/n), Math.round(gs/n), Math.round(bs/n));
+        return res.json({ hex, x: left, y: top, width, height, r: rpx });
+      }
     }
 
-    const pixel = await sharp(rec.buffer).extract({ left, top, width: 1, height: 1 }).ensureAlpha().raw().toBuffer();
-    const hex = toHex(pixel[0], pixel[1], pixel[2]);
+    // Fallback when raw is not cached: extract a small block and average
+    const k = Math.max(1, 2 * rpx + 1);
+    const { data, info } = await sharp(rec.buffer)
+      .extract({ left: Math.max(0, left - rpx), top: Math.max(0, top - rpx),
+                 width: Math.min(k, width), height: Math.min(k, height) })
+      .ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let rs=0, gs=0, bs=0;
+    for (let i = 0; i < data.length; i += 4) { rs += data[i]; gs += data[i+1]; bs += data[i+2]; }
+    const area = info.width * info.height;
+    const hex = toHex(Math.round(rs/area), Math.round(gs/area), Math.round(bs/area));
     return res.json({ hex, x: left, y: top, width, height });
   } catch (e) {
     console.error('sample-color failed:', e);
