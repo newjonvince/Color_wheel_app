@@ -430,7 +430,13 @@ export default function App() {
           console.log('🎨 Reanimated ready:', typeof global.__reanimatedWorkletInit === 'function');
         }
       } catch (error) {
-        console.error('🚨 Startup initialization error:', error);
+        if (__DEV__) console.error('Failed to fetch user data:', error);
+        if (error.isAuthError) {
+          // Clear user state and let auth flow handle login
+          setUser(null);
+          return;
+        }
+        // Don't set user data on error, but don't crash either
       }
     } catch (error) {
       console.error('🚨 App.js: handleLoginSuccess error:', error);

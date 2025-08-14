@@ -55,13 +55,18 @@ export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch,
 
       setBoards(boardsData);
       setColorMatches(matchesData);
-    } catch (e) {
-      console.error('loadBoardsAndMatches:', e);
-      setColorMatches(savedColorMatches || []);
+    } catch (error) {
+      console.error('Failed to load boards and matches:', error);
+      if (error.isAuthError) {
+        // Navigate to login instead of showing unavailable
+        navigation.navigate('Login');
+        return;
+      }
+      setError('Failed to load data. Please try again.');
     } finally {
       setLoading(false);
     }
-  }, [currentUser, savedColorMatches]);
+  }, [currentUser, savedColorMatches, navigation]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

@@ -18,11 +18,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = process.env.HOST || '0.0.0.0'; // Railway requires binding to 0.0.0.0
 
-// CRITICAL: Trust proxy for Railway deployment
+// Disable ETag to prevent 304 responses globally
+app.set('etag', false);
+
+// Trust proxy for Railway deployment
 // Without this, req.ip will be the proxy's IP and all users share limits
 app.set('trust proxy', 1);
 
 // Railway optimizations
+app.set('x-powered-by', false); // Remove Express signature for security
 app.set('x-powered-by', false); // Remove Express signature for security
 app.set('etag', 'strong'); // Enable strong ETags for better caching
 

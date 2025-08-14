@@ -47,6 +47,21 @@ const api = axios.create({
   timeout: 20000,
 });
 
+// Add response interceptor for 401 handling
+api.interceptors.response.use(
+  r => r,
+  async (err) => {
+    const status = err?.response?.status;
+    if (status === 401) {
+      // clear tokens so app sees "logged out"
+      await setToken(null);
+      // attach a recognizable error message
+      err.isAuthError = true;
+    }
+    return Promise.reject(err);
+  }
+);
+
 const TOKEN_KEY = 'fashion_color_wheel_auth_token';
 const LEGACY_TOKEN_KEY = 'authToken'; // App.js legacy key
 
@@ -74,8 +89,8 @@ const initializeToken = async () => {
   }
 };
 
-// Initialize token on module load
-initializeToken();
+// Initialize token on module load and export a readiness promise
+export const ready = initializeToken();
 
 export const setToken = async (t) => { 
   authToken = t; 
