@@ -12,13 +12,7 @@ let _token = null;
 export function setAuthToken(t){ _token = t; }
 function auth(){ const h={Accept:'application/json'}; if(_token)h.Authorization=`Bearer ${_token}`; return h; }
 
-export async function extractColorsFromImage(uri){
-  const form = new FormData();
-  form.append('image', { uri, name: 'upload.jpg', type: 'image/jpeg' });
-  const res = await fetch(`${API_ROOT}/images/extract-colors`, { method:'POST', headers:auth(), body:form });
-  if(!res.ok) throw new Error(`extract-colors ${res.status}`);
-  return res.json(); // { dominant, palette, imageId, ... }
-}
+
 
 export async function sampleColorAt(imageId, nx, ny, radius=0.02){
   const res = await fetch(`${API_ROOT}/images/sample-color`, {

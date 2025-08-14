@@ -258,19 +258,23 @@ async function initializeTables() {
         id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
         user_id VARCHAR(36) NOT NULL,
         base_color VARCHAR(7) NOT NULL,
-        scheme VARCHAR(20) NOT NULL,
+        scheme ENUM('analogous', 'complementary', 'split-complementary', 'triadic', 'tetradic', 'monochromatic') NOT NULL,
         colors JSON NOT NULL,
         title VARCHAR(255),
         description TEXT,
-        privacy VARCHAR(10) DEFAULT 'private',
+        privacy ENUM('public', 'private') DEFAULT 'private' NOT NULL,
         is_locked TINYINT(1) DEFAULT 0,
         locked_color VARCHAR(7),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT colors_valid CHECK (JSON_VALID(colors)),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
         INDEX idx_color_matches_user_id (user_id),
         INDEX idx_color_matches_privacy (privacy),
-        INDEX idx_color_matches_created_at (created_at)
+        INDEX idx_color_matches_created_at (created_at),
+        INDEX idx_color_matches_scheme (scheme),
+        INDEX idx_color_matches_user_created (user_id ASC, created_at DESC),
+        INDEX idx_color_matches_privacy_created (privacy ASC, created_at DESC)
       ) ENGINE=InnoDB
     `);
 
