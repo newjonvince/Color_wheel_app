@@ -118,7 +118,7 @@ router.get('/matches', authenticateToken, async (req, res) => {
       ${whereClause}
       ORDER BY created_at DESC 
       LIMIT ? OFFSET ?
-    `, [...params, lim, off]);
+    `, [...params, parseInt(lim, 10), parseInt(off, 10)]);
     
     // Normalize DB results and safely parse JSON colors
     const matches = rows(result);
@@ -298,7 +298,7 @@ router.get('/public', async (req, res) => {
       ${whereClause}
       ORDER BY cm.created_at DESC 
       LIMIT ? OFFSET ?
-    `, [...params, lim, off]));
+    `, [...params, parseInt(lim, 10), parseInt(off, 10)]));
     
     // Parse JSON colors for each match
     list.forEach(match => {
