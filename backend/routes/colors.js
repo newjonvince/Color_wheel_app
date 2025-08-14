@@ -112,13 +112,14 @@ router.get('/matches', authenticateToken, async (req, res) => {
       params.push(scheme);
     }
     
-    const result = await query(`
-      SELECT id, user_id, base_color, scheme, colors, title, description, privacy, is_locked, locked_color, created_at, updated_at 
-      FROM color_matches 
+    const sql = `
+      SELECT id, user_id, base_color, scheme, colors, title, description, privacy, is_locked, locked_color, created_at, updated_at
+      FROM color_matches
       ${whereClause}
-      ORDER BY created_at DESC 
-      LIMIT ? OFFSET ?
-    `, [...params, parseInt(lim, 10), parseInt(off, 10)]);
+      ORDER BY created_at DESC
+      LIMIT ${lim} OFFSET ${off}
+    `;
+    const result = await query(sql, params);
     
     // Normalize DB results and safely parse JSON colors
     const matches = rows(result);
@@ -290,15 +291,16 @@ router.get('/public', async (req, res) => {
       params.push(scheme);
     }
     
-    const list = rows(await query(`
+    const sql = `
       SELECT cm.id, cm.base_color, cm.scheme, cm.colors, cm.title, cm.description, cm.privacy, cm.is_locked, cm.locked_color, cm.created_at,
              u.username, u.id as user_id
       FROM color_matches cm
       JOIN users u ON cm.user_id = u.id
       ${whereClause}
-      ORDER BY cm.created_at DESC 
-      LIMIT ? OFFSET ?
-    `, [...params, parseInt(lim, 10), parseInt(off, 10)]));
+      ORDER BY cm.created_at DESC
+      LIMIT ${lim} OFFSET ${off}
+    `;
+    const list = rows(await query(sql, params));
     
     // Parse JSON colors for each match
     list.forEach(match => {
