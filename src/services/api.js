@@ -215,7 +215,11 @@ export const createColorMatch = async (body) => {
 };
 
 export const getColorMatches = async (params = {}) => {
-  const queryString = new URLSearchParams(params).toString();
+  // Filter out undefined/empty params to avoid sending them to server
+  const cleanParams = Object.fromEntries(
+    Object.entries(params).filter(([_, value]) => value !== undefined && value !== '' && value !== null)
+  );
+  const queryString = new URLSearchParams(cleanParams).toString();
   const url = `/colors/matches${queryString ? `?${queryString}` : ''}`;
   const { data } = await api.get(url, withAuthHeaders());
   return data;
@@ -223,7 +227,11 @@ export const getColorMatches = async (params = {}) => {
 
 // App.js expects an array; provide a thin alias that unwraps { ok, data }
 export const getUserColorMatches = async (params = {}) => {
-  const queryString = new URLSearchParams(params).toString();
+  // Filter out undefined/empty params to avoid sending them to server
+  const cleanParams = Object.fromEntries(
+    Object.entries(params).filter(([_, value]) => value !== undefined && value !== '' && value !== null)
+  );
+  const queryString = new URLSearchParams(cleanParams).toString();
   const url = `/colors/matches${queryString ? `?${queryString}` : ''}`;
   const { data } = await api.get(url, withAuthHeaders());
   return Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);

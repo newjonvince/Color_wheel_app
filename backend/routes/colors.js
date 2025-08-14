@@ -85,10 +85,16 @@ router.post('/matches', authenticateToken, async (req, res) => {
 // GET /matches - Get user's color matches with pagination and filtering
 router.get('/matches', authenticateToken, async (req, res) => {
   try {
-    // Validate and clamp limit/offset to prevent huge queries or NaN
-    let { limit = 20, offset = 0, is_public, scheme } = req.query;
-    limit = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
-    offset = Math.max(0, parseInt(offset, 10) || 0);
+    let { limit, offset, is_public, scheme } = req.query;
+    const toInt = (v, def) => {
+      const n = Number.parseInt(v, 10);
+      return Number.isFinite(n) ? n : def;
+    };
+    let lim = toInt(limit, 20);
+    let off = toInt(offset, 0);
+    // keep things sane
+    lim = Math.max(1, Math.min(100, lim));
+    off = Math.max(0, off);
     
     const userId = req.user.userId;
     
@@ -112,7 +118,7 @@ router.get('/matches', authenticateToken, async (req, res) => {
       ${whereClause}
       ORDER BY created_at DESC 
       LIMIT ? OFFSET ?
-    `, [...params, limit, offset]);
+    `, [...params, lim, off]);
     
     // Normalize DB results and safely parse JSON colors
     const matches = rows(result);
@@ -170,11 +176,11 @@ router.put('/matches/:id', authenticateToken, async (req, res) => {
     const locked_color = lockedColor || null;
     
     // Verify ownership
-    const existing = await query('SELECT user_id FROM color_matches WHERE id = ?', [id]);
-    if (existing.rows.length === 0) {
+    const existing = rows(await query('SELECT user_id FROM color_matches WHERE id = ?', [id]));
+    if (existing.length === 0) {
       return res.status(404).json({ ok: false, error: 'Color match not found' });
     }
-    if (existing.rows[0].user_id !== userId) {
+    if (existing[0].user_id !== userId) {
       return res.status(403).json({ ok: false, error: 'Not authorized to update this color match' });
     }
     
@@ -223,13 +229,13 @@ router.put('/matches/:id', authenticateToken, async (req, res) => {
     await query(`UPDATE color_matches SET ${updates.join(', ')} WHERE id = ?`, params);
     
     // Return updated record
-    const updated = await query(`
+    const updated = rows(await query(`
       SELECT id, user_id, base_color, scheme, colors, title, description, privacy, is_locked, locked_color, created_at, updated_at 
       FROM color_matches WHERE id = ?
-    `, [id]);
+    `, [id]));
     
-    const match = updated.rows[0];
-    match.colors = JSON.parse(match.colors);
+    const match = updated[0];
+    match.colors = safeJsonParse(match.colors, []);
     
     res.json({ ok: true, data: match });
   } catch (error) {
@@ -245,11 +251,11 @@ router.delete('/matches/:id', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     
     // Verify ownership
-    const existing = await query('SELECT user_id FROM color_matches WHERE id = ?', [id]);
-    if (existing.rows.length === 0) {
+    const existing = rows(await query('SELECT user_id FROM color_matches WHERE id = ?', [id]));
+    if (existing.length === 0) {
       return res.status(404).json({ ok: false, error: 'Color match not found' });
     }
-    if (existing.rows[0].user_id !== userId) {
+    if (existing[0].user_id !== userId) {
       return res.status(403).json({ ok: false, error: 'Not authorized to delete this color match' });
     }
     
@@ -265,7 +271,16 @@ router.delete('/matches/:id', authenticateToken, async (req, res) => {
 // GET /public - Get public color matches for discovery
 router.get('/public', async (req, res) => {
   try {
-    const { limit = 20, offset = 0, scheme } = req.query;
+    let { limit, offset, scheme } = req.query;
+    const toInt = (v, def) => {
+      const n = Number.parseInt(v, 10);
+      return Number.isFinite(n) ? n : def;
+    };
+    let lim = toInt(limit, 20);
+    let off = toInt(offset, 0);
+    // keep things sane
+    lim = Math.max(1, Math.min(100, lim));
+    off = Math.max(0, off);
     
     let whereClause = 'WHERE privacy = \'public\'';
     let params = [];
@@ -275,7 +290,7 @@ router.get('/public', async (req, res) => {
       params.push(scheme);
     }
     
-    const matches = await query(`
+    const list = rows(await query(`
       SELECT cm.id, cm.base_color, cm.scheme, cm.colors, cm.title, cm.description, cm.privacy, cm.is_locked, cm.locked_color, cm.created_at,
              u.username, u.id as user_id
       FROM color_matches cm
@@ -283,14 +298,14 @@ router.get('/public', async (req, res) => {
       ${whereClause}
       ORDER BY cm.created_at DESC 
       LIMIT ? OFFSET ?
-    `, [...params, parseInt(limit), parseInt(offset)]);
+    `, [...params, lim, off]));
     
     // Parse JSON colors for each match
-    matches.rows.forEach(match => {
-      match.colors = JSON.parse(match.colors);
+    list.forEach(match => {
+      match.colors = safeJsonParse(match.colors, []);
     });
     
-    res.json({ ok: true, data: matches.rows, count: matches.rows.length });
+    res.json({ ok: true, data: list, count: list.length });
   } catch (error) {
     console.error('Get public color matches error:', error);
     res.status(500).json({ ok: false, error: 'Failed to get public color matches' });
