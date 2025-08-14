@@ -21,7 +21,14 @@ try {
 
 // Helpers
 const isMultipart = (req) => (req.headers['content-type'] || '').includes('multipart/form-data');
-const skipHealthAndPreflight = (req) => req.method === 'OPTIONS' || req.path === '/health' || req.path.startsWith('/health');
+const skipHealthAndPreflight = (req) => {
+  return req.method === 'OPTIONS' || 
+         req.path === '/health' || 
+         req.path === '/healthz' ||
+         req.path === '/api/health' ||
+         req.path.startsWith('/health') ||
+         (req.path === '/api/colors/validate' && req.method === 'GET'); // Health check endpoint
+};
 
 // Progressive delay — but skip for multipart uploads to prevent client timeouts on iOS
 const speedLimiter = slowDown({

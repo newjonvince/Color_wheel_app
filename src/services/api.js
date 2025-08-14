@@ -8,6 +8,15 @@ import * as SecureStore from 'expo-secure-store';
 
 const HOST = (process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || '').replace(/\/+$/, '');
 const API_ROOT = /\/api$/.test(HOST) ? HOST : `${HOST}/api`;
+
+// Log API base URL at startup for debugging
+if (__DEV__) {
+  console.log('🌐 API Configuration:');
+  console.log('  EXPO_PUBLIC_API_BASE_URL:', process.env.EXPO_PUBLIC_API_BASE_URL);
+  console.log('  API_BASE_URL:', process.env.API_BASE_URL);
+  console.log('  Final API_ROOT:', API_ROOT);
+}
+
 let _token = null;
 export function setAuthToken(t){ _token = t; }
 function auth(){ const h={Accept:'application/json'}; if(_token)h.Authorization=`Bearer ${_token}`; return h; }
@@ -149,8 +158,8 @@ export const startImageExtractSession = async (imageUri, {
   };
 
   const { data } = await _try(
-    () => _postMultipart('/api/images/extract-session', form, uploadCfg),
-    () => _postMultipart('/api/images/extract-colors', form, uploadCfg),
+    () => _postMultipart('/images/extract-session', form, uploadCfg),
+    () => _postMultipart('/images/extract-colors', form, uploadCfg),
   );
 
   const token = data.imageId || data.sessionId || data.token;
@@ -167,10 +176,10 @@ export const sampleImageColor = async (sessionToken, {
   else { throw new Error('Provide either {x,y} or normalized {nx,ny}'); }
 
   const bodyA = { sessionToken, x: sx, y: sy, normalized: useNormalized };
-  const doA = () => api.post('/api/images/extract-sample', bodyA, withAuthHeaders());
+  const doA = () => api.post('/images/extract-sample', bodyA, withAuthHeaders());
 
   const bodyB = { imageId: sessionToken, x: sx, y: sy, units: useNormalized ? 'normalized' : 'px' };
-  const doB = () => api.post('/api/images/sample-color', bodyB, withAuthHeaders());
+  const doB = () => api.post('/images/sample-color', bodyB, withAuthHeaders());
 
   const { data } = await _try(doA, doB);
   return data;
@@ -178,8 +187,8 @@ export const sampleImageColor = async (sessionToken, {
 
 export const closeImageExtractSession = async (sessionId) => {
   if (!sessionId) return { ok: true };
-  const doA = () => api.post(`/api/images/extract-session/${encodeURIComponent(sessionId)}/close`, {}, withAuthHeaders());
-  const doB = () => api.post('/api/images/close-session', { imageId: sessionId }, withAuthHeaders());
+  const doA = () => api.post(`/images/extract-session/${encodeURIComponent(sessionId)}/close`, {}, withAuthHeaders());
+  const doB = () => api.post('/images/close-session', { imageId: sessionId }, withAuthHeaders());
   const { data } = await _try(doA, doB);
   return data;
 };
@@ -305,18 +314,12 @@ export const clearToken = async () => {
 
 // ---- Export default object ----
 const ApiService = {
-  // env
-  baseURL: API_ROOT, setToken, getToken, clearToken,
-  // auth token management
-  setAuthToken,
-  // generic
-  get, post, put, delete: del, _delete,
-  // health
-  ping,
+  // API configuration
+  baseURL: API_ROOT,
   // auth
-  login, register, demoLogin, logout, getUserProfile,
-  // session-based image extraction (new)
-  extractColorsFromImage, sampleColorAt, closeImageSession,
+  setToken, getToken, clearToken, login, register, demoLogin, getUserProfile, updateUserProfile,
+  // image extraction
+  extractColorsFromImage,
   // legacy image methods (preserved)
   startImageExtractSession, sampleImageColor, closeImageExtractSession,
   // colors

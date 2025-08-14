@@ -13,6 +13,14 @@ router.get('/', (req, res) => {
   res.json({ ok: true, message: 'Color utilities API' });
 });
 
+// GET /validate for health checks (query param)
+router.get('/validate', (req, res) => {
+  const hex = (req.query.hex || '').trim();
+  const upper = hex.startsWith('#') ? hex.toUpperCase() : ('#' + hex.toUpperCase());
+  const valid = /^#([0-9A-F]{6}|[0-9A-F]{3})$/i.test(upper);
+  res.json({ ok: true, hex: upper, valid });
+});
+
 router.post('/validate', (req, res) => {
   const { hex } = req.body || {};
   if (!hex) return res.status(400).json({ ok: false, error: 'hex is required' });

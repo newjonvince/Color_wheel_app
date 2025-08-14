@@ -10,6 +10,9 @@ import * as SecureStore from 'expo-secure-store';
 import * as Updates from 'expo-updates';
 import ApiService from './src/services/api';
 
+// Log API base URL at app startup for debugging
+console.log('🚀 App startup - API base:', ApiService.baseURL);
+
 // Deep link support (matches app.json -> expo.scheme: "colorwheel")
 const linking = {
   prefixes: ['colorwheel://'],

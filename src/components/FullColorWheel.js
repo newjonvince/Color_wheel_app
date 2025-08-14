@@ -69,7 +69,7 @@ const callJS = (fn, ...args) => {
   }
 };
 
-export default forwardRef(function FullColorWheel({
+const FullColorWheel = forwardRef(function FullColorWheel({
   selectedFollowsActive = true,
   size,
   scheme = 'analogous',
@@ -377,3 +377,5 @@ export default forwardRef(function FullColorWheel({
     </GestureDetector>
   );
 });
+
+export default FullColorWheel;

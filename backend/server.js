@@ -147,6 +147,15 @@ app.get('/healthz', async (req, res) => {
 
 // Duplicate logging middleware removed - already handled above
 
+// Health route alias under /api for client compatibility
+app.get('/api/health', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    timestamp: new Date().toISOString(),
+    service: 'Fashion Color Wheel API'
+  });
+});
+
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/colors', colorRoutes);

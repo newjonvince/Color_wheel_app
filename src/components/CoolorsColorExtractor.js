@@ -13,6 +13,7 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, Alert, StyleSheet, Dimensions, PanResponder } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
 import ApiService from '../services/api'; // <- uses the new file
 
@@ -25,6 +26,22 @@ const safe = (fn, context = 'unknown') => (...args) => {
     console.error('Stack trace:', error.stack);
     console.error('Args:', args);
     throw error; // Re-throw to maintain error handling flow
+  }
+};
+
+// iOS image safety: Re-encode to JPEG to avoid HEIC 415 from server
+const prepareAssetForUpload = async (asset) => {
+  try {
+    // Re-encode to JPEG to avoid HEIC 415 from server
+    const manip = await ImageManipulator.manipulateAsync(
+      asset.uri,
+      [], // no transforms
+      { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
+    );
+    return { ...asset, uri: manip.uri };
+  } catch (error) {
+    console.warn('Failed to prepare asset for upload, using original:', error);
+    return asset; // Fallback to original if manipulation fails
   }
 };
 
@@ -200,8 +217,11 @@ export default function CoolorsColorExtractor({
       setSelectedImage(asset);
       console.log('CoolorsColorExtractor: Processing image with ApiService.extractColorsFromImage');
       
+      // iOS image safety: Re-encode to JPEG to avoid HEIC 415 from server
+      const assetSafe = await prepareAssetForUpload(asset);
+      
       // Use the proper ApiService method for backend extraction
-      const response = await ApiService.extractColorsFromImage(asset.uri, {
+      const response = await ApiService.extractColorsFromImage(assetSafe.uri, {
         onProgress: (progress) => {
           console.log(`Upload progress: ${progress}%`);
         }

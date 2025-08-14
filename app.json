@@ -17,7 +17,8 @@
     "extra": {
       "eas": {
         "projectId": "bdda9f6e-8e60-4d2f-882a-e1c37085af9b"
-      }
+      },
+      "EXPO_PUBLIC_API_BASE_URL": "https://colorwheelapp-production.up.railway.app"
     },
     "ios": {
       "bundleIdentifier": "com.fashioncolorwheel.app",
