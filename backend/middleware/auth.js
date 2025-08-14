@@ -1,11 +1,15 @@
 const jwt = require('jsonwebtoken');
 const { query } = require('../config/database');
 
+// normalize DB results (pg/mysql driver agnostic)
+const rows = (r) => (Array.isArray(r) ? r : (r?.rows || []));
+
 // Middleware to authenticate JWT tokens with enhanced security
 const authenticateToken = async (req, res, next) => {
   try {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    const authHeader = req.headers['authorization'] || '';
+    const [scheme, presentedToken] = authHeader.split(' ');
+    const token = /^Bearer$/i.test(scheme) ? presentedToken : authHeader.trim(); // tolerate case/format
 
     if (!token) {
       return res.status(401).json({
@@ -37,14 +41,15 @@ const authenticateToken = async (req, res, next) => {
       [decoded.jti, decoded.userId]
     );
 
-    if (sessionResult.rows.length === 0) {
+    const list = rows(sessionResult);
+    if (list.length === 0) {
       return res.status(401).json({
         error: 'Invalid token',
         message: 'Session has expired, been revoked, or is invalid'
       });
     }
 
-    const session = sessionResult.rows[0];
+    const session = list[0];
 
     // Verify token userId matches session user_id to prevent token/user mismatches
     if (decoded.userId !== session.user_id) {
@@ -56,12 +61,13 @@ const authenticateToken = async (req, res, next) => {
 
     // Add user info to request
     req.user = {
-      userId: decoded.userId,
-      email: decoded.email,
+      userId: session.user_id,
+      email: session.email,
       username: session.username,
       sessionId: session.id,
-      jti: decoded.jti
+      jti: session.jti || decoded.jti
     };
+    req.session = { id: session.id, expiresAt: session.expires_at };
 
     next();
   } catch (error) {

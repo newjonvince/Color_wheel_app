@@ -4,6 +4,18 @@ const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
 const { authenticateToken } = require('../middleware/auth');
 
+// Helper: normalize DB results (some drivers return arrays, others return {rows: []})
+const rows = (r) => (Array.isArray(r) ? r : (r?.rows || []));
+
+// Helper: safe JSON parse with fallback
+const safeJsonParse = (str, fallback = []) => {
+  try {
+    return JSON.parse(str);
+  } catch {
+    return fallback;
+  }
+};
+
 const ALLOWED_SCHEMES = new Set(['analogous','complementary','split-complementary','triadic','tetradic','monochromatic']);
 function isValidHexColor(hex){ return /^#([0-9A-F]{6}|[0-9A-F]{3})$/i.test(hex); }
 
@@ -73,7 +85,11 @@ router.post('/matches', authenticateToken, async (req, res) => {
 // GET /matches - Get user's color matches with pagination and filtering
 router.get('/matches', authenticateToken, async (req, res) => {
   try {
-    const { limit = 20, offset = 0, is_public, scheme } = req.query;
+    // Validate and clamp limit/offset to prevent huge queries or NaN
+    let { limit = 20, offset = 0, is_public, scheme } = req.query;
+    limit = Math.max(1, Math.min(100, parseInt(limit, 10) || 20));
+    offset = Math.max(0, parseInt(offset, 10) || 0);
+    
     const userId = req.user.userId;
     
     let whereClause = 'WHERE user_id = ?';
@@ -90,20 +106,21 @@ router.get('/matches', authenticateToken, async (req, res) => {
       params.push(scheme);
     }
     
-    const matches = await query(`
+    const result = await query(`
       SELECT id, user_id, base_color, scheme, colors, title, description, privacy, is_locked, locked_color, created_at, updated_at 
       FROM color_matches 
       ${whereClause}
       ORDER BY created_at DESC 
       LIMIT ? OFFSET ?
-    `, [...params, parseInt(limit), parseInt(offset)]);
+    `, [...params, limit, offset]);
     
-    // Parse JSON colors for each match
-    matches.rows.forEach(match => {
-      match.colors = JSON.parse(match.colors);
+    // Normalize DB results and safely parse JSON colors
+    const matches = rows(result);
+    matches.forEach(match => {
+      match.colors = safeJsonParse(match.colors, []);
     });
     
-    res.json({ ok: true, data: matches.rows, count: matches.rows.length });
+    res.json({ ok: true, data: matches, count: matches.length });
   } catch (error) {
     console.error('Get color matches error:', error);
     res.status(500).json({ ok: false, error: 'Failed to get color matches' });
@@ -122,12 +139,14 @@ router.get('/matches/:id', authenticateToken, async (req, res) => {
       WHERE id = ? AND (user_id = ? OR privacy = 'public')
     `, [id, userId]);
     
-    if (result.rows.length === 0) {
+    // Normalize DB results
+    const matches = rows(result);
+    if (matches.length === 0) {
       return res.status(404).json({ ok: false, error: 'Color match not found' });
     }
     
-    const match = result.rows[0];
-    match.colors = JSON.parse(match.colors);
+    const match = matches[0];
+    match.colors = safeJsonParse(match.colors, []);
     
     res.json({ ok: true, data: match });
   } catch (error) {

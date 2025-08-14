@@ -25,12 +25,19 @@ const handleValidationErrors = (req, res, next) => {
 // Helpers
 const isValidHexColor = v => /^#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})$/.test(v);
 
-// Sanitize hex color - prepend # and uppercase if needed
+// Sanitize hex color - prepend # and uppercase if needed, normalize 3-digit to 6-digit
 const sanitizeHexColor = (value) => {
   if (!value) return value;
   let hex = String(value).trim();
   if (!hex.startsWith('#')) hex = '#' + hex;
-  return hex.toUpperCase();
+  hex = hex.toUpperCase();
+  
+  // Normalize 3-digit hex to 6-digit (#ABC → #AABBCC)
+  if (hex.length === 4) {
+    hex = '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3];
+  }
+  
+  return hex;
 };
 
 // Validate and construct a proper date from birthday components
@@ -198,6 +205,11 @@ const idValidation = [
   handleValidationErrors
 ];
 
+const uuidIdValidation = [
+  param('id').isUUID().withMessage('ID must be a valid UUID'),
+  handleValidationErrors
+];
+
 // --- Profile ---
 const updateProfileValidation = [
   body('firstName').optional().isLength({ min:1, max:50 }).matches(/^[a-zA-Z\s\-']+$/).trim(),
@@ -219,5 +231,6 @@ module.exports = {
   commentValidation,
   paginationValidation,
   idValidation,
+  uuidIdValidation,
   handleValidationErrors
 };

@@ -1,7 +1,6 @@
 const express = require('express'); 
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
 const { registerValidation, loginValidation, idValidation } = require('../middleware/validation');
@@ -13,12 +12,9 @@ const {
   emailVerificationLimiter 
 } = require('../middleware/rateLimiting');
 const { authenticateToken } = require('../middleware/auth');
-const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
 const { generateSecureToken, createSessionData } = require('../utils/jwt');
 const emailService = require('../services/emailService');
 const router = express.Router();
-
-const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:19006';
 
 // Register new user
 router.post('/register', registrationLimiter, registerValidation, async (req, res) => {
@@ -207,10 +203,11 @@ router.post('/demo-login', authLimiter, async (req, res) => {
     );
     if (demoUser.rows.length === 0) {
       const hashedPassword = await bcrypt.hash('demo123', 12);
+      const userId = uuidv4();
       await query(
-        `INSERT INTO users (email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, email_verified, created_at) 
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-        ['demo@fashioncolorwheel.com', 'demo_user', hashedPassword, 'United States', 'January', 1, 1990, 'Prefer not to say', true]
+        `INSERT INTO users (id, email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, email_verified, created_at) 
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+        [userId, 'demo@fashioncolorwheel.com', 'demo_user', hashedPassword, 'United States', 'January', 1, 1990, 'Prefer not to say', true]
       );
       demoUser = await query(
         'SELECT * FROM users WHERE email = ?',

@@ -3,7 +3,7 @@
 // Crash-safe: Skia optional, all runOnJS guarded.
 
 import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
-import { View, Platform } from 'react-native';
+import { View, Platform, Text } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
@@ -11,6 +11,12 @@ import Animated, {
   withTiming,
   runOnJS,
 } from 'react-native-reanimated';
+
+// Detect whether Reanimated worklets are actually available (plugin + init)
+const REANIMATED_READY = typeof global.__reanimatedWorkletInit === 'function';
+
+// Import color helpers BEFORE Skia to ensure proper initialization order
+import { hslToHex, hexToHsl } from '../utils/color';
 
 // Try Skia; fall back gracefully if not present
 let Canvas, SkiaCircle, SweepGradient, RadialGradient, vec;
@@ -29,9 +35,6 @@ try {
   RadialGradient = () => null;
   vec = () => null;
 }
-
-// Use your existing color helpers (kept compatible with your colors.js)
-import { hslToHex, hexToHsl } from '../utils/color';
 
 // === Color-harmony definitions ===
 export const SCHEME_OFFSETS = {
@@ -69,7 +72,8 @@ const callJS = (fn, ...args) => {
   }
 };
 
-const FullColorWheel = forwardRef(function FullColorWheel({
+// The real, animated wheel (runs only when reanimated is ready)
+const FullColorWheelImpl = forwardRef(function FullColorWheel({
   selectedFollowsActive = true,
   size,
   scheme = 'analogous',
@@ -94,6 +98,12 @@ const FullColorWheel = forwardRef(function FullColorWheel({
 
   const count = SCHEME_COUNTS[scheme] || 1;
   const offsets = SCHEME_OFFSETS[scheme] || [0];
+
+  // Make count available in worklet context
+  const schemeCount = useSharedValue(count);
+  React.useEffect(() => {
+    schemeCount.value = count;
+  }, [count, schemeCount]);
 
   // 4 handles max (pre-allocated for stability)
   const handleAngles = [
@@ -216,7 +226,7 @@ const FullColorWheel = forwardRef(function FullColorWheel({
   const emitPalette = () => {
     'worklet';
     try {
-      const c = SCHEME_COUNTS[scheme] || 1;
+      const c = schemeCount.value;
       const result = [];
       for (let i = 0; i < c; i++) {
         const ang = handleAngles[i].value;
@@ -230,7 +240,7 @@ const FullColorWheel = forwardRef(function FullColorWheel({
         callJS(onHexChange, result[sel]);
       }
     } catch (e) {
-      console.warn('emitPalette error:', e);
+      callJS(console.warn, 'emitPalette error:', e);
     }
   };
 
@@ -368,14 +378,50 @@ const FullColorWheel = forwardRef(function FullColorWheel({
           ) : null}
         </Canvas>
 
-        {/* Markers (show only what the scheme needs) */}
+        {/* Markers (always render, control visibility via opacity to avoid conditional Reanimated components) */}
         <Animated.View pointerEvents="none" style={[m0, { zIndex: 4 }]} />
-        {(SCHEME_COUNTS[scheme] || 1) >= 2 && <Animated.View pointerEvents="none" style={[m1, { zIndex: 3 }]} />}
-        {(SCHEME_COUNTS[scheme] || 1) >= 3 && <Animated.View pointerEvents="none" style={[m2, { zIndex: 2 }]} />}
-        {(SCHEME_COUNTS[scheme] || 1) >= 4 && <Animated.View pointerEvents="none" style={[m3, { zIndex: 1 }]} />}
+        <Animated.View pointerEvents="none" style={[m1, { zIndex: 3, opacity: count >= 2 ? 1 : 0 }]} />
+        <Animated.View pointerEvents="none" style={[m2, { zIndex: 2, opacity: count >= 3 ? 1 : 0 }]} />
+        <Animated.View pointerEvents="none" style={[m3, { zIndex: 1, opacity: count >= 4 ? 1 : 0 }]} />
       </View>
     </GestureDetector>
   );
 });
 
-export default FullColorWheel;
+// A lightweight, non-animated fallback that won't crash if Reanimated isn't ready
+const FallbackWheel = forwardRef(function FallbackWheel(
+  { size, initialHex = '#FF6B6B', onColorsChange, onHexChange }, ref
+) {
+  const radius = size / 2;
+  
+  // Provide basic imperative methods for compatibility
+  useImperativeHandle(ref, () => ({
+    setActiveHandleHSL: () => {},
+    resetScheme: () => {},
+    randomize: () => {}
+  }), []);
+
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: radius,
+        backgroundColor: initialHex,
+        borderWidth: 1,
+        borderColor: '#ddd',
+        justifyContent: 'center',
+        alignItems: 'center',
+      }}
+    >
+      <Text style={{ fontSize: 12, color: '#555', textAlign: 'center' }}>
+        Color wheel running in safe mode
+      </Text>
+      <Text style={{ fontSize: 10, color: '#999', textAlign: 'center', marginTop: 4 }}>
+        Reanimated not ready
+      </Text>
+    </View>
+  );
+});
+
+export default REANIMATED_READY ? FullColorWheelImpl : FallbackWheel;

@@ -17,9 +17,9 @@ if (__DEV__) {
   console.log('  Final API_ROOT:', API_ROOT);
 }
 
-let _token = null;
-export function setAuthToken(t){ _token = t; }
-function auth(){ const h={Accept:'application/json'}; if(_token)h.Authorization=`Bearer ${_token}`; return h; }
+let _token = null; // Legacy variable (kept for compatibility)
+// Fix: Use unified token system (authToken, not _token)
+function auth(){ const h={Accept:'application/json'}; if(authToken)h.Authorization=`Bearer ${authToken}`; return h; }
 
 
 
@@ -93,6 +93,12 @@ export const setToken = async (t) => {
 };
 
 export const getToken = () => authToken;
+
+// Legacy function - now aliases setToken for backward compatibility (moved below setToken to avoid TDZ)
+export const setAuthToken = async (t) => {
+  console.warn('⚠️ setAuthToken is deprecated, use setToken instead');
+  await setToken(t);
+};
 
 function withAuthHeaders(extra = {}) {
   const headers = { ...(extra.headers || {}) };
@@ -250,24 +256,7 @@ export const getCommunityFeed = async (cursor = null) => {
   return data;
 };
 
-// ---- Feature health check ----
-export const ping = async () => {
-  try {
-    // Quick health check: test auth profile + colors endpoint
-    const healthPromises = [
-      api.get('/health', withAuthHeaders()).catch(() => ({ data: { status: 'offline' } })),
-      api.get('/colors/validate', { hex: '#FF0000' }, withAuthHeaders()).catch(() => ({ data: { valid: false } }))
-    ];
-    
-    const [healthResult] = await Promise.allSettled(healthPromises);
-    return {
-      online: healthResult.status === 'fulfilled' && healthResult.value?.data?.status !== 'offline',
-      timestamp: new Date().toISOString()
-    };
-  } catch (error) {
-    return { online: false, error: error.message, timestamp: new Date().toISOString() };
-  }
-};
+// ---- Feature health check ---- (removed duplicate, keeping better implementation below)
 
 // ---- Authentication endpoints ----
 export const login = async (email, password) => {
@@ -300,7 +289,19 @@ export const logout = async () => {
   } catch (error) {
     console.warn('Logout API call failed:', error);
   }
-  await setToken(null);
+  
+  // Comprehensive token cleanup to prevent phantom login states
+  await setToken(null); // This clears both SecureStore keys
+  
+  // Also clear any legacy AsyncStorage tokens
+  try {
+    const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+    await AsyncStorage.removeItem('authToken');
+    await AsyncStorage.removeItem('userData');
+    await AsyncStorage.removeItem('isLoggedIn');
+  } catch (error) {
+    console.warn('Failed to clear AsyncStorage tokens:', error);
+  }
 };
 
 export const getUserProfile = async () => {
@@ -308,8 +309,26 @@ export const getUserProfile = async () => {
   return data;
 };
 
+// Missing function that's referenced in default export
+export const updateUserProfile = async (profileData) => {
+  const { data } = await api.put('/auth/profile', profileData, withAuthHeaders());
+  return data;
+};
+
 export const clearToken = async () => {
   await setToken(null);
+};
+
+// Feature health check function
+export const ping = async () => {
+  try {
+    // Fix: Use POST for /colors/validate (backend supports POST)
+    const { data } = await api.post('/colors/validate', { hex: '#FF0000' }, withAuthHeaders());
+    return { success: true, data };
+  } catch (error) {
+    console.warn('Health check failed:', error);
+    return { success: false, error: error.message };
+  }
 };
 
 // ---- Export default object ----
@@ -320,12 +339,16 @@ const ApiService = {
   setToken, getToken, clearToken, login, register, demoLogin, getUserProfile, updateUserProfile,
   // image extraction
   extractColorsFromImage,
+  // session-based image methods (fixed exports)
+  startImageExtractSession, sampleColorAt, closeImageExtractSession,
   // legacy image methods (preserved)
-  startImageExtractSession, sampleImageColor, closeImageExtractSession,
+  sampleImageColor,
   // colors
   createColorMatch, getColorMatches, getUserColorMatches, getColorMatch, updateColorMatch, deleteColorMatch, validateHex,
   // community
   getCommunityFeed,
+  // health check
+  ping,
 };
 
 // getUserColorMatches is now defined above with proper parameter support

@@ -14,6 +14,8 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
       await AsyncStorage.setItem('userData', JSON.stringify(user));
       await AsyncStorage.setItem('isLoggedIn', 'true');
       if (token) {
+        // Write to both keys for compatibility (new key first, legacy key for fallback)
+        await SecureStore.setItemAsync('fashion_color_wheel_auth_token', token, { keychainService: 'fashioncolorwheel.auth' });
         await SecureStore.setItemAsync('authToken', token, { keychainService: 'fashioncolorwheel.auth' });
         ApiService.setToken(token); // keep axios authorized for subsequent calls
       }

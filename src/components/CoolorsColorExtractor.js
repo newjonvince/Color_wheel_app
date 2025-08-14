@@ -159,7 +159,7 @@ export default function CoolorsColorExtractor({
       if (!apiBase) {
         throw new Error('API base URL unavailable');
       }
-      const url = `${apiBase}/api/images/sample-color`;
+      const url = `${apiBase}/images/sample-color`;
       const headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
       const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ imageId, x: normX, y: normY, units:'norm', radius }) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

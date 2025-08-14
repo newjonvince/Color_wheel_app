@@ -156,7 +156,7 @@ router.get('/preferences', authenticateToken, async (req, res) => {
 router.put('/preferences', [
   authenticateToken,
   body('skin_tone').optional().trim(),
-  body('favorite_colors').optional().isArray(),
+  body('favorite_colors').optional().isArray().isLength({ max: 10 }),
   body('style_personality').optional().trim(),
   body('notifications_enabled').optional().isBoolean()
 ], async (req, res) => {
@@ -184,7 +184,7 @@ router.put('/preferences', [
       await query(
         `INSERT INTO user_preferences (user_id, skin_tone, favorite_colors, style_personality, notifications_enabled)
          VALUES (?, ?, ?, ?, ?)`,
-        [userId, skin_tone, JSON.stringify(favorite_colors), style_personality, notifications_enabled]
+        [userId, skin_tone, JSON.stringify(favorite_colors ?? null), style_personality, notifications_enabled]
       );
       
       // Get the newly created preferences
@@ -202,7 +202,7 @@ router.put('/preferences', [
              notifications_enabled = COALESCE(?, notifications_enabled),
              updated_at = CURRENT_TIMESTAMP 
          WHERE user_id = ?`,
-        [skin_tone, JSON.stringify(favorite_colors), style_personality, notifications_enabled, userId]
+        [skin_tone, JSON.stringify(favorite_colors ?? null), style_personality, notifications_enabled, userId]
       );
       
       // Get updated preferences
@@ -268,7 +268,6 @@ router.put('/settings', [
       // Update existing preferences
       const updates = [];
       const values = [];
-      let paramCount = 1;
 
       if (notifications !== undefined) {
         updates.push(`notifications_enabled = ?`);

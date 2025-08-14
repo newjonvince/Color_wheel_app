@@ -16,7 +16,8 @@ try {
 }
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024 } });
+// Raise upload limit to 20MB for modern high-res images
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 const IMAGE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const imageStore = new Map(); // token -> { buffer, raw, width, height, mime, createdAt }
@@ -94,12 +95,18 @@ router.post('/extract-session', upload.single('image'), async (req, res) => {
 // Core handler lifted so both routes can call it
 async function extractColorsHandler(req, res) {
   try {
+    // Add Cache-Control: no-store to dynamic responses
+    res.set('Cache-Control', 'no-store');
+    
     // Accept common field names
     const file = req.file || (req.files && (req.files.image || req.files.photo || req.files.file));
     if (!file) return res.status(400).json({ error: 'No image provided', field: 'image' });
 
-    if (file.mimetype === 'image/heic' || (file.originalname || '').toLowerCase().endsWith('.heic')) {
-      return res.status(415).json({ error: 'HEIC format not supported. Please use JPEG, PNG, or WebP.' });
+    // Block HEIC and HEIF formats (some iOS photos come through as image/heif)
+    if (file.mimetype === 'image/heic' || file.mimetype === 'image/heif' || 
+        (file.originalname || '').toLowerCase().endsWith('.heic') || 
+        (file.originalname || '').toLowerCase().endsWith('.heif')) {
+      return res.status(415).json({ error: 'HEIC/HEIF format not supported. Please use JPEG, PNG, or WebP.' });
     }
 
     // Normalize to sRGB PNG for consistent sampling
