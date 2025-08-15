@@ -25,7 +25,15 @@ const router = express.Router();
 router.use((req, res, next) => {
   // Avoid 304 for dynamic data
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
   res.removeHeader('ETag'); // Express may add one later; make sure it's gone
+  res.removeHeader('Last-Modified');
+  
+  // Force ignore client cache headers
+  delete req.headers['if-none-match'];
+  delete req.headers['if-modified-since'];
+  
   next();
 });
 
