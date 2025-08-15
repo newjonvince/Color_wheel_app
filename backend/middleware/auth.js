@@ -82,33 +82,30 @@ const authenticateToken = async (req, res, next) => {
 
     next();
   } catch (error) {
-    console.error('Authentication error:', error);
-    
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({
-        error: 'Invalid token',
-        message: 'Token is malformed'
-      });
-    }
+    console.error('🚨 Auth middleware error:', {
+      name: error.name,
+      message: error.message,
+      userAgent: req.headers['user-agent']?.substring(0, 50),
+      ip: req.ip,
+      authHeader: req.headers['authorization'] ? 'Bearer ***' : 'missing'
+    });
     
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({
         error: 'Token expired',
-        message: 'Please log in again'
+        message: 'Your session has expired. Please log in again.'
       });
-    }
-
-    if (error.name === 'NotBeforeError') {
+    } else if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({
         error: 'Invalid token',
-        message: 'Token not yet valid'
+        message: 'Token is malformed or invalid'
+      });
+    } else {
+      return res.status(500).json({
+        error: 'Authentication failed',
+        message: 'An error occurred during authentication'
       });
     }
-
-    res.status(500).json({
-      error: 'Authentication failed',
-      message: 'Internal server error'
-    });
   }
 };
 

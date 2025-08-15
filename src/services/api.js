@@ -69,12 +69,14 @@ let authToken = null;
 // Initialize token from secure storage on app start - read both keys, prefer new one
 const initializeToken = async () => {
   try {
+    console.log('🔄 ApiService: Initializing token from SecureStore...');
     // Try new key first
     let storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
     if (!storedToken) {
       // Fallback to legacy key from App.js
       storedToken = await SecureStore.getItemAsync(LEGACY_TOKEN_KEY);
       if (storedToken) {
+        console.log('🔄 ApiService: Migrating token from legacy key');
         // Migrate to new key
         await SecureStore.setItemAsync(TOKEN_KEY, storedToken);
         await SecureStore.deleteItemAsync(LEGACY_TOKEN_KEY);
@@ -82,9 +84,12 @@ const initializeToken = async () => {
     }
     if (storedToken) {
       authToken = storedToken;
+      console.log('✅ ApiService: Token loaded successfully');
+    } else {
+      console.log('⚠️ ApiService: No stored token found');
     }
   } catch (error) {
-    if (__DEV__) console.warn('Failed to load stored auth token:', error);
+    console.error('❌ ApiService: Failed to load stored auth token:', error);
   }
 };
 
@@ -119,6 +124,19 @@ function withAuthHeaders(extra = {}) {
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
   return { ...extra, headers };
 }
+
+// Add request interceptor to include auth token
+api.interceptors.request.use(
+  async (config) => {
+    // Ensure token is loaded before making any request
+    await ready;
+    if (authToken) {
+      config.headers.Authorization = `Bearer ${authToken}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 // ---- Generic HTTP helpers (used by Community screens) ----
 export const get = async (url, config = {}) => {
