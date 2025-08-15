@@ -10,8 +10,13 @@ const authenticateToken = async (req, res, next) => {
     const authHeader = req.headers['authorization'] || '';
     const [scheme, presentedToken] = authHeader.split(' ');
     const token = /^Bearer$/i.test(scheme) ? presentedToken : authHeader.trim(); // tolerate case/format
-
+    
     if (!token) {
+      console.log('🚨 Auth middleware: No token provided', {
+        authHeader: authHeader.substring(0, 20) + '...',
+        userAgent: req.headers['user-agent']?.substring(0, 50),
+        ip: req.ip
+      });
       return res.status(401).json({
         error: 'Access denied',
         message: 'No token provided'
@@ -43,6 +48,12 @@ const authenticateToken = async (req, res, next) => {
 
     const list = rows(sessionResult);
     if (list.length === 0) {
+      console.log('🚨 Auth middleware: Invalid session', {
+        jti: decoded.jti,
+        userId: decoded.userId,
+        userAgent: req.headers['user-agent']?.substring(0, 50),
+        ip: req.ip
+      });
       return res.status(401).json({
         error: 'Invalid token',
         message: 'Session has expired, been revoked, or is invalid'

@@ -324,10 +324,7 @@ export default function App() {
             await AsyncStorage.setItem(key, JSON.stringify(backendMatches));
           }
           return;
-          await AsyncStorage.setItem(key, JSON.stringify(backendMatches));
         }
-        return;
-      }
       } catch (backendError) {
         console.warn('Backend load failed, falling back to local storage:', backendError);
       }
