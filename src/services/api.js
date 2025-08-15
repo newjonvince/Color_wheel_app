@@ -48,7 +48,7 @@ export async function closeImageSession(imageId){
   return res.json();
 }
 
-const api = axios.create({
+export const api = axios.create({
   baseURL: API_ROOT,
   timeout: 20000,
 });
@@ -137,9 +137,9 @@ function withAuthHeaders(extra = {}) {
   return { ...extra, headers };
 }
 
-// REQUEST interceptor: wait for bootstrap, then inject Authorization if missing
+// Request interceptor: wait for bootstrap, inject Authorization if missing
 api.interceptors.request.use(async (cfg) => {
-  await ready;                       // ensures initializeToken has run
+  await ready;                              // guarantees initializeToken ran
   cfg.headers = cfg.headers || {};
   if (authToken && !cfg.headers.Authorization) {
     cfg.headers.Authorization = `Bearer ${authToken}`;
