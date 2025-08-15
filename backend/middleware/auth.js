@@ -4,7 +4,7 @@ const { query } = require('../config/database');
 // normalize DB results (pg/mysql driver agnostic)
 const rows = r => (Array.isArray(r) ? r : (r?.rows || []));
 
-module.exports = async function authenticateToken(req, res, next) {
+const authenticateToken = async function(req, res, next) {
   try {
     const raw = (req.headers['authorization'] || '').trim();
     // Accept "Bearer <token>" (any case) OR just "<token>"
@@ -46,3 +46,5 @@ module.exports = async function authenticateToken(req, res, next) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 };
+
+module.exports = { authenticateToken };
