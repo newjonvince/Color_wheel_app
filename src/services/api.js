@@ -23,6 +23,7 @@ function auth(){ const h={Accept:'application/json'}; if(authToken)h.Authorizati
 
 
 export async function sampleColorAt(imageId, nx, ny, radius=0.02){
+  await ready;
   const res = await fetch(`${API_ROOT}/images/sample-color`, {
     method:'POST',
     headers:{ ...auth(), 'Content-Type':'application/json' },
@@ -33,12 +34,13 @@ export async function sampleColorAt(imageId, nx, ny, radius=0.02){
 }
 
 export async function closeImageSession(imageId){
+  await ready;
   try{
     await fetch(`${API_ROOT}/images/close-session`, {
       method:'POST', headers:{ ...auth(), 'Content-Type':'application/json' },
       body: JSON.stringify({ imageId })
     });
-  } catch(_) {}
+  } catch(e) { console.warn('close-session error:', e); }
 }
 
 const api = axios.create({
@@ -84,6 +86,8 @@ const initializeToken = async () => {
     }
     if (storedToken) {
       authToken = storedToken;
+      api.defaults.headers.common.Authorization = `Bearer ${storedToken}`;
+      try { require('axios').defaults.headers.common.Authorization = `Bearer ${storedToken}`; } catch {}
       console.log('✅ ApiService: Token loaded successfully');
     } else {
       console.log('⚠️ ApiService: No stored token found');
@@ -98,6 +102,8 @@ export const ready = initializeToken();
 
 export const setToken = async (t) => { 
   authToken = t; 
+  api.defaults.headers.common.Authorization = t ? `Bearer ${t}` : undefined;
+  try { require('axios').defaults.headers.common.Authorization = t ? `Bearer ${t}` : undefined; } catch {}
   try {
     if (t) {
       await SecureStore.setItemAsync(TOKEN_KEY, t);

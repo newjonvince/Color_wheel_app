@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
-const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
 require('dotenv').config();
 
@@ -79,7 +78,7 @@ app.use('/api', (req, res, next) => {
     const masked = JSON.parse(JSON.stringify(req.body));
     ['password','newPassword','token'].forEach(k => { if (masked[k]) masked[k] = '***'; });
     console.log('🔍 Body:', JSON.stringify(masked, null, 2));
-  } else if (!req.is('application/json')) {
+  } else if (req.method !== 'GET' && !req.is('application/json')) {
     console.log('🔍 Body: [non-JSON or multipart body]');
   }
   next();

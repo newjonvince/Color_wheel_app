@@ -4,6 +4,7 @@
 import React, { useMemo, useRef, useState, useCallback } from 'react';
 import { Dimensions, Platform, View, Text, TextInput, Pressable, TouchableOpacity } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { getColorScheme, hexToHsl, hslToHex } from '../utils/color';
 import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 import FullColorWheel, { SCHEME_COUNTS, SCHEME_OFFSETS } from '../components/FullColorWheel';
@@ -110,6 +111,11 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
       }
     }
   }, [currentUser, navigation]);
+
+  // Run on focus so we redirect on 401 instead of showing "Unavailable"
+  useFocusEffect(useCallback(() => {
+    loadUserData();
+  }, [loadUserData]));
 
   // Prefer live palette from wheel; otherwise derive
   const schemeColors = useMemo(() => {
