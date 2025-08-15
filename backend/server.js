@@ -27,8 +27,6 @@ app.set('trust proxy', 1);
 
 // Railway optimizations
 app.set('x-powered-by', false); // Remove Express signature for security
-app.set('x-powered-by', false); // Remove Express signature for security
-app.set('etag', 'strong'); // Enable strong ETags for better caching
 
 // Security middleware
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
@@ -60,6 +58,17 @@ const corsOptions = {
 };
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions)); 
+
+// Rate limiting middleware (apply speedLimiter before generalLimiter)
+const { speedLimiter, generalLimiter } = require('./middleware/rateLimiting');
+app.use(speedLimiter); // Progressive delay first
+app.use(generalLimiter); // Hard limits second
+
+// Body parsing middleware - tightened limits + error handling
+app.use(express.json({ limit: '2mb' }));             // 2mb is plenty for JSON
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+
+// Request logger (after body parsing so req.body is available)
 app.use('/api', (req, res, next) => {
   const redacted = { ...req.headers };
   if (redacted.authorization) redacted.authorization = 'Bearer ***';
@@ -75,17 +84,6 @@ app.use('/api', (req, res, next) => {
   }
   next();
 });
-
-// handle preflight everywhere
-
-// Rate limiting middleware (apply speedLimiter before generalLimiter)
-const { speedLimiter, generalLimiter } = require('./middleware/rateLimiting');
-app.use(speedLimiter); // Progressive delay first
-app.use(generalLimiter); // Hard limits second
-
-// Body parsing middleware - tightened limits + error handling
-app.use(express.json({ limit: '2mb' }));             // 2mb is plenty for JSON
-app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // Handle malformed JSON gracefully
 app.use((err, req, res, next) => {
