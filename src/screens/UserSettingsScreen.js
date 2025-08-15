@@ -34,6 +34,7 @@ export default function UserSettingsScreen({ currentUser, onLogout, onAccountDel
   const loadUserSettings = async () => {
     try {
       setLoadingSettings(true);
+      await ApiService.ready; // ensure token is loaded from SecureStore first
       const response = await ApiService.request('/users/preferences');
       const preferences = response.preferences;
       
@@ -57,6 +58,7 @@ export default function UserSettingsScreen({ currentUser, onLogout, onAccountDel
     
     try {
       // Save to backend
+      await ApiService.ready; // ensure token is loaded from SecureStore first
       await ApiService.updateSettings({ [key]: value });
     } catch (error) {
       console.error('Failed to save setting:', error);
@@ -81,6 +83,7 @@ export default function UserSettingsScreen({ currentUser, onLogout, onAccountDel
     setIsDeleting(true);
     try {
       // Call API to delete account
+      await ApiService.ready; // ensure token is loaded from SecureStore first
       await ApiService.deleteAccount();
       
       Alert.alert(
@@ -127,6 +130,7 @@ export default function UserSettingsScreen({ currentUser, onLogout, onAccountDel
   const handleExportData = async () => {
     try {
       setExporting(true);
+      await ApiService.ready; // ensure token is loaded from SecureStore first
       await ApiService.requestDataExport();
       Alert.alert(
         'Export Requested', 

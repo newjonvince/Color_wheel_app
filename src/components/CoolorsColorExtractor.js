@@ -221,6 +221,7 @@ export default function CoolorsColorExtractor({
       const assetSafe = await prepareAssetForUpload(asset);
       
       // Use the proper ApiService method for backend extraction
+      await ApiService.ready; // ensure token is loaded from SecureStore first
       const response = await ApiService.extractColorsFromImage(assetSafe.uri, {
         onProgress: (progress) => {
           console.log(`Upload progress: ${progress}%`);

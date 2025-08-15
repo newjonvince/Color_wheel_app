@@ -47,6 +47,7 @@ export default function CommunityModal({ visible, onClose, currentUser }) {
   const loadTab = useCallback(async (tab) => {
     setLoading(true);
     try {
+      await ApiService.ready; // ensure token is loaded from SecureStore first
       if (tab === 'suggested') {
         const res = await ApiService.get('/users/suggested');
         const data = res.data || [];
@@ -101,6 +102,7 @@ export default function CommunityModal({ visible, onClose, currentUser }) {
     // optimistic update
     setFollowed(userId, true);
     try {
+      await ApiService.ready; // ensure token is loaded from SecureStore first
       await ApiService.post(`/users/${userId}/follow`);
     } catch (e) {
       // rollback
@@ -114,6 +116,7 @@ export default function CommunityModal({ visible, onClose, currentUser }) {
     const previous = !!followMap[userId];
     setFollowed(userId, false);
     try {
+      await ApiService.ready; // ensure token is loaded from SecureStore first
       await ApiService.delete(`/users/${userId}/follow`);
     } catch (e) {
       // rollback

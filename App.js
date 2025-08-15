@@ -106,8 +106,10 @@ try {
   ColorWheelScreen = require('./src/screens/ColorWheelScreen').default;
   console.log('✅ App.js: ColorWheelScreen imported successfully');
 } catch (error) {
-  console.error('🚨 App.js: ColorWheelScreen import failed:', error);
-  console.error('🚨 App.js: Error details:', error?.message, error?.stack);
+  console.error('🚨 ColorWheelScreen import failed:', error);
+  console.error('🚨 Import error name:', error?.name);
+  console.error('🚨 Import error message:', error?.message);
+  console.error('🚨 Import error stack:', error?.stack);
   // Fallback component to prevent app crash
   ColorWheelScreen = ({ onLogout }) => (
     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
@@ -310,14 +312,18 @@ export default function App() {
       
       // Try to load from backend first
       try {
+        await ApiService.ready; // ensure token is loaded from SecureStore first
         const backendMatches = typeof ApiService.getUserColorMatches === 'function'
-  ? await ApiService.getUserColorMatches()
-  : null;
+          ? await ApiService.getUserColorMatches()
+          : null;
         if (backendMatches) {
-        console.log('App: Loaded', backendMatches?.length || 0, 'color matches from backend');
-        setSavedColorMatches(backendMatches || []);
-        // Also save to local storage as backup
-        if (backendMatches?.length > 0) {
+          console.log('App: Loaded', backendMatches?.length || 0, 'color matches from backend');
+          setSavedColorMatches(backendMatches || []);
+          // Also save to local storage as backup
+          if (backendMatches?.length > 0) {
+            await AsyncStorage.setItem(key, JSON.stringify(backendMatches));
+          }
+          return;
           await AsyncStorage.setItem(key, JSON.stringify(backendMatches));
         }
         return;
@@ -405,9 +411,9 @@ export default function App() {
 
   const handleLoginSuccess = useCallback(async (u) => {
     console.log('🔍 App.js: handleLoginSuccess called with:', u);
-    
+    let nextUser;
     try {
-      const nextUser = pickUser(u);
+      nextUser = pickUser(u);
       console.log('🔍 App.js: pickUser result:', nextUser);
       
       // if the LoginScreen passes back a token, set it now

@@ -17,7 +17,6 @@ if (__DEV__) {
   console.log('  Final API_ROOT:', API_ROOT);
 }
 
-let _token = null; // Legacy variable (kept for compatibility)
 // Fix: Use unified token system (authToken, not _token)
 function auth(){ const h={Accept:'application/json'}; if(authToken)h.Authorization=`Bearer ${authToken}`; return h; }
 

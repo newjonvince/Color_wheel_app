@@ -1,12 +1,13 @@
 // screens/ColorWheelScreen.js
 // Screen that hosts the wheel + controls: link/unlink, H/S/L inputs, reset, randomize, and shows scheme swatches.
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useCallback } from 'react';
 import { Dimensions, Platform, View, Text, TextInput, Pressable, TouchableOpacity } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { getColorScheme, hexToHsl, hslToHex } from '../utils/color';
 import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 import FullColorWheel, { SCHEME_COUNTS, SCHEME_OFFSETS } from '../components/FullColorWheel';
+import ApiService from '../services/api';
 
 const { width: screenWidth } = Dimensions.get('window');
 const WHEEL_SIZE = Math.min(screenWidth * 0.9, 380);
@@ -14,7 +15,7 @@ const WHEEL_SIZE = Math.min(screenWidth * 0.9, 380);
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 const mod = (a, n) => ((a % n) + n) % n;
 
-export default function ColorWheelScreen() {
+export default function ColorWheelScreen({ navigation, currentUser }) {
   const [selectedFollowsActive, setSelectedFollowsActive] = React.useState(true);
   const wheelRef = React.useRef(null);
   const [selectedScheme, setSelectedScheme] = useState('complementary');
@@ -88,11 +89,27 @@ export default function ColorWheelScreen() {
       setBaseHex(newBaseHex);
       setSelectedColor(newBaseHex);
       setPalette(extractedPalette);
-      resetScheme(newBaseHex);
+      // Don't call resetScheme - keep the extracted palette
     }
     setShowExtractor(false);
     setExtractorImageUri(null);
   };
+
+  const loadUserData = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      await ApiService.ready; // ensure token is loaded from SecureStore first
+      const matches = await ApiService.getUserColorMatches();
+      // TODO: Use matches data if needed
+    } catch (error) {
+      console.error('Failed to load user data:', error);
+      if (error.isAuthError) {
+        // Navigate to login instead of showing unavailable
+        navigation?.navigate('Login');
+        return;
+      }
+    }
+  }, [currentUser, navigation]);
 
   // Prefer live palette from wheel; otherwise derive
   const schemeColors = useMemo(() => {
@@ -122,12 +139,11 @@ export default function ColorWheelScreen() {
         />
         
         {/* Camera and Gallery Icons */}
-        <View style={{ 
+        <View style={{
           position: 'absolute', 
           bottom: -20, 
           flexDirection: 'row', 
-          justifyContent: 'center',
-          gap: 20
+          justifyContent: 'center'
         }}>
           <TouchableOpacity
             onPress={openCamera}
@@ -138,6 +154,7 @@ export default function ColorWheelScreen() {
               height: 50,
               justifyContent: 'center',
               alignItems: 'center',
+              marginRight: 20,
               shadowColor: '#000',
               shadowOffset: { width: 0, height: 2 },
               shadowOpacity: 0.25,

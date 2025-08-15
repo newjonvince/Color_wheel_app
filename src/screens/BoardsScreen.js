@@ -47,6 +47,7 @@ export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch,
     if (!currentUser) return;
     setLoading(true);
     try {
+      await ApiService.ready; // ensure token is loaded from SecureStore first
       const boardsRes = await ApiService.getBoards();
       const matchesRes = await ApiService.getColorMatches();
 
@@ -164,6 +165,7 @@ export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch,
         },
       };
 
+      await ApiService.ready; // ensure token is loaded from SecureStore first
       const response = await ApiService.createColorMatch(colorMatch);
       const saved = response?.colorMatch || response?.data || response;
       if (!saved) throw new Error('Unexpected server response.');

@@ -91,7 +91,10 @@ IMPROVEMENTS MADE:
     }, []);
 
     const fetchPage = useCallback(async (cursor = null, replace = false) => {
+      if (loading && !replace) return;
+      setLoading(true);
       try {
+        await ApiService.ready; // ensure token is loaded from SecureStore first
         const params = cursor ? { cursor } : {};
         const qs = new URLSearchParams(params).toString();
         const endpoint = `/community/posts/community${qs ? `?${qs}` : ''}`;
@@ -171,6 +174,7 @@ IMPROVEMENTS MADE:
 
       updatePostsForUser(userId, { is_following: true });
       try {
+        await ApiService.ready; // ensure token is loaded from SecureStore first
         await ApiService.post(`/community/users/${userId}/follow`);
       } catch (error) {
         console.error('Error following user:', error);
@@ -188,6 +192,7 @@ IMPROVEMENTS MADE:
 
       updatePostsForUser(userId, { is_following: false });
       try {
+        await ApiService.ready; // ensure token is loaded from SecureStore first
         await ApiService.delete(`/community/users/${userId}/follow`);
       } catch (error) {
         console.error('Error unfollowing user:', error);
@@ -221,6 +226,7 @@ IMPROVEMENTS MADE:
       toggleLikeOptimistic(postId);
 
       try {
+        await ApiService.ready; // ensure token is loaded from SecureStore first
         await ApiService.post(`/community/posts/${postId}/like`);
       } catch (error) {
         console.error('Error liking post:', error);
