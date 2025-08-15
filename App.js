@@ -226,7 +226,9 @@ export default function App() {
 
       if (token) {
         try {
-          ApiService?.setToken?.(token);
+          await ApiService?.setToken?.(token);
+          // Wait for ApiService to be fully ready before proceeding
+          await ApiService.ready;
           // Validate token quickly
           const timeoutPromise = new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
@@ -234,6 +236,8 @@ export default function App() {
 
           let profile = null;
           if (ApiService?.getUserProfile) {
+            // Ensure token is ready before making authenticated call
+            await ApiService.ready;
             profile = await Promise.race([ApiService.getUserProfile(), timeoutPromise]);
           } else {
             // fallback to stored userData
@@ -244,6 +248,8 @@ export default function App() {
           const normalized = pickUser(profile);
           if (normalized?.id) {
             setUser(normalized);
+            // Ensure token is ready before loading color matches
+            await ApiService.ready;
             await loadSavedColorMatches(getMatchesKey(normalized.id));
           } else {
             await clearStoredToken();

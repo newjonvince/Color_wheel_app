@@ -192,7 +192,7 @@ app.use((err, req, res, next) => {
 });
 
 // Start server with graceful shutdown (Railway)
-const server = app.listen(PORT, HOST, () => {
+const server = app.listen(PORT, HOST, async () => {
   console.log('// Fashion Color Wheel Backend Server');
   console.log('// Production-ready Express.js API with MySQL, authentication, and rate limiting');
   console.log('// Updated: All Railway deployment warnings fixed + Database schema aligned');
@@ -200,6 +200,18 @@ const server = app.listen(PORT, HOST, () => {
   console.log('🔗 Health check: http://localhost:' + PORT + '/health');
   console.log('✨ All warnings fixed + schema aligned - clean deployment!');
   console.log(`🚀 API up on ${HOST}:${PORT}`);
+  
+  // Test database connection first
+  try {
+    const isHealthy = await healthCheck();
+    if (isHealthy) {
+      console.log('✅ Database connection verified');
+    } else {
+      console.warn('⚠️ Database health check failed, but server continues');
+    }
+  } catch (dbError) {
+    console.error('⚠️ Database connection error:', dbError.message);
+  }
   
   // Initialize database tables asynchronously (non-blocking with timeout)
   const dbInitTimeout = setTimeout(() => {
@@ -217,12 +229,37 @@ const server = app.listen(PORT, HOST, () => {
     });
 });
 
-const shutdown = () => {
-  console.log('⏳ Shutting down gracefully...');
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(1), 10000).unref();
+const shutdown = (signal) => {
+  console.log(`⏳ Received ${signal}, shutting down gracefully...`);
+  server.close((err) => {
+    if (err) {
+      console.error('❌ Error during server shutdown:', err);
+      process.exit(1);
+    } else {
+      console.log('✅ Server closed successfully');
+      process.exit(0);
+    }
+  });
+  // Force exit after 10 seconds if graceful shutdown fails
+  setTimeout(() => {
+    console.error('⚠️ Forced shutdown after timeout');
+    process.exit(1);
+  }, 10000).unref();
 };
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// Handle uncaught exceptions to prevent silent crashes
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  console.error('Stack:', error.stack);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
 
 module.exports = app;
