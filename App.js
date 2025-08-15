@@ -426,6 +426,7 @@ export default function App() {
           const tokenToSet = nextUser.token || nextUser.authToken;
           console.log('🔍 App.js: Token to set:', tokenToSet ? 'present' : 'missing');
           await ApiService.setToken?.(tokenToSet); 
+          if (ApiService.ready) { await ApiService.ready; }
           console.log('✅ App.js: Token set successfully in ApiService');
         } else {
           console.log('⚠️ App.js: No token found in user object');

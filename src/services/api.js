@@ -4,6 +4,7 @@
 // - Correct payloads for backend endpoints
 
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
 const HOST = (process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || '').replace(/\/+$/, '');
@@ -17,8 +18,12 @@ if (__DEV__) {
   console.log('  Final API_ROOT:', API_ROOT);
 }
 
-// Fix: Use unified token system (authToken, not _token)
-function auth(){ const h={Accept:'application/json'}; if(authToken)h.Authorization=`Bearer ${authToken}`; return h; }
+// Helper used by fetch-based endpoints
+const auth = () => {
+  const h = { Accept: 'application/json' };
+  if (authToken) h.Authorization = `Bearer ${authToken}`;
+  return h;
+};
 
 
 
@@ -35,12 +40,12 @@ export async function sampleColorAt(imageId, nx, ny, radius=0.02){
 
 export async function closeImageSession(imageId){
   await ready;
-  try{
-    await fetch(`${API_ROOT}/images/close-session`, {
-      method:'POST', headers:{ ...auth(), 'Content-Type':'application/json' },
-      body: JSON.stringify({ imageId })
-    });
-  } catch(e) { console.warn('close-session error:', e); }
+  const res = await fetch(`${API_ROOT}/images/extract-session`, {
+    method:'DELETE',
+    headers: auth()
+  });
+  if(!res.ok) throw new Error(`close-session ${res.status}`);
+  return res.json();
 }
 
 const api = axios.create({
@@ -48,15 +53,12 @@ const api = axios.create({
   timeout: 20000,
 });
 
-// Add response interceptor for 401 handling
+// RESPONSE interceptor: normalize 401
 api.interceptors.response.use(
   r => r,
   async (err) => {
-    const status = err?.response?.status;
-    if (status === 401) {
-      // clear tokens so app sees "logged out"
+    if (err?.response?.status === 401) {
       await setToken(null);
-      // attach a recognizable error message
       err.isAuthError = true;
     }
     return Promise.reject(err);
@@ -75,17 +77,20 @@ const initializeToken = async () => {
     // Try new key first
     let storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
     if (!storedToken) {
-      // Fallback to legacy key from App.js
+      // try legacy key (SecureStore) then legacy AsyncStorage fallback
       storedToken = await SecureStore.getItemAsync(LEGACY_TOKEN_KEY);
+      if (!storedToken) storedToken = await AsyncStorage.getItem(LEGACY_TOKEN_KEY);
       if (storedToken) {
         console.log('🔄 ApiService: Migrating token from legacy key');
         // Migrate to new key
         await SecureStore.setItemAsync(TOKEN_KEY, storedToken);
-        await SecureStore.deleteItemAsync(LEGACY_TOKEN_KEY);
+        await SecureStore.deleteItemAsync(LEGACY_TOKEN_KEY).catch(()=>{});
+        await AsyncStorage.removeItem(LEGACY_TOKEN_KEY).catch(()=>{});
       }
     }
     if (storedToken) {
       authToken = storedToken;
+      // ensure *all* axios calls carry the header (instance + any stray usage)
       api.defaults.headers.common.Authorization = `Bearer ${storedToken}`;
       try { require('axios').defaults.headers.common.Authorization = `Bearer ${storedToken}`; } catch {}
       console.log('✅ ApiService: Token loaded successfully');
@@ -102,6 +107,7 @@ export const ready = initializeToken();
 
 export const setToken = async (t) => { 
   authToken = t; 
+  // update axios defaults everywhere
   api.defaults.headers.common.Authorization = t ? `Bearer ${t}` : undefined;
   try { require('axios').defaults.headers.common.Authorization = t ? `Bearer ${t}` : undefined; } catch {}
   try {
@@ -111,19 +117,19 @@ export const setToken = async (t) => {
       // Clear both keys on logout to prevent silent logout state
       await SecureStore.deleteItemAsync(TOKEN_KEY);
       await SecureStore.deleteItemAsync(LEGACY_TOKEN_KEY);
+      await AsyncStorage.removeItem(LEGACY_TOKEN_KEY).catch(()=>{});
     }
   } catch (error) {
     if (__DEV__) console.warn('Failed to store auth token:', error);
   }
 };
 
-export const getToken = () => authToken;
+export const clearToken = () => setToken(null);
 
-// Legacy function - now aliases setToken for backward compatibility (moved below setToken to avoid TDZ)
-export const setAuthToken = async (t) => {
-  console.warn('⚠️ setAuthToken is deprecated, use setToken instead');
-  await setToken(t);
-};
+// Back-compat setter if anything still calls it
+export const setAuthToken = (t) => setToken(t);
+
+export const getToken = () => authToken;
 
 function withAuthHeaders(extra = {}) {
   const headers = { ...(extra.headers || {}) };
@@ -131,21 +137,15 @@ function withAuthHeaders(extra = {}) {
   return { ...extra, headers };
 }
 
-// Add request interceptor to include auth token
-api.interceptors.request.use(
-  async (config) => {
-    // Ensure token is loaded before making any request
-    await ready;
-    if (authToken) {
-      config.headers.Authorization = `Bearer ${authToken}`;
-      console.log('✅ ApiService: Added Authorization header to request');
-    } else {
-      console.log('⚠️ ApiService: No token available for request to', config.url);
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
+// REQUEST interceptor: wait for bootstrap, then inject Authorization if missing
+api.interceptors.request.use(async (cfg) => {
+  await ready;                       // ensures initializeToken has run
+  cfg.headers = cfg.headers || {};
+  if (authToken && !cfg.headers.Authorization) {
+    cfg.headers.Authorization = `Bearer ${authToken}`;
+  }
+  return cfg;
+});
 
 // ---- Generic HTTP helpers (used by Community screens) ----
 export const get = async (url, config = {}) => {
@@ -171,7 +171,7 @@ export const _delete = del;
 // ---- Multipart helper & dual-endpoint try/fallback ----
 async function _postMultipart(url, form, cfg) {
   return api.post(url, form, {
-    headers: { 'Content-Type': 'multipart/form-data', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+    headers: { ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
     ...(cfg || {}),
   });
 }
@@ -364,9 +364,6 @@ export const updateUserProfile = async (profileData) => {
   return data;
 };
 
-export const clearToken = async () => {
-  await setToken(null);
-};
 
 // Feature health check function
 export const ping = async () => {
@@ -391,7 +388,7 @@ const ApiService = {
   // session-based image methods (fixed exports)
   startImageExtractSession, sampleColorAt, closeImageExtractSession,
   // legacy image methods (preserved)
-  sampleImageColor,
+  sampleImageColor, closeImageSession,
   // colors
   createColorMatch, getColorMatches, getUserColorMatches, getColorMatch, updateColorMatch, deleteColorMatch, validateHex,
   // community
