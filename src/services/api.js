@@ -132,6 +132,9 @@ api.interceptors.request.use(
     await ready;
     if (authToken) {
       config.headers.Authorization = `Bearer ${authToken}`;
+      console.log('✅ ApiService: Added Authorization header to request');
+    } else {
+      console.log('⚠️ ApiService: No token available for request to', config.url);
     }
     return config;
   },

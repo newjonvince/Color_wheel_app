@@ -414,11 +414,16 @@ export default function App() {
       console.log('🔍 App.js: pickUser result:', nextUser);
       
       // if the LoginScreen passes back a token, set it now
-      try { 
-        if (u && (u.token || u.authToken)) { 
-          console.log('🔍 App.js: Setting token from login response');
-          ApiService.setToken?.(u.token || u.authToken); 
-        } 
+      try {
+        console.log('🔍 App.js: Setting token in ApiService...');
+        if (nextUser?.token || nextUser?.authToken) {
+          const tokenToSet = nextUser.token || nextUser.authToken;
+          console.log('🔍 App.js: Token to set:', tokenToSet ? 'present' : 'missing');
+          await ApiService.setToken?.(tokenToSet); 
+          console.log('✅ App.js: Token set successfully in ApiService');
+        } else {
+          console.log('⚠️ App.js: No token found in user object');
+        }
       } catch (tokenError) {
         console.error('🚨 App.js: Token setting error:', tokenError);
       }
