@@ -129,6 +129,9 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
 
   const activeIdx = useSharedValue(0);
   const freed = useRef(new Set(freedIndices || []));
+  
+  // Create a shared value version of freed indices for worklet access
+  const freedIndicesShared = useSharedValue(Array.from(freed.current));
 
   // Pre-compute hue sweep colors for performance
   const hueSweepColors = useMemo(() => {
@@ -194,6 +197,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   // Reset freed handles only when scheme changes, not on color changes
   useEffect(() => {
     freed.current.clear(); // Reset freed handles on scheme change
+    freedIndicesShared.value = []; // Also clear shared value
     const { h: hue = 0, s: sat = 100, l: light = 50 } = hexToHsl(initialHex) || {};
     const sat01 = sat / 100;
     
@@ -313,7 +317,12 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       const sat = clamp01(Math.hypot(e.x - cx, e.y - cy) / radius);
 
       // Free this handle if we are linked and it's not the base
-      if (linked && idx !== 0) { freed.current.add(idx); }
+      if (linked && idx !== 0) { 
+        // Update both ref and shared value for worklet compatibility
+        callJS(() => freed.current.add(idx));
+        const newFreed = [...freedIndicesShared.value, idx];
+        freedIndicesShared.value = Array.from(new Set(newFreed));
+      }
 
       handleAngles[idx].value = deg;
       handleSats[idx].value = sat;
@@ -329,7 +338,6 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
 
   // Public setters (used by numeric inputs)
   const setHandleHSL = (idx, h, s, l) => {
-    'worklet';
     handleAngles[idx].value = mod(h, 360);
     handleSats[idx].value = clamp01(s / 100);
     handleLights[idx].value = Math.max(0, Math.min(100, l));
@@ -337,14 +345,14 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
     if (linked && idx === 0) {
       const c = SCHEME_COUNTS[scheme] || 1;
       for (let i = 1; i < c; i++) {
-        if (!freed.current.has(i)) {
+        if (!freed.current.has(i)) {    // OK now: this runs on JS, not UI
           handleAngles[i].value = mod(h + offsets[i], 360);
           handleSats[i].value = clamp01(s / 100);
           handleLights[i].value = Math.max(0, Math.min(100, l));
         }
       }
     }
-    emitPalette();
+    emitPalette(); // emitPalette *is* a worklet, but calling it from JS is fine (it'll run on JS in this path)
   };
   // Expose imperative setters for numeric inputs (for live updates while typing)
   useImperativeHandle(ref, () => ({

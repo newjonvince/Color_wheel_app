@@ -92,7 +92,11 @@ const initializeToken = async () => {
       authToken = storedToken;
       // ensure *all* axios calls carry the header (instance + any stray usage)
       api.defaults.headers.common.Authorization = `Bearer ${storedToken}`;
-      try { require('axios').defaults.headers.common.Authorization = `Bearer ${storedToken}`; } catch {}
+      try { 
+        const globalAxios = require('axios');
+        globalAxios.defaults.headers.common.Authorization = `Bearer ${storedToken}`;
+        console.log('🔧 Set global axios defaults with token');
+      } catch {}
       console.log('✅ ApiService: Token loaded successfully, length:', storedToken.length);
       console.log('✅ ApiService: Axios defaults set with Authorization header');
     } else {
@@ -106,11 +110,24 @@ const initializeToken = async () => {
 // Initialize token on module load and export a readiness promise
 export const ready = initializeToken();
 
+// Last-resort guard: ensure ANY fetch carries Authorization when logged in
+const _realFetch = global.fetch;
+global.fetch = async (url, options = {}) => {
+  const headers = { ...(options.headers || {}) };
+  const t = authToken;
+  if (t) headers.Authorization = `Bearer ${t}`;
+  return _realFetch(url, { ...options, headers });
+};
+
 export const setToken = async (t) => { 
   authToken = t; 
   // update axios defaults everywhere
   api.defaults.headers.common.Authorization = t ? `Bearer ${t}` : undefined;
-  try { require('axios').defaults.headers.common.Authorization = t ? `Bearer ${t}` : undefined; } catch {}
+  try { 
+    const globalAxios = require('axios');
+    globalAxios.defaults.headers.common.Authorization = t ? `Bearer ${t}` : undefined;
+    console.log('🔧 Updated global axios defaults');
+  } catch {}
   
   if (t) {
     console.log('🔧 ApiService: setToken called with token length:', t.length);
@@ -146,35 +163,49 @@ function withAuthHeaders(extra = {}) {
   return { ...extra, headers };
 }
 
-// Request interceptor: wait for bootstrap, inject Authorization if missing
+// Request interceptor: wait for bootstrap, inject Authorization unconditionally
 api.interceptors.request.use(async (cfg) => {
   await ready;                              // guarantees initializeToken ran
   cfg.headers = cfg.headers || {};
-  if (authToken && !cfg.headers.Authorization) {
-    cfg.headers.Authorization = `Bearer ${authToken}`;
-    console.log('🔧 ApiService: Injected Authorization header via interceptor');
-  } else if (!authToken) {
+  
+  if (authToken) {
+    cfg.headers.Authorization = `Bearer ${authToken}`;   // set unconditionally
+    console.log('🔧 ApiService: Set Authorization header via interceptor');
+  } else {
     console.warn('⚠️ ApiService: No authToken available for request to', cfg.url);
-  } else if (cfg.headers.Authorization) {
-    console.log('✅ ApiService: Authorization header already present');
+    console.warn('⚠️ This request will fail with 401');
   }
+  
+  return cfg;
+}, (error) => {
+  console.error('❌ Request interceptor error:', error);
+  return Promise.reject(error);
+});
+
+// Debug logging for every request
+api.interceptors.request.use(cfg => {
+  console.log('→', (cfg.method||'get').toUpperCase(), cfg.url, 'auth?', !!cfg.headers?.Authorization);
   return cfg;
 });
 
 // ---- Generic HTTP helpers (used by Community screens) ----
 export const get = async (url, config = {}) => {
+  await ready; // Ensure token is loaded before making request
   const { data } = await api.get(url, withAuthHeaders(config));
   return data;
 };
 export const post = async (url, body = {}, config = {}) => {
+  await ready; // Ensure token is loaded before making request
   const { data } = await api.post(url, body, withAuthHeaders(config));
   return data;
 };
 export const put = async (url, body = {}, config = {}) => {
+  await ready; // Ensure token is loaded before making request
   const { data } = await api.put(url, body, withAuthHeaders(config));
   return data;
 };
 export const del = async (url, config = {}) => {
+  await ready; // Ensure token is loaded before making request
   const { data } = await api.delete(url, withAuthHeaders(config));
   return data;
 };
@@ -230,6 +261,7 @@ export const startImageExtractSession = async (imageUri, {
 export const sampleImageColor = async (sessionToken, {
   x = null, y = null, nx = null, ny = null,
 } = {}) => {
+  await ready; // Ensure token is loaded before making request
   if (!sessionToken) throw new Error('sessionToken is required');
   let useNormalized; let sx; let sy;
   if (nx != null && ny != null) { useNormalized = true; sx = nx; sy = ny; }
@@ -247,6 +279,7 @@ export const sampleImageColor = async (sessionToken, {
 };
 
 export const closeImageExtractSession = async (sessionId) => {
+  await ready; // Ensure token is loaded before making request
   if (!sessionId) return { ok: true };
   const doA = () => api.post(`/images/extract-session/${encodeURIComponent(sessionId)}/close`, {}, withAuthHeaders());
   const doB = () => api.post('/images/close-session', { imageId: sessionId }, withAuthHeaders());
@@ -254,97 +287,26 @@ export const closeImageExtractSession = async (sessionId) => {
   return data;
 };
 
-export const extractColorsFromImage = async (imageUri, opts = {}) => {
-  const form = new FormData();
-  form.append('image', { uri: imageUri, name: 'upload.jpg', type: 'image/jpeg' });
-  if (opts.maxWidth) form.append('maxWidth', String(opts.maxWidth));
-  if (opts.maxHeight) form.append('maxHeight', String(opts.maxHeight));
-  const { data } = await _postMultipart('/images/extract-colors', form);
-  return data;
-};
-
-// ---- Colors endpoints ----
-export const createColorMatch = async (body) => {
-  const { data } = await api.post('/colors/matches', body, withAuthHeaders());
-  return data;
-};
-
-export const getColorMatches = async (params = {}) => {
-  // Filter out undefined/empty params to avoid sending them to server
-  const cleanParams = Object.fromEntries(
-    Object.entries(params).filter(([_, value]) => value !== undefined && value !== '' && value !== null)
-  );
-  const queryString = new URLSearchParams(cleanParams).toString();
-  const url = `/colors/matches${queryString ? `?${queryString}` : ''}`;
-  const { data } = await api.get(url, withAuthHeaders());
-  return data;
-};
-
-// App.js expects an array; provide a thin alias that unwraps { ok, data }
-export const getUserColorMatches = async (params = {}) => {
-  await ready; // Ensure token is loaded before making request
-  // Filter out undefined/empty params to avoid sending them to server
-  const cleanParams = Object.fromEntries(
-    Object.entries(params).filter(([_, value]) => value !== undefined && value !== '' && value !== null)
-  );
-  const queryString = new URLSearchParams(cleanParams).toString();
-  const url = `/colors/matches${queryString ? `?${queryString}` : ''}`;
-  console.log('🔍 ApiService: Making getUserColorMatches request to', url);
-  const { data } = await api.get(url, withAuthHeaders());
-  return Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
-};
-
-export const getColorMatch = async (id) => {
-  const { data } = await api.get(`/colors/matches/${id}`, withAuthHeaders());
-  return data;
-};
-
-export const updateColorMatch = async (id, body) => {
-  const { data } = await api.put(`/colors/matches/${id}`, body, withAuthHeaders());
-  return data;
-};
-
-export const deleteColorMatch = async (id) => {
-  const { data } = await api.delete(`/colors/matches/${id}`, withAuthHeaders());
-  return data;
-};
-
 export const validateHex = async (hex) => {
+  await ready; // Ensure token is loaded before making request
   const { data } = await api.post('/colors/validate', { hex }, withAuthHeaders());
   return data;
 };
 
 // ---- Community convenience (optional) ----
-export const getCommunityFeed = async (cursor = null) => {
-  const qs = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
+export const getCommunityFeed = async (params = {}) => {
+  await ready; // Ensure token is loaded before making request
+  const cleanParams = Object.fromEntries(
+    Object.entries(params).filter(([_, value]) => value !== undefined && value !== '' && value !== null)
+  );
+  const qs = Object.keys(cleanParams).length ? `?${new URLSearchParams(cleanParams).toString()}` : '';
   const { data } = await api.get(`/community/posts/community${qs}`, withAuthHeaders());
   return data;
 };
 
-// ---- Feature health check ---- (removed duplicate, keeping better implementation below)
-
-// ---- Authentication endpoints ----
-export const login = async (email, password) => {
-  const { data } = await api.post('/auth/login', { email, password });
-  if (data.token) {
-    await setToken(data.token);
-  }
-  return data;
-};
-
-export const register = async (userData) => {
-  const { data } = await api.post('/auth/register', userData);
-  if (data.token) {
-    await setToken(data.token);
-  }
-  return data;
-};
-
-export const demoLogin = async () => {
-  const { data } = await api.post('/auth/demo-login');
-  if (data.token) {
-    await setToken(data.token);
-  }
+export const ping = async () => {
+  await ready; // Ensure token is loaded before making request
+  const { data } = await api.get('/health');
   return data;
 };
 
@@ -381,8 +343,9 @@ export const updateUserProfile = async (profileData) => {
 };
 
 
-// Feature health check function
-export const ping = async () => {
+// Feature health check function (renamed to avoid duplicate)
+export const healthCheck = async () => {
+  await ready; // Ensure token is loaded before making request
   try {
     // Fix: Use POST for /colors/validate (backend supports POST)
     const { data } = await api.post('/colors/validate', { hex: '#FF0000' }, withAuthHeaders());
@@ -410,7 +373,7 @@ const ApiService = {
   // community
   getCommunityFeed,
   // health check
-  ping,
+  healthCheck,
 };
 
 // getUserColorMatches is now defined above with proper parameter support

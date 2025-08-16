@@ -100,7 +100,9 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
     if (!currentUser) return;
     try {
       await ApiService.ready; // ensure token is loaded from SecureStore first
+      console.log('🔍 ColorWheelScreen: About to call getUserColorMatches, token exists:', !!ApiService.getToken?.());
       const matches = await ApiService.getUserColorMatches();
+      console.log('🔍 ColorWheelScreen: getUserColorMatches completed successfully');
       // TODO: Use matches data if needed
     } catch (error) {
       console.error('Failed to load user data:', error);

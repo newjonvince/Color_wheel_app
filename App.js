@@ -1,3 +1,4 @@
+import 'react-native-gesture-handler';
 import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, AppState, Platform, LogBox, TouchableOpacity } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
@@ -8,6 +9,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as SecureStore from 'expo-secure-store';
 import * as Updates from 'expo-updates';
+
+// Production error handler to capture fatal JS errors
+if (!__DEV__) {
+  const oldHandler = global.ErrorUtils.getGlobalHandler?.();
+  global.ErrorUtils.setGlobalHandler((err, isFatal) => {
+    // send to your backend or Sentry
+    console.log('JS Fatal:', isFatal, err?.message, err?.stack);
+    oldHandler?.(err, isFatal);
+  });
+}
 import ApiService from './src/services/api';
 
 // Deep link support (matches app.json -> expo.scheme: "colorwheel")
@@ -319,6 +330,7 @@ export default function App() {
       // Try to load from backend first
       try {
         await ApiService.ready; // ensure token is loaded from SecureStore first
+        console.log('🔍 App.js: About to call getUserColorMatches, token exists:', !!ApiService.getToken?.());
         const backendMatches = typeof ApiService.getUserColorMatches === 'function'
           ? await ApiService.getUserColorMatches()
           : null;
