@@ -28,8 +28,6 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
   
   // Camera/Gallery extractor modal state
   const [showExtractor, setShowExtractor] = useState(false);
-  const [extractorMode, setExtractorMode] = useState('gallery'); // 'camera' or 'gallery'
-  const [extractorImageUri, setExtractorImageUri] = useState(null);
 
   // HSL input state is derived from Selected Color (active handle will update wheel though)
   const hsl = hexToHsl(selectedColor) || { h: 0, s: 100, l: 50 };
@@ -78,9 +76,8 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
   };
 
   // Camera/Gallery handlers
-  // Camera/Gallery handlers
-  const openCamera = () => { setExtractorMode('camera'); setExtractorImageUri(null); setShowExtractor(true); };
-  const openGallery = () => { setExtractorMode('gallery'); setExtractorImageUri(null); setShowExtractor(true); };
+  const openCamera = () => { setShowExtractor(true); };
+  const openGallery = () => { setShowExtractor(true); };
 
   // Handle extractor completion (object with { imageUri, slots, activeIndex })
   const handleExtractorComplete = (result) => {
@@ -93,16 +90,19 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
       // Don't call resetScheme - keep the extracted palette
     }
     setShowExtractor(false);
-    setExtractorImageUri(null);
   };
 
   const loadUserData = useCallback(async () => {
     if (!currentUser) return;
     try {
       await ApiService.ready; // ensure token is loaded from SecureStore first
-      console.log('🔍 ColorWheelScreen: About to call getUserColorMatches, token exists:', !!ApiService.getToken?.());
+      if (__DEV__) {
+        console.log('🔍 ColorWheelScreen: About to call getUserColorMatches, token exists:', !!ApiService.getToken?.());
+      }
       const matches = await ApiService.getUserColorMatches();
-      console.log('🔍 ColorWheelScreen: getUserColorMatches completed successfully');
+      if (__DEV__) {
+        console.log('🔍 ColorWheelScreen: getUserColorMatches completed successfully');
+      }
       // TODO: Use matches data if needed
     } catch (error) {
       console.error('Failed to load user data:', error);
@@ -281,19 +281,10 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
       {/* Color Extractor Modal */}
       {showExtractor && (
         <CoolorsColorExtractor
-          visible={showExtractor}              // prop is harmless – component ignores unknown props
-          mode={extractorMode}                 // NEW
-          initialImageUri={extractorImageUri}
           initialSlots={5}
-          navigateOnActions={false}
           onComplete={handleExtractorComplete}
-          onCancel={() => {
-            setShowExtractor(false);
-            setExtractorImageUri(null);
-          }}
           onClose={() => {
             setShowExtractor(false);
-            setExtractorImageUri(null);
           }}
         />
       )}

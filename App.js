@@ -11,12 +11,11 @@ import * as SecureStore from 'expo-secure-store';
 import * as Updates from 'expo-updates';
 
 // Production error handler to capture fatal JS errors
-if (!__DEV__) {
-  const oldHandler = global.ErrorUtils.getGlobalHandler?.();
+if (!__DEV__ && global?.ErrorUtils?.setGlobalHandler) {
+  const old = global.ErrorUtils.getGlobalHandler?.();
   global.ErrorUtils.setGlobalHandler((err, isFatal) => {
-    // send to your backend or Sentry
-    console.log('JS Fatal:', isFatal, err?.message, err?.stack);
-    oldHandler?.(err, isFatal);
+    console.log('JS Fatal:', isFatal, err?.message, err?.stack); // or POST to your server
+    old?.(err, isFatal);
   });
 }
 import ApiService from './src/services/api';

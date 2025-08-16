@@ -40,7 +40,11 @@ class ErrorBoundary extends React.Component {
     console.error('🚨 Error stack:', error?.stack);
     console.error('🚨 Component stack:', errorInfo?.componentStack);
     console.error('🚨 Error toString:', String(error));
-    console.error('🚨 Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+    try {
+      console.error('🚨 Full error object:', JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+    } catch {
+      console.error('🚨 Full error object: <unserializable>');
+    }
 
     const errorDetails = {
       name: error?.name,

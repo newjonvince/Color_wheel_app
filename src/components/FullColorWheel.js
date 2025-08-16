@@ -28,7 +28,7 @@ try {
   RadialGradient = Skia.RadialGradient;
   vec = Skia.vec;
 } catch (e) {
-  console.warn('Skia not available, using fallback views');
+  if (__DEV__) console.warn('Skia not available, using fallback views');
   Canvas = View;
   SkiaCircle = () => null;
   SweepGradient = () => null;
@@ -128,10 +128,10 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   ];
 
   const activeIdx = useSharedValue(0);
+  // JS-side set (safe in React effects)
   const freed = useRef(new Set(freedIndices || []));
-  
-  // Create a shared value version of freed indices for worklet access
-  const freedIndicesShared = useSharedValue(Array.from(freed.current));
+  // Worklet-safe mirror (array of numbers)
+  const freedIdxSV = useSharedValue((freedIndices || []).slice());
 
   // Pre-compute hue sweep colors for performance
   const hueSweepColors = useMemo(() => {
@@ -197,7 +197,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   // Reset freed handles only when scheme changes, not on color changes
   useEffect(() => {
     freed.current.clear(); // Reset freed handles on scheme change
-    freedIndicesShared.value = []; // Also clear shared value
+    freedIdxSV.value = []; // Also clear shared value
     const { h: hue = 0, s: sat = 100, l: light = 50 } = hexToHsl(initialHex) || {};
     const sat01 = sat / 100;
     
@@ -209,6 +209,12 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
     }
     emitPalette();
   }, [scheme]);
+
+  // Keep JS set in sync when prop changes
+  useEffect(() => {
+    freed.current = new Set(freedIndices || []);
+    freedIdxSV.value = (freedIndices || []).slice();
+  }, [freedIndices]);
 
   // If linked, keep non-freed handles aligned to base during re-renders
   useEffect(() => {
@@ -244,7 +250,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
         callJS(onHexChange, result[sel]);
       }
     } catch (e) {
-      callJS(console.warn, 'emitPalette error:', e);
+      if (__DEV__) callJS(console.warn, 'emitPalette error:', e);
     }
   };
 
@@ -320,8 +326,8 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       if (linked && idx !== 0) { 
         // Update both ref and shared value for worklet compatibility
         callJS(() => freed.current.add(idx));
-        const newFreed = [...freedIndicesShared.value, idx];
-        freedIndicesShared.value = Array.from(new Set(newFreed));
+        const newFreed = [...freedIdxSV.value, idx];
+        freedIdxSV.value = Array.from(new Set(newFreed));
       }
 
       handleAngles[idx].value = deg;
@@ -338,21 +344,24 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
 
   // Public setters (used by numeric inputs)
   const setHandleHSL = (idx, h, s, l) => {
-    handleAngles[idx].value = mod(h, 360);
-    handleSats[idx].value = clamp01(s / 100);
-    handleLights[idx].value = Math.max(0, Math.min(100, l));
-    // If linked and idx==0, sync others that aren't freed
-    if (linked && idx === 0) {
+    const count = SCHEME_COUNTS[scheme] || 1;
+    const i = Math.max(0, Math.min(idx, count - 1));
+    handleAngles[i].value = mod(h, 360);
+    handleSats[i].value = clamp01(s / 100);
+    handleLights[i].value = Math.max(0, Math.min(100, l));
+    
+    // If linked, update other handles too
+    if (linked && i === 0) {
       const c = SCHEME_COUNTS[scheme] || 1;
-      for (let i = 1; i < c; i++) {
-        if (!freed.current.has(i)) {    // OK now: this runs on JS, not UI
-          handleAngles[i].value = mod(h + offsets[i], 360);
-          handleSats[i].value = clamp01(s / 100);
-          handleLights[i].value = Math.max(0, Math.min(100, l));
+      for (let k = 1; k < c; k++) {
+        if (!freed.current.has(k)) {
+          handleAngles[k].value = mod(h + offsets[k], 360);
+          handleSats[k].value = clamp01(s / 100);
+          handleLights[k].value = Math.max(0, Math.min(100, l));
         }
       }
     }
-    emitPalette(); // emitPalette *is* a worklet, but calling it from JS is fine (it'll run on JS in this path)
+    emitPalette();
   };
   // Expose imperative setters for numeric inputs (for live updates while typing)
   useImperativeHandle(ref, () => ({
