@@ -1,20 +1,20 @@
 // screens/ColorWheelScreen.js
-// Screen that hosts the wheel + controls: link/unlink, H/S/L inputs, reset, randomize, and shows scheme swatches.
+// Screen that hosts the Canva-style wheel + scheme selector + camera/gallery
 
 import React, { useMemo, useRef, useState, useCallback } from 'react';
-import { Dimensions, Platform, View, Text, TextInput, Pressable, TouchableOpacity } from 'react-native';
+import { Dimensions, Platform, View, Text, TextInput, Pressable, TouchableOpacity, ScrollView } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { getColorScheme, hexToHsl, hslToHex } from '../utils/color';
-import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 import FullColorWheel, { SCHEME_COUNTS, SCHEME_OFFSETS } from '../components/FullColorWheel';
 import ApiService from '../services/api';
+import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 
 const { width: screenWidth } = Dimensions.get('window');
-const WHEEL_SIZE = Math.min(screenWidth * 0.9, 380);
-
-const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const WHEEL_SIZE = Math.min(screenWidth * 0.92, 380);
 const mod = (a, n) => ((a % n) + n) % n;
+
+const SCHEMES = ['complementary','analogous','split-complementary','triadic','tetradic','monochromatic'];
 
 export default function ColorWheelScreen({ navigation, currentUser }) {
   const [selectedFollowsActive, setSelectedFollowsActive] = React.useState(true);
@@ -22,20 +22,16 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
   const [selectedScheme, setSelectedScheme] = useState('complementary');
   const [palette, setPalette] = useState(['#FF6B6B']);
   const [selectedColor, setSelectedColor] = useState('#FF6B6B');
-  const [baseHex, setBaseHex] = useState('#FF6B6B'); // new: decoupled from selectedColor
+  const [baseHex, setBaseHex] = useState('#FF6B6B');
   const [linked, setLinked] = useState(true);
   const [activeIdx, setActiveIdx] = useState(0);
-  
-  // Camera/Gallery extractor modal state
   const [showExtractor, setShowExtractor] = useState(false);
 
-  // HSL input state is derived from Selected Color (active handle will update wheel though)
   const hsl = hexToHsl(selectedColor) || { h: 0, s: 100, l: 50 };
   const [hIn, setHIn] = useState(String(Math.round(hsl.h)));
   const [sIn, setSIn] = useState(String(Math.round(hsl.s)));
   const [lIn, setLIn] = useState(String(Math.round(hsl.l)));
 
-  // Keep text fields in sync when selectedColor changes
   React.useEffect(() => {
     const { h=0, s=100, l=50 } = hexToHsl(selectedColor) || {};
     setHIn(String(Math.round(h)));
@@ -47,13 +43,12 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
     const H = mod(parseFloat(hIn) || 0, 360);
     const S = Math.max(0, Math.min(100, parseFloat(sIn) || 0));
     const L = Math.max(0, Math.min(100, parseFloat(lIn) || 0));
-    setSelectedColor(hslToHex(H, S, L));
-    // Use the ref to keep wheel in sync on blur
+    const hex = hslToHex(H, S, L);
+    setSelectedColor(hex);
     wheelRef.current?.setActiveHandleHSL?.(H, S, L);
   };
 
   const resetScheme = (anchorHex = selectedColor) => {
-    // Reset to canonical offsets from anchor hue
     const { h=0, s=100, l=50 } = hexToHsl(anchorHex) || {};
     const c = SCHEME_COUNTS[selectedScheme] || 1;
     const offs = SCHEME_OFFSETS[selectedScheme] || [0];
@@ -61,25 +56,23 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
       hslToHex(mod(h + (offs[i] ?? 0), 360), s, l)
     );
     setPalette(result);
-    setBaseHex(anchorHex); // anchor the wheel to this hex
+    setBaseHex(anchorHex);
     setLinked(true);
   };
 
   const randomize = () => {
     const h = Math.floor(Math.random()*360);
-    const s = 60 + Math.floor(Math.random()*40); // 60–100%
-    const l = 45 + Math.floor(Math.random()*10); // 45–55%
+    const s = 60 + Math.floor(Math.random()*40);
+    const l = 45 + Math.floor(Math.random()*10);
     const hex = hslToHex(h, s, l);
     setSelectedColor(hex);
-    setBaseHex(hex); // anchor the wheel to the same hex
-    resetScheme(hex); // pass the new hex explicitly to avoid stale state
+    setBaseHex(hex);
+    resetScheme(hex);
   };
 
-  // Camera/Gallery handlers
-  const openCamera = () => { setShowExtractor(true); };
-  const openGallery = () => { setShowExtractor(true); };
+  const openCamera = () => setShowExtractor(true);
+  const openGallery = () => setShowExtractor(true);
 
-  // Handle extractor completion (object with { imageUri, slots, activeIndex })
   const handleExtractorComplete = (result) => {
     const extractedPalette = Array.isArray(result?.slots) ? result.slots : [];
     if (extractedPalette.length > 0) {
@@ -87,7 +80,6 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
       setBaseHex(newBaseHex);
       setSelectedColor(newBaseHex);
       setPalette(extractedPalette);
-      // Don't call resetScheme - keep the extracted palette
     }
     setShowExtractor(false);
   };
@@ -95,127 +87,90 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
   const loadUserData = useCallback(async () => {
     if (!currentUser) return;
     try {
-      await ApiService.ready; // ensure token is loaded from SecureStore first
-      if (__DEV__) {
-        console.log('🔍 ColorWheelScreen: About to call getUserColorMatches, token exists:', !!ApiService.getToken?.());
-      }
-      const matches = await ApiService.getUserColorMatches();
-      if (__DEV__) {
-        console.log('🔍 ColorWheelScreen: getUserColorMatches completed successfully');
-      }
-      // TODO: Use matches data if needed
+      await ApiService.ready;
+      await ApiService.getUserColorMatches();
     } catch (error) {
-      console.error('Failed to load user data:', error);
       if (error.isAuthError) {
-        // Navigate to login instead of showing unavailable
         navigation?.navigate('Login');
-        return;
       }
     }
   }, [currentUser, navigation]);
+  useFocusEffect(useCallback(() => { loadUserData(); }, [loadUserData]));
 
-  // Run on focus so we redirect on 401 instead of showing "Unavailable"
-  useFocusEffect(useCallback(() => {
-    loadUserData();
-  }, [loadUserData]));
-
-  // Prefer live palette from wheel; otherwise derive
   const schemeColors = useMemo(() => {
     if (Array.isArray(palette) && palette.length > 0) return palette;
     return getColorScheme(selectedColor, selectedScheme, 0);
   }, [palette, selectedColor, selectedScheme]);
 
+  const schemeTitle = selectedScheme ? (selectedScheme[0].toUpperCase() + selectedScheme.slice(1)) : 'Scheme';
+
   return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-start', paddingTop: 12 }}>
-      {/* Wheel with Camera/Gallery Icons */}
+    <ScrollView contentContainerStyle={{ alignItems: 'center', paddingTop: 12, paddingBottom: 24 }}>
+      {/* Scheme selector and live selected swatch */}
+      <View style={{ width: '92%', maxWidth: 520, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
+          {SCHEMES.map((name) => (
+            <Pressable
+              key={name}
+              onPress={() => setSelectedScheme(name)}
+              style={{
+                paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999,
+                borderWidth: 1, borderColor: selectedScheme === name ? '#0d47a1' : '#bbb',
+                marginRight: 6, marginBottom: 6,
+                backgroundColor: selectedScheme === name ? '#E3F2FD' : '#fff'
+              }}
+            >
+              <Text style={{ fontWeight: '600', textTransform: 'capitalize' }}>{name}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <View style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: selectedColor, borderWidth: 1, borderColor: '#ddd' }} />
+      </View>
+
+      {/* Wheel + camera/gallery buttons */}
       <View style={{ position: 'relative', alignItems: 'center' }}>
         <FullColorWheel
           ref={wheelRef}
           selectedFollowsActive={selectedFollowsActive}
           size={WHEEL_SIZE}
           scheme={selectedScheme}
-          initialHex={baseHex} // use baseHex, not selectedColor
+          initialHex={baseHex}
           linked={linked}
           onToggleLinked={() => setLinked(v => !v)}
-          onColorsChange={(colors) => {
-            if (Array.isArray(colors) && colors.length) setPalette(colors);
-          }}
-          onHexChange={(hex) => {
-            if (hex) setSelectedColor(hex);
-          }}
+          onColorsChange={(colors) => { if (Array.isArray(colors) && colors.length) setPalette(colors); }}
+          onHexChange={(hex) => { if (hex) setSelectedColor(hex); }}
           onActiveHandleChange={(i) => setActiveIdx(i)}
         />
-        
-        {/* Camera and Gallery Icons */}
-        <View style={{
-          position: 'absolute', 
-          bottom: -20, 
-          flexDirection: 'row', 
-          justifyContent: 'center'
-        }}>
-          <TouchableOpacity
-            onPress={openCamera}
-            style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.9)',
-              borderRadius: 25,
-              width: 50,
-              height: 50,
-              justifyContent: 'center',
-              alignItems: 'center',
-              marginRight: 20,
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.25,
-              shadowRadius: 3.84,
-              elevation: 5,
-            }}
-          >
+
+        <View style={{ position: 'absolute', bottom: -20, flexDirection: 'row', justifyContent: 'center' }}>
+          <TouchableOpacity onPress={openCamera}
+            style={{ backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 25, width: 50, height: 50, justifyContent: 'center', alignItems: 'center',
+                     marginRight: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 }}>
             <MaterialIcons name="photo-camera" size={24} color="#333" />
           </TouchableOpacity>
-          
-          <TouchableOpacity
-            onPress={openGallery}
-            style={{
-              backgroundColor: 'rgba(255, 255, 255, 0.9)',
-              borderRadius: 25,
-              width: 50,
-              height: 50,
-              justifyContent: 'center',
-              alignItems: 'center',
-              shadowColor: '#000',
-              shadowOffset: { width: 0, height: 2 },
-              shadowOpacity: 0.25,
-              shadowRadius: 3.84,
-              elevation: 5,
-            }}
-          >
+          <TouchableOpacity onPress={openGallery}
+            style={{ backgroundColor: 'rgba(255,255,255,0.95)', borderRadius: 25, width: 50, height: 50, justifyContent: 'center', alignItems: 'center',
+                     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84, elevation: 5 }}>
             <Feather name="image" size={24} color="#333" />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* Controls row */}
-      <View style={{ width: '92%', maxWidth: 520, marginTop: 12 }}>
+      {/* Controls */}
+      <View style={{ width: '92%', maxWidth: 520, marginTop: 28 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-          {/* Link toggle */}
-          <Pressable
-            onPress={() => setLinked(v => !v)}
-            style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: linked ? '#e8f5e9' : '#ffebee', borderWidth: 1, borderColor: linked ? '#2e7d32' : '#c62828' }}
-          >
+          <Pressable onPress={() => setLinked(v => !v)}
+            style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: linked ? '#e8f5e9' : '#ffebee', borderWidth: 1, borderColor: linked ? '#2e7d32' : '#c62828' }}>
             <Text style={{ fontWeight: '600' }}>{linked ? 'Linked' : 'Unlinked'}</Text>
           </Pressable>
 
-          {/* Selected Color mode toggle */}
-          <Pressable
-            onPress={() => setSelectedFollowsActive(v => !v)}
-            style={{ marginLeft: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: selectedFollowsActive ? '#e3f2fd' : '#fff3e0', borderWidth: 1, borderColor: selectedFollowsActive ? '#1565c0' : '#ef6c00' }}
-          >
+          <Pressable onPress={() => setSelectedFollowsActive(v => !v)}
+            style={{ marginLeft: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: selectedFollowsActive ? '#e3f2fd' : '#fff3e0', borderWidth: 1, borderColor: selectedFollowsActive ? '#1565c0' : '#ef6c00' }}>
             <Text style={{ fontWeight: '600' }}>{selectedFollowsActive ? 'Selected = Active Handle' : 'Selected = Handle #1'}</Text>
           </Pressable>
 
-          {/* Reset & Random */}
           <View style={{ flexDirection: 'row', marginLeft: 8, marginRight: 8 }}>
-            <Pressable onPress={resetScheme} style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#999', marginRight: 8 }}>
+            <Pressable onPress={() => resetScheme()} style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#999', marginRight: 8 }}>
               <Text>Reset</Text>
             </Pressable>
             <Pressable onPress={randomize} style={{ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#999' }}>
@@ -224,13 +179,13 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
           </View>
         </View>
 
-        {/* Numeric H/S/L */}
+        {/* HSL numeric inputs */}
         <View style={{ flexDirection: 'row', marginTop: 10, marginLeft: 8, marginRight: 8 }}>
           <View style={{ flex: 1, marginRight: 4 }}>
             <Text style={{ fontSize: 12, color: '#555' }}>H</Text>
             <TextInput
               value={hIn}
-              onChangeText={(v) => { setHIn(v); try { const H = ((parseFloat(v) || 0)%360+360)%360; const S = Math.max(0, Math.min(100, parseFloat(sIn) || 0)); const L = Math.max(0, Math.min(100, parseFloat(lIn) || 0)); if (wheelRef.current && wheelRef.current.setActiveHandleHSL) { wheelRef.current.setActiveHandleHSL(H,S,L); } } catch(e){} }}
+              onChangeText={(v) => { setHIn(v); try { const H = ((parseFloat(v) || 0)%360+360)%360; const S = Math.max(0, Math.min(100, parseFloat(sIn) || 0)); const L = Math.max(0, Math.min(100, parseFloat(lIn) || 0)); wheelRef.current?.setActiveHandleHSL?.(H,S,L);} catch(e){} }}
               onBlur={applyNumericInputs}
               keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'}
               style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 }}
@@ -241,7 +196,7 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
             <Text style={{ fontSize: 12, color: '#555' }}>S (%)</Text>
             <TextInput
               value={sIn}
-              onChangeText={(v) => { setSIn(v); try { const H = ((parseFloat(hIn) || 0)%360+360)%360; const S = Math.max(0, Math.min(100, parseFloat(v) || 0)); const L = Math.max(0, Math.min(100, parseFloat(lIn) || 0)); if (wheelRef.current && wheelRef.current.setActiveHandleHSL) { wheelRef.current.setActiveHandleHSL(H,S,L); } } catch(e){} }}
+              onChangeText={(v) => { setSIn(v); try { const H = ((parseFloat(hIn) || 0)%360+360)%360; const S = Math.max(0, Math.min(100, parseFloat(v) || 0)); const L = Math.max(0, Math.min(100, parseFloat(lIn) || 0)); wheelRef.current?.setActiveHandleHSL?.(H,S,L);} catch(e){} }}
               onBlur={applyNumericInputs}
               keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'}
               style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 }}
@@ -252,7 +207,7 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
             <Text style={{ fontSize: 12, color: '#555' }}>L (%)</Text>
             <TextInput
               value={lIn}
-              onChangeText={(v) => { setLIn(v); try { const H = ((parseFloat(hIn) || 0)%360+360)%360; const S = Math.max(0, Math.min(100, parseFloat(sIn) || 0)); const L = Math.max(0, Math.min(100, parseFloat(v) || 0)); if (wheelRef.current && wheelRef.current.setActiveHandleHSL) { wheelRef.current.setActiveHandleHSL(H,S,L); } } catch(e){} }}
+              onChangeText={(v) => { setLIn(v); try { const H = ((parseFloat(hIn) || 0)%360+360)%360; const S = Math.max(0, Math.min(100, parseFloat(sIn) || 0)); const L = Math.max(0, Math.min(100, parseFloat(v) || 0)); wheelRef.current?.setActiveHandleHSL?.(H,S,L);} catch(e){} }}
               onBlur={applyNumericInputs}
               keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'}
               style={{ borderWidth: 1, borderColor: '#ccc', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 }}
@@ -262,32 +217,25 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
         </View>
       </View>
 
-      {/* Swatches preview */}
+      {/* Swatches */}
       <View style={{ width: '92%', maxWidth: 520, marginTop: 16 }}>
         <Text style={{ fontWeight: '700', marginBottom: 6 }}>Selected Color</Text>
         <View style={{ width: '100%', height: 44, borderRadius: 8, backgroundColor: selectedColor, borderWidth: 1, borderColor: '#ddd' }} />
-        <Text style={{ fontWeight: '700', marginTop: 16, marginBottom: 6 }}>{selectedScheme[0].toUpperCase() + selectedScheme.slice(1)} swatches</Text>
+        <Text style={{ fontWeight: '700', marginTop: 16, marginBottom: 6 }}>{schemeTitle} swatches</Text>
         <View style={{ flexDirection: 'row' }}>
           {schemeColors.map((c, i) => (
-            <View key={i} style={{
-              flex: 1, height: 40, borderRadius: 8, backgroundColor: c, borderWidth: 1, borderColor: '#ddd',
-              opacity: i === activeIdx ? 1 : 0.95,
-              marginRight: i < schemeColors.length - 1 ? 8 : 0
-            }} />
+            <View key={i} style={{ flex: 1, height: 40, borderRadius: 8, backgroundColor: c, borderWidth: 1, borderColor: '#ddd', opacity: i === activeIdx ? 1 : 0.95, marginRight: i < schemeColors.length - 1 ? 8 : 0 }} />
           ))}
         </View>
       </View>
 
-      {/* Color Extractor Modal */}
       {showExtractor && (
         <CoolorsColorExtractor
           initialSlots={5}
           onComplete={handleExtractorComplete}
-          onClose={() => {
-            setShowExtractor(false);
-          }}
+          onClose={() => setShowExtractor(false)}
         />
       )}
-    </View>
+    </ScrollView>
   );
 }

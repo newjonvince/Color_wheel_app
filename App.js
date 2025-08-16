@@ -1,3 +1,4 @@
+// App.patched.js — hardened App entry with retry for ColorWheel import
 import 'react-native-gesture-handler';
 import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, AppState, Platform, LogBox, TouchableOpacity } from 'react-native';
@@ -34,12 +35,11 @@ const linking = {
 };
 
 // --- Optional crash/error reporting (Sentry) -------------------------------
-let sentryReady = false;
+let sentryReady = FalseLikeToAvoidTreeShaking(); // tiny trick to keep block intact
+function FalseLikeToAvoidTreeShaking(){ return false; }
 try {
-  // Only attempt to load Sentry when DSN is set (Expo: app.json -> expo.extra.public.SENTRY_DSN or EXPO_PUBLIC_SENTRY_DSN)
   const SENTRY_DSN = process.env.EXPO_PUBLIC_SENTRY_DSN;
   if (SENTRY_DSN) {
-    // Lazy require so local dev without the dep won't crash
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const Sentry = require('sentry-expo');
     Sentry.init({
@@ -59,7 +59,6 @@ try {
 let isErrorHandlerActive = false;
 const setupErrorHandling = () => {
   try {
-    // Guard ErrorUtils access carefully (Hermes + RN versions can vary)
     if (typeof ErrorUtils !== 'undefined' && ErrorUtils.setGlobalHandler) {
       const originalHandler = ErrorUtils.getGlobalHandler();
       const jsErrorHandler = (error, isFatal) => {
@@ -68,7 +67,6 @@ const setupErrorHandling = () => {
         try {
           console.error('🚨 JS Error:', error?.message || error, 'isFatal:', isFatal);
           console.error('Stack:', error?.stack);
-          // pass through to RN's default
           if (typeof originalHandler === 'function') originalHandler(error, isFatal);
         } catch (handlerError) {
           console.error('Error in JS error handler:', handlerError);
@@ -85,29 +83,24 @@ const setupErrorHandling = () => {
     console.error('Failed to setup error handling:', setupError);
   }
 
-  // Unhandled promise rejections (helps catch silent network/auth errors)
   try {
     const onUnhandledRejection = (event) => {
       const reason = event?.reason || event;
       const msg = (reason && (reason.message || reason.toString?.())) || 'Unknown rejection';
       console.error('🚨 Unhandled promise rejection:', msg);
     };
-    // @ts-ignore - RN ships a DOM-like event API for globalThis in Hermes
     globalThis.addEventListener?.('unhandledrejection', onUnhandledRejection);
   } catch (e) {
     console.warn('Unhandled rejection handler not installed:', e?.message);
   }
 };
-
 setupErrorHandling();
 
-// Tidy logs in production / TestFlight
 if (!__DEV__) {
   LogBox.ignoreAllLogs(true);
 }
 
-// --- Screens ---------------------------------------------------------------
-// Enhanced import debugging for persistent crash
+// --- Screens (with resilient fallback) ------------------------------------
 console.log('🔍 App.js: Starting screen imports...');
 
 let ColorWheelScreen;
@@ -117,36 +110,42 @@ try {
   console.log('✅ App.js: ColorWheelScreen imported successfully');
 } catch (error) {
   console.error('🚨 ColorWheelScreen import failed:', error);
-  console.error('🚨 Import error name:', error?.name);
-  console.error('🚨 Import error message:', error?.message);
-  console.error('🚨 Import error stack:', error?.stack);
-  // Fallback component to prevent app crash
-  ColorWheelScreen = ({ onLogout }) => (
+  const FallbackWheel = ({ onLogout, onRetry }) => (
     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-      <Text style={{ fontSize: 18, color: '#ff6b6b', textAlign: 'center', marginBottom: 20 }}>
+      <Text style={{ fontSize: 18, color: '#ff6b6b', textAlign: 'center', marginBottom: 12 }}>
         Color Wheel Unavailable
       </Text>
       <Text style={{ fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20 }}>
-        The color wheel feature is temporarily unavailable. Please try restarting the app.
+        The color wheel feature is temporarily unavailable. Try reloading the wheel or restarting the app.
       </Text>
-      <TouchableOpacity 
-        style={{ backgroundColor: '#007AFF', padding: 12, borderRadius: 8 }}
-        onPress={() => onLogout?.()}
-      >
-        <Text style={{ color: 'white', fontSize: 16 }}>Back to Login</Text>
-      </TouchableOpacity>
+      <View style={{ flexDirection: 'row', gap: 12 }}>
+        <TouchableOpacity 
+          style={{ backgroundColor: '#007AFF', padding: 12, borderRadius: 8, marginRight: 12 }}
+          onPress={() => onRetry?.()}
+        >
+          <Text style={{ color: 'white', fontSize: 16 }}>Try Again</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={{ backgroundColor: '#888', padding: 12, borderRadius: 8 }}
+          onPress={() => onLogout?.()}
+        >
+          <Text style={{ color: 'white', fontSize: 16 }}>Back to Login</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
+  ColorWheelScreen = FallbackWheel;
 }
 
+let BoardsScreen, DiscoverScreen, CommunityFeedScreen, LoginScreen, SignUpScreen, UserSettingsScreen;
 try {
   console.log('🔍 App.js: Importing other screens...');
-  var BoardsScreen = require('./src/screens/BoardsScreen').default;
-  var DiscoverScreen = require('./src/screens/DiscoverScreen').default;
-  var CommunityFeedScreen = require('./src/screens/CommunityFeedScreen').default;
-  var LoginScreen = require('./src/screens/LoginScreen').default;
-  var SignUpScreen = require('./src/screens/SignUpScreen').default;
-  var UserSettingsScreen = require('./src/screens/UserSettingsScreen').default;
+  BoardsScreen = require('./src/screens/BoardsScreen').default;
+  DiscoverScreen = require('./src/screens/DiscoverScreen').default;
+  CommunityFeedScreen = require('./src/screens/CommunityFeedScreen').default;
+  LoginScreen = require('./src/screens/LoginScreen').default;
+  SignUpScreen = require('./src/screens/SignUpScreen').default;
+  UserSettingsScreen = require('./src/screens/UserSettingsScreen').default;
   console.log('✅ App.js: All other screens imported successfully');
 } catch (error) {
   console.error('🚨 App.js: Other screens import failed:', error);
@@ -161,27 +160,18 @@ const makePlaceholder = (title) => (props) => (
     </Text>
   </View>
 );
-
 if (!BoardsScreen)        BoardsScreen = makePlaceholder('Profile Unavailable');
 if (!CommunityFeedScreen) CommunityFeedScreen = makePlaceholder('Community Unavailable');
 if (!UserSettingsScreen)  UserSettingsScreen = makePlaceholder('Settings Unavailable');
 if (!LoginScreen)         LoginScreen = makePlaceholder('Login Unavailable');
 if (!SignUpScreen)        SignUpScreen = makePlaceholder('Sign Up Unavailable');
 
-// Components - dynamic import with fallback
 let ErrorBoundary = React.Fragment;
-try {
-  ErrorBoundary = require('./src/components/ErrorBoundary').default;
-} catch (e) {
-  console.warn('ErrorBoundary unavailable, using Fragment.');
-}
+try { ErrorBoundary = require('./src/components/ErrorBoundary').default; }
+catch { console.warn('ErrorBoundary unavailable, using Fragment.'); }
 
 const Tab = createBottomTabNavigator();
-
-// Helper: normalize various callback shapes to a user object
 const pickUser = (u) => (u?.user ? u.user : u);
-
-// Emoji tab icon (memoized)
 const EmojiTabIcon = React.memo(({ name, focused }) => {
   const icons = {
     Community: focused ? '🌍' : '🌎',
@@ -191,8 +181,6 @@ const EmojiTabIcon = React.memo(({ name, focused }) => {
   };
   return <Text style={styles.tabIcon}>{icons[name] || '📱'}</Text>;
 });
-
-// Helper: get storage key for color matches based on user ID
 const getMatchesKey = (userId) => `savedColorMatches:${userId || 'anon'}`;
 
 export default function App() {
@@ -202,63 +190,63 @@ export default function App() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [showSignUp, setShowSignUp] = useState(false);
   const [savedColorMatches, setSavedColorMatches] = useState([]);
+  const [wheelReloadNonce, setWheelReloadNonce] = useState(0);
 
-  // Safe initialization with multiple fallbacks
+  const retryLoadColorWheel = useCallback(async () => {
+    try {
+      // Try a dynamic import to recover from transient module init failures
+      const mod = await import('./src/screens/ColorWheelScreen');
+      if (mod?.default) {
+        // replace module-level variable and trigger a re-render
+        ColorWheelScreen = mod.default;
+        setWheelReloadNonce(n => n + 1);
+        return;
+      }
+    } catch (e) {
+      console.warn('Retry import failed, attempting app reload:', e?.message);
+    }
+    try { await Updates.reloadAsync(); } catch {}
+  }, []);
+
   const initializeApp = useCallback(async () => {
     let initTimeout;
     try {
       console.log('🚀 Starting app initialization...');
-
-      // Protect against hanging init on TestFlight
       initTimeout = setTimeout(() => {
         console.error('⏰ App initialization timeout');
         setLoading(false);
         setIsInitialized(true);
       }, 10000);
-
-      // Give native modules a tick to be ready
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Read token from SecureStore first, fallback to AsyncStorage
       let token = null;
       try {
         if (SecureStore?.getItemAsync) {
           token = await SecureStore.getItemAsync('fashion_color_wheel_auth_token');
           if (!token) token = await SecureStore.getItemAsync('authToken'); // legacy
         }
-        if (!token) {
-          token = await AsyncStorage.getItem('authToken');
-        }
+        if (!token) token = await AsyncStorage.getItem('authToken');
       } catch (storageError) {
         console.error('📱 Storage access error:', storageError?.message);
-        // Continue without token
       }
 
       if (token) {
         try {
           await ApiService?.setToken?.(token);
-          // Wait for ApiService to be fully ready before proceeding
           await ApiService.ready;
-          // Validate token quickly
           const timeoutPromise = new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
           );
-
           let profile = null;
           if (ApiService?.getUserProfile) {
-            // Ensure token is ready before making authenticated call
-            await ApiService.ready;
             profile = await Promise.race([ApiService.getUserProfile(), timeoutPromise]);
           } else {
-            // fallback to stored userData
             const storedUserData = await AsyncStorage.getItem('userData');
             if (storedUserData) profile = JSON.parse(storedUserData);
           }
-
           const normalized = pickUser(profile);
           if (normalized?.id) {
             setUser(normalized);
-            // Ensure token is ready before loading color matches
             await ApiService.ready;
             await loadSavedColorMatches(getMatchesKey(normalized.id));
           } else {
@@ -266,7 +254,6 @@ export default function App() {
           }
         } catch (profileError) {
           console.warn('Profile validation failed, falling back:', profileError?.message);
-          // Fallback to stored userData
           const storedUserData = await AsyncStorage.getItem('userData');
           if (storedUserData) {
             const userData = JSON.parse(storedUserData);
@@ -290,10 +277,8 @@ export default function App() {
     }
   }, []);
 
-  // Safe token clearing helper
   const clearStoredToken = async () => {
     try {
-      // Clear both token keys to avoid "half logged in" state
       await SecureStore?.deleteItemAsync?.('fashion_color_wheel_auth_token');
       await SecureStore?.deleteItemAsync?.('authToken');
       await AsyncStorage.removeItem('authToken');
@@ -310,7 +295,6 @@ export default function App() {
     return () => clearTimeout(initTimer);
   }, [initializeApp]);
 
-  // Handle app state changes
   useEffect(() => {
     const handleAppStateChange = (nextAppState) => {
       if (nextAppState === 'active' && !isInitialized) {
@@ -324,19 +308,13 @@ export default function App() {
 
   const loadSavedColorMatches = useCallback(async (key) => {
     try {
-      console.log('App: Loading saved color matches for user');
-      
-      // Try to load from backend first
       try {
-        await ApiService.ready; // ensure token is loaded from SecureStore first
-        console.log('🔍 App.js: About to call getUserColorMatches, token exists:', !!ApiService.getToken?.());
+        await ApiService.ready;
         const backendMatches = typeof ApiService.getUserColorMatches === 'function'
           ? await ApiService.getUserColorMatches()
           : null;
         if (backendMatches) {
-          console.log('App: Loaded', backendMatches?.length || 0, 'color matches from backend');
           setSavedColorMatches(backendMatches || []);
-          // Also save to local storage as backup
           if (backendMatches?.length > 0) {
             await AsyncStorage.setItem(key, JSON.stringify(backendMatches));
           }
@@ -345,20 +323,15 @@ export default function App() {
       } catch (backendError) {
         console.warn('Backend load failed, falling back to local storage:', backendError);
       }
-      
-      // Fallback to local storage
       const saved = await AsyncStorage.getItem(key);
       const localMatches = saved ? JSON.parse(saved) : [];
-      console.log('App: Loaded', localMatches.length, 'color matches from local storage');
       setSavedColorMatches(localMatches);
-      
     } catch (error) {
       console.error('Error loading saved color matches:', error);
       setSavedColorMatches([]);
     }
   }, []);
 
-  // Load color matches when user changes
   useEffect(() => {
     if (user?.id) {
       loadSavedColorMatches(getMatchesKey(user.id));
@@ -367,54 +340,35 @@ export default function App() {
 
   const saveColorMatch = useCallback(async (colorMatch) => {
     try {
-      console.log('App: Saving color match:', colorMatch);
-      
-      // Validate colorMatch structure to prevent crashes
-      if (!colorMatch || typeof colorMatch !== 'object') {
-        throw new Error('Invalid color match data: must be an object');
-      }
-      
-      if (!colorMatch.colors || !Array.isArray(colorMatch.colors) || colorMatch.colors.length === 0) {
+      if (!colorMatch || typeof colorMatch !== 'object') throw new Error('Invalid color match data: must be an object');
+      if (!colorMatch.colors || !Array.isArray(colorMatch.colors) || colorMatch.colors.length === 0)
         throw new Error('Invalid color match data: colors array is required and must not be empty');
-      }
-      
-      if (!colorMatch.base_color || typeof colorMatch.base_color !== 'string') {
+      if (!colorMatch.base_color || typeof colorMatch.base_color !== 'string')
         throw new Error('Invalid color match data: base_color is required and must be a string');
-      }
-      
-      if (!colorMatch.scheme || typeof colorMatch.scheme !== 'string') {
+      if (!colorMatch.scheme || typeof colorMatch.scheme !== 'string')
         throw new Error('Invalid color match data: scheme is required and must be a string');
-      }
-      
-      // Save to backend first
+
       try {
         const savedResp = await ApiService.createColorMatch({
           base_color: colorMatch.base_color,
           scheme: colorMatch.scheme,
           colors: colorMatch.colors,
-          title: colorMatch.title || `${colorMatch.scheme} palette`,
+          title: colorMatch.title || `${colorMatch.scheme} palette',
           description: colorMatch.description || '',
           is_public: colorMatch.is_public || false
         });
         const savedMatch = (savedResp && savedResp.data) ? savedResp.data : savedResp;
-        console.log('App: Color match saved to backend:', savedMatch);
-        // Update local state with backend response (includes ID)
         const updated = [...savedColorMatches, savedMatch];
         setSavedColorMatches(updated);
-        // Also save to local storage as backup
         const key = getMatchesKey(user?.id);
         await AsyncStorage.setItem(key, JSON.stringify(updated));
         return savedMatch;
       } catch (backendError) {
-        console.error('Backend save failed, saving locally only:', backendError);
-        
-        // Fallback to local storage only
         const key = getMatchesKey(user?.id);
         const localMatch = { ...colorMatch, id: Date.now().toString(), created_at: new Date().toISOString() };
         const updated = [...savedColorMatches, localMatch];
         setSavedColorMatches(updated);
         await AsyncStorage.setItem(key, JSON.stringify(updated));
-        
         return localMatch;
       }
     } catch (error) {
@@ -424,73 +378,40 @@ export default function App() {
   }, [user?.id, savedColorMatches]);
 
   const handleLoginSuccess = useCallback(async (u) => {
-    console.log('🔍 App.js: handleLoginSuccess called with:', u);
     let nextUser;
     try {
       nextUser = pickUser(u);
-      console.log('🔍 App.js: pickUser result:', nextUser);
-      
-      // if the LoginScreen passes back a token, set it now
       try {
-        console.log('🔍 App.js: Setting token in ApiService...');
         if (nextUser?.token || nextUser?.authToken) {
           const tokenToSet = nextUser.token || nextUser.authToken;
-          console.log('🔍 App.js: Token to set:', tokenToSet ? 'present' : 'missing');
-          await ApiService.setToken?.(tokenToSet); 
+          await ApiService.setToken?.(tokenToSet);
           if (ApiService.ready) { await ApiService.ready; }
-          console.log('✅ App.js: Token set successfully in ApiService');
-        } else {
-          console.log('⚠️ App.js: No token found in user object');
         }
-      } catch (tokenError) {
-        console.error('🚨 App.js: Token setting error:', tokenError);
-      }
-      
-      console.log('🔍 App.js: Setting user state...');
+      } catch (tokenError) {}
       setUser(nextUser);
-      console.log('🔍 App.js: User state set successfully');
-      // Log API base URL and Reanimated readiness at app startup for debugging
-      try {
-        if (__DEV__) {
-          console.log('🚀 App startup - API base:', ApiService?.baseURL || 'API service not ready');
-          console.log('🎨 Reanimated ready:', typeof global.__reanimatedWorkletInit === 'function');
-        }
-      } catch (error) {
-        if (__DEV__) console.error('Failed to fetch user data:', error);
-        if (error.isAuthError) {
-          // Clear user state and let auth flow handle login
-          setUser(null);
-          return;
-        }
-        // Don't set user data on error, but don't crash either
+      if (__DEV__) {
+        console.log('🚀 App startup - API base:', ApiService?.baseURL || 'API service not ready');
+        console.log('🎨 Reanimated ready:', typeof global.__reanimatedWorkletInit === 'function');
       }
     } catch (error) {
       console.error('🚨 App.js: handleLoginSuccess error:', error);
-      console.error('🚨 App.js: Error name:', error?.name);
-      console.error('🚨 App.js: Error message:', error?.message);
-      console.error('🚨 App.js: Error stack:', error?.stack);
-      throw error; // Re-throw to trigger ErrorBoundary
+      throw error;
     }
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
       await AsyncStorage.setItem('userData', JSON.stringify(nextUser));
-    } catch (error) {
-      console.error('Error saving login state:', error);
-    }
+    } catch {}
   }, []);
 
   const handleSignUpComplete = useCallback(async (u) => {
     const nextUser = pickUser(u);
-    // if the LoginScreen passes back a token, set it now
     try { if (u && (u.token || u.authToken)) { ApiService.setToken?.(u.token || u.authToken); } } catch {}
     setUser(nextUser);
     try {
       await AsyncStorage.setItem('isLoggedIn', 'true');
       await AsyncStorage.setItem('userData', JSON.stringify(nextUser));
       await loadSavedColorMatches(getMatchesKey(nextUser?.id));
-    } catch (error) {
-      console.warn('Error storing user data in AsyncStorage:', error);
-    }
+    } catch {}
   }, [loadSavedColorMatches]);
 
   const handleLogout = useCallback(async () => {
@@ -502,8 +423,7 @@ export default function App() {
       await AsyncStorage.removeItem('userData');
       setUser(null);
       await loadSavedColorMatches(getMatchesKey(null));
-    } catch (error) {
-      console.error('Error logging out:', error);
+    } catch {
       setUser(null);
       await loadSavedColorMatches(getMatchesKey(null));
     }
@@ -518,14 +438,12 @@ export default function App() {
       setSavedColorMatches([]);
       setUser(null);
       await loadSavedColorMatches(getMatchesKey(null));
-    } catch (error) {
-      console.error('Error clearing data after account deletion:', error);
+    } catch {
       setUser(null);
       await loadSavedColorMatches(getMatchesKey(null));
     }
   }, [user?.id, loadSavedColorMatches]);
 
-  // Optional: Auto-reload on OTA update (helps TestFlight sessions)
   useEffect(() => {
     const checkUpdates = async () => {
       try {
@@ -534,14 +452,11 @@ export default function App() {
           await Updates.fetchUpdateAsync();
           await Updates.reloadAsync();
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     };
     if (!__DEV__) checkUpdates();
   }, []);
 
-  // --- Render ----------------------------------------------------------------
   if (loading || !isInitialized) {
     return (
       <SafeAreaProvider>
@@ -597,15 +512,12 @@ export default function App() {
               <Tab.Screen name="ColorWheel" options={{ title: 'Wheel' }}>
                 {(props) => (
                   <ColorWheelScreen
+                    key={wheelReloadNonce}                       // force remount after retry import
                     {...props}
                     currentUser={user || null}
-                    onSaveColorMatch={saveColorMatch || (() => {
-                      console.warn('saveColorMatch not available');
-                      return Promise.resolve();
-                    })}
-                    onLogout={handleLogout || (() => {
-                      console.warn('handleLogout not available');
-                    })}
+                    onSaveColorMatch={saveColorMatch || (() => Promise.resolve())}
+                    onLogout={handleLogout || (() => {})}
+                    onRetry={retryLoadColorWheel}                // exposed to fallback component
                     navigation={props?.navigation}
                   />
                 )}
@@ -653,27 +565,10 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  loadingText: {
-    fontSize: 18,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  errorText: {
-    fontSize: 14,
-    color: '#ff6b6b',
-    textAlign: 'center',
-    marginTop: 10,
-  },
+  container: { flex: 1 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  loadingText: { fontSize: 18, color: '#666', textAlign: 'center', marginBottom: 10 },
+  errorText: { fontSize: 14, color: '#ff6b6b', textAlign: 'center', marginTop: 10 },
   tabBar: {
     backgroundColor: 'white',
     borderTopWidth: 1,

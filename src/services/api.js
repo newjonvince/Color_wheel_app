@@ -165,12 +165,13 @@ function withAuthHeaders(extra = {}) {
 
 // Request interceptor: wait for bootstrap, inject Authorization unconditionally
 api.interceptors.request.use(async (cfg) => {
-  await ready;                              // guarantees initializeToken ran
+  await ready;
   cfg.headers = cfg.headers || {};
-  
   if (authToken) {
-    cfg.headers.Authorization = `Bearer ${authToken}`;   // set unconditionally
-    console.log('🔧 ApiService: Set Authorization header via interceptor');
+    cfg.headers.Authorization = `Bearer ${authToken}`;
+  }
+  return cfg;
+}, (error) => Promise.reject(error));
   } else {
     console.warn('⚠️ ApiService: No authToken available for request to', cfg.url);
     console.warn('⚠️ This request will fail with 401');
