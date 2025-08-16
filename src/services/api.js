@@ -93,7 +93,8 @@ const initializeToken = async () => {
       // ensure *all* axios calls carry the header (instance + any stray usage)
       api.defaults.headers.common.Authorization = `Bearer ${storedToken}`;
       try { require('axios').defaults.headers.common.Authorization = `Bearer ${storedToken}`; } catch {}
-      console.log('✅ ApiService: Token loaded successfully');
+      console.log('✅ ApiService: Token loaded successfully, length:', storedToken.length);
+      console.log('✅ ApiService: Axios defaults set with Authorization header');
     } else {
       console.log('⚠️ ApiService: No stored token found');
     }
@@ -110,6 +111,14 @@ export const setToken = async (t) => {
   // update axios defaults everywhere
   api.defaults.headers.common.Authorization = t ? `Bearer ${t}` : undefined;
   try { require('axios').defaults.headers.common.Authorization = t ? `Bearer ${t}` : undefined; } catch {}
+  
+  if (t) {
+    console.log('🔧 ApiService: setToken called with token length:', t.length);
+    console.log('🔧 ApiService: Updated axios defaults with new token');
+  } else {
+    console.log('🔧 ApiService: setToken called with null - clearing token');
+  }
+  
   try {
     if (t) {
       await SecureStore.setItemAsync(TOKEN_KEY, t);
@@ -143,6 +152,11 @@ api.interceptors.request.use(async (cfg) => {
   cfg.headers = cfg.headers || {};
   if (authToken && !cfg.headers.Authorization) {
     cfg.headers.Authorization = `Bearer ${authToken}`;
+    console.log('🔧 ApiService: Injected Authorization header via interceptor');
+  } else if (!authToken) {
+    console.warn('⚠️ ApiService: No authToken available for request to', cfg.url);
+  } else if (cfg.headers.Authorization) {
+    console.log('✅ ApiService: Authorization header already present');
   }
   return cfg;
 });
@@ -268,12 +282,14 @@ export const getColorMatches = async (params = {}) => {
 
 // App.js expects an array; provide a thin alias that unwraps { ok, data }
 export const getUserColorMatches = async (params = {}) => {
+  await ready; // Ensure token is loaded before making request
   // Filter out undefined/empty params to avoid sending them to server
   const cleanParams = Object.fromEntries(
     Object.entries(params).filter(([_, value]) => value !== undefined && value !== '' && value !== null)
   );
   const queryString = new URLSearchParams(cleanParams).toString();
   const url = `/colors/matches${queryString ? `?${queryString}` : ''}`;
+  console.log('🔍 ApiService: Making getUserColorMatches request to', url);
   const { data } = await api.get(url, withAuthHeaders());
   return Array.isArray(data?.data) ? data.data : (Array.isArray(data) ? data : []);
 };
