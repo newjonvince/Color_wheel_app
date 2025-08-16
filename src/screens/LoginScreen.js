@@ -4,6 +4,13 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ApiService from '../services/api';
 
+// Ensures network calls don't hang forever
+const withTimeout = (p, ms = 10000) => Promise.race([
+  p,
+  new Promise((_, rej) => setTimeout(() => rej(new Error('Request timed out')), ms))
+]);
+
+
 export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -17,7 +24,8 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
         // Write to both keys for compatibility (new key first, legacy key for fallback)
         await SecureStore.setItemAsync('fashion_color_wheel_auth_token', token, { keychainService: 'fashioncolorwheel.auth' });
         await SecureStore.setItemAsync('authToken', token, { keychainService: 'fashioncolorwheel.auth' });
-        ApiService.setToken(token); // keep axios authorized for subsequent calls
+        await ApiService.setToken(token);
+      await ApiService.ready; // keep axios authorized for subsequent calls
       }
     } catch (e) {
       console.warn('Failed to persist session:', e?.message);
@@ -46,7 +54,7 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
     setLoading(true);
 
     try {
-      const response = await ApiService.login(email.trim(), password);
+      const response = await withTimeout(ApiService.login(email.trim().toLowerCase(), password), 10000);
 
       // Accept common backend shapes
       const user = response?.user || response?.data?.user;
@@ -76,25 +84,25 @@ export default function LoginScreen({ onLoginSuccess, onSignUpPress }) {
     if (loading) return;
     setLoading(true);
     
-    console.log('🔍 LoginScreen: Demo login started...');
+    if (__DEV__) console.log('🔍 LoginScreen: Demo login started...');
     
     try {
-      console.log('🔍 LoginScreen: Calling ApiService.demoLogin()...');
-      const response = await ApiService.demoLogin();
-      console.log('🔍 LoginScreen: Demo login response received:', response);
+      if (__DEV__) console.log('🔍 LoginScreen: Calling ApiService.demoLogin()...');
+      const response = await withTimeout(ApiService.demoLogin(), 10000);
+      if (__DEV__) console.log('🔍 LoginScreen: Demo login response received:', response);
       
       const user = response?.user;
       const token = response?.token;
       
-      console.log('🔍 LoginScreen: Extracted user:', user);
-      console.log('🔍 LoginScreen: Extracted token:', !!token);
+      if (__DEV__) console.log('🔍 LoginScreen: Extracted user:', user);
+      if (__DEV__) console.log('🔍 LoginScreen: Extracted token:', !!token);
       
       if (user && token) {
-        console.log('🔍 LoginScreen: Saving session...');
+        if (__DEV__) console.log('🔍 LoginScreen: Saving session...');
         await saveSession({ user, token });
-        console.log('🔍 LoginScreen: Session saved, calling onLoginSuccess...');
+        if (__DEV__) console.log('🔍 LoginScreen: Session saved, calling onLoginSuccess...');
         onLoginSuccess?.(user);
-        console.log('🔍 LoginScreen: onLoginSuccess called successfully');
+        if (__DEV__) console.log('🔍 LoginScreen: onLoginSuccess called successfully');
       } else {
         // Local fallback if backend demo login fails
         const demoUser = {

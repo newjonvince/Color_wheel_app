@@ -4,21 +4,19 @@ const { query } = require('../config/database');
 // normalize DB results (pg/mysql driver agnostic)
 const rows = r => (Array.isArray(r) ? r : (r?.rows || []));
 
-const authenticateToken = async function(req, res, next) {
+const authenticateToken = async (req, res, next) => {
   try {
-    const raw = (req.headers['authorization'] || '').trim();
-    // Accept "Bearer <token>" (any case) OR just "<token>"
-    let token = '';
-    const m = raw.match(/^Bearer\s+(.+)$/i);
-    token = m ? m[1].trim() : raw;
+    // Case-insensitive header access
+    const authHeader = req.headers.authorization || req.headers['authorization'] || '';
+    const [scheme, presentedToken] = authHeader.split(' ');
+    const token = /^Bearer$/i.test(scheme) ? presentedToken : authHeader.trim();
 
     if (!token) {
-      console.warn('Auth middleware: No token provided', {
-        authHeaderPresent: !!raw,
-        userAgent: req.headers['user-agent'],
-        ip: req.headers['x-real-ip'] || req.ip,
+      res.set({
+        'WWW-Authenticate': 'Bearer realm="API"',
+        'Cache-Control': 'no-store'
       });
-      return res.status(401).json({ error: 'Missing token' });
+      return res.status(401).json({ error: 'unauthorized' });
     }
 
     const verifyOpts = { algorithms: ['HS256'], clockTolerance: 30 };
@@ -35,15 +33,21 @@ const authenticateToken = async function(req, res, next) {
       [decoded.jti, decoded.userId]
     );
     const list = rows(result);
-    if (!list.length) return res.status(401).json({ error: 'Invalid or expired session' });
+    if (!list.length) {
+      res.set('WWW-Authenticate', 'Bearer realm="API"');
+      return res.status(401).json({ error: 'unauthorized' });
+    }
 
     const s = list[0];
     req.user = { userId: s.user_id, email: s.email, username: s.username, sessionId: s.id, jti: s.jti || decoded.jti };
     req.session = { id: s.id, expiresAt: s.expires_at };
     return next();
   } catch (e) {
-    console.error('Auth middleware error:', e?.message);
-    return res.status(401).json({ error: 'Unauthorized' });
+    // Never log raw token, only presence
+    const authHeaderPresent = !!req.headers.authorization;
+    console.error('Auth middleware error:', e?.message, { authHeaderPresent });
+    res.set('WWW-Authenticate', 'Bearer realm="API"');
+    return res.status(401).json({ error: 'unauthorized' });
   }
 };
 

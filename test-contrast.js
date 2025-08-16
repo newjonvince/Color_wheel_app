@@ -1,5 +1,5 @@
 // Test file to verify contrast calculation is working properly
-import { hexToRgb } from './src/utils/color.js';
+import { contrastRatio } from './src/utils/color.js';
 
 // Test the contrast calculation functions
 const getLuminance = (hex) => {

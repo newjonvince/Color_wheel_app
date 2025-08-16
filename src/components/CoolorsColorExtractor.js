@@ -54,6 +54,17 @@ const DEFAULT_SLOTS = 5;
 function useThrottle(fn, ms) {
   const last = useRef(0);
   const trailing = useRef(null);
+  
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (trailing.current) {
+        clearTimeout(trailing.current);
+        trailing.current = null;
+      }
+    };
+  }, []);
+  
   return useCallback((...args) => {
     const now = Date.now();
     const remaining = ms - (now - last.current);

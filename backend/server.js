@@ -20,6 +20,12 @@ const HOST = process.env.HOST || '0.0.0.0'; // Railway requires binding to 0.0.0
 // Disable ETag to prevent 304 responses globally
 app.set('etag', false);
 
+// Cache control for auth-gated routes
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // Trust proxy for Railway deployment
 // Without this, req.ip will be the proxy's IP and all users share limits
 app.set('trust proxy', 1);

@@ -2,6 +2,9 @@
 // Canva-style multi-handle color wheel with Skia + Reanimated
 // Crash-safe: no non-serializable captures inside worklets (no Set/refs); hex conversion on JS thread
 
+// Build verification tag for crash debugging
+if (!__DEV__) console.log('FullColorWheel build tag: 2025-08-16 worklet-patched');
+
 import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import { View, Platform } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -51,9 +54,6 @@ export const SCHEME_COUNTS = {
   monochromatic: 3,
 };
 
-const clamp01 = (v) => Math.max(0, Math.min(1, v));
-const mod = (a, n) => ((a % n) + n) % n;
-
 // Helper: run callback on JS when invoked from a worklet
 const callJS = (fn, ...args) => {
   'worklet';
@@ -63,6 +63,17 @@ const callJS = (fn, ...args) => {
   } else {
     fn(...args);
   }
+};
+
+// Pure functions - safe to call from worklets (no closures/captures)
+const clamp01 = (v) => {
+  'worklet';
+  return Math.max(0, Math.min(1, v));
+};
+
+const mod = (a, n) => {
+  'worklet';
+  return ((a % n) + n) % n;
 };
 
 const FullColorWheelImpl = forwardRef(function FullColorWheel({
@@ -186,6 +197,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
 
   // ===== Marker visuals (Canva look) =====
   const markerStyle = (idx) => useAnimatedStyle(() => {
+    'worklet';
     const rad = ((handleAngles[idx].value - 90) * Math.PI) / 180;
     const r = radius * clamp01(handleSats[idx].value);
     const x = cx - 12 + Math.cos(rad) * r;

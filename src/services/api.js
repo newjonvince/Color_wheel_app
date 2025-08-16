@@ -73,7 +73,7 @@ let authToken = null;
 // Initialize token from secure storage on app start - read both keys, prefer new one
 const initializeToken = async () => {
   try {
-    console.log('🔄 ApiService: Initializing token from SecureStore...');
+    if (__DEV__) console.log('🔄 ApiService: Initializing token from SecureStore...');
     // Try new key first
     let storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
     if (!storedToken) {
@@ -81,7 +81,7 @@ const initializeToken = async () => {
       storedToken = await SecureStore.getItemAsync(LEGACY_TOKEN_KEY);
       if (!storedToken) storedToken = await AsyncStorage.getItem(LEGACY_TOKEN_KEY);
       if (storedToken) {
-        console.log('🔄 ApiService: Migrating token from legacy key');
+        if (__DEV__) console.log('🔄 ApiService: Migrating token from legacy key');
         // Migrate to new key
         await SecureStore.setItemAsync(TOKEN_KEY, storedToken);
         await SecureStore.deleteItemAsync(LEGACY_TOKEN_KEY).catch(()=>{});
@@ -95,12 +95,12 @@ const initializeToken = async () => {
       try { 
         const globalAxios = require('axios');
         globalAxios.defaults.headers.common.Authorization = `Bearer ${storedToken}`;
-        console.log('🔧 Set global axios defaults with token');
+        if (__DEV__) console.log('🔧 Set global axios defaults with token');
       } catch {}
-      console.log('✅ ApiService: Token loaded successfully, length:', storedToken.length);
-      console.log('✅ ApiService: Axios defaults set with Authorization header');
+      if (__DEV__) console.log('✅ ApiService: Token loaded successfully, length:', storedToken.length);
+      if (__DEV__) console.log('✅ ApiService: Axios defaults set with Authorization header');
     } else {
-      console.log('⚠️ ApiService: No stored token found');
+      if (__DEV__) console.log('⚠️ ApiService: No stored token found');
     }
   } catch (error) {
     console.error('❌ ApiService: Failed to load stored auth token:', error);
@@ -126,14 +126,14 @@ export const setToken = async (t) => {
   try { 
     const globalAxios = require('axios');
     globalAxios.defaults.headers.common.Authorization = t ? `Bearer ${t}` : undefined;
-    console.log('🔧 Updated global axios defaults');
+    if (__DEV__) console.log('🔧 Updated global axios defaults');
   } catch {}
   
   if (t) {
-    console.log('🔧 ApiService: setToken called with token length:', t.length);
-    console.log('🔧 ApiService: Updated axios defaults with new token');
+      if (__DEV__) console.log('🔧 ApiService: setToken called with token length:', t.length);
+    if (__DEV__) console.log('🔧 ApiService: Updated axios defaults with new token');
   } else {
-    console.log('🔧 ApiService: setToken called with null - clearing token');
+    if (__DEV__) console.log('🔧 ApiService: setToken called with null - clearing token');
   }
   
   try {
@@ -170,10 +170,10 @@ api.interceptors.request.use(async (cfg) => {
   
   if (authToken) {
     cfg.headers.Authorization = `Bearer ${authToken}`;
-    console.log('🔧 ApiService: Set Authorization header via interceptor');
+    if (__DEV__) console.log('🔧 ApiService: Set Authorization header via interceptor');
   } else {
-    console.warn('⚠️ ApiService: No authToken available for request to', cfg.url);
-    console.warn('⚠️ This request will fail with 401');
+    if (__DEV__) console.warn('⚠️ ApiService: No authToken available for request to', cfg.url);
+    if (__DEV__) console.warn('⚠️ This request will fail with 401');
   }
   
   return cfg;
@@ -182,11 +182,7 @@ api.interceptors.request.use(async (cfg) => {
   return Promise.reject(error);
 });
 
-// Debug logging for every request
-api.interceptors.request.use(cfg => {
-  console.log('→', (cfg.method||'get').toUpperCase(), cfg.url, 'auth?', !!cfg.headers?.Authorization);
-  return cfg;
-});
+// Remove temporary debug logging before production
 
 // ---- Generic HTTP helpers (used by Community screens) ----
 export const get = async (url, config = {}) => {

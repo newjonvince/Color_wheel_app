@@ -101,16 +101,12 @@ router.post('/matches', authenticateToken, async (req, res) => {
 // GET /matches - Get user's color matches with pagination and filtering
 router.get('/matches', authenticateToken, async (req, res) => {
   try {
-    let { limit, offset, is_public, scheme } = req.query;
-    const toInt = (v, def) => {
-      const n = Number.parseInt(v, 10);
-      return Number.isFinite(n) ? n : def;
-    };
-    let lim = toInt(limit, 20);
-    let off = toInt(offset, 0);
-    // keep things sane
-    lim = Math.max(1, Math.min(100, lim));
-    off = Math.max(0, off);
+    // Fix ER_WRONG_ARGUMENTS by coercing LIMIT/OFFSET to numbers
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit) || 20));
+    const page = Math.max(0, Number(req.query.page) || 0);
+    const offset = page * limit;
+    
+    let { is_public, scheme } = req.query;
     
     const userId = req.user.userId;
     
@@ -133,8 +129,10 @@ router.get('/matches', authenticateToken, async (req, res) => {
       FROM color_matches
       ${whereClause}
       ORDER BY created_at DESC
-      LIMIT ${lim} OFFSET ${off}
+      LIMIT ? OFFSET ?
     `;
+    // Ensure numbers only in params array
+    params.push(limit, offset);
     const result = await query(sql, params);
     
     // Normalize DB results and safely parse JSON colors

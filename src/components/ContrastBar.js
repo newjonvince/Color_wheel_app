@@ -2,7 +2,7 @@
 // src/components/ContrastBar.js
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { contrastRatio, nearestAccessible } from '../utils/colorUtils';
+import { contrastRatio, nearestAccessible } from '../utils/color';
 
 export default function ContrastBar({ background = '#FFFFFF', colors = [] }) {
   if (!colors?.length) return null;
