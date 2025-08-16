@@ -167,11 +167,10 @@ function withAuthHeaders(extra = {}) {
 api.interceptors.request.use(async (cfg) => {
   await ready;
   cfg.headers = cfg.headers || {};
+  
   if (authToken) {
     cfg.headers.Authorization = `Bearer ${authToken}`;
-  }
-  return cfg;
-}, (error) => Promise.reject(error));
+    console.log('🔧 ApiService: Set Authorization header via interceptor');
   } else {
     console.warn('⚠️ ApiService: No authToken available for request to', cfg.url);
     console.warn('⚠️ This request will fail with 401');
