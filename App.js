@@ -353,7 +353,7 @@ export default function App() {
           base_color: colorMatch.base_color,
           scheme: colorMatch.scheme,
           colors: colorMatch.colors,
-          title: colorMatch.title || `${colorMatch.scheme} palette',
+          title: colorMatch.title || `${colorMatch.scheme} palette`,
           description: colorMatch.description || '',
           is_public: colorMatch.is_public || false
         });
