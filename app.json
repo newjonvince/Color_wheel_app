@@ -1,15 +1,16 @@
 {
   "expo": {
-    "name": "ColorFashionWheel",
-    "slug": "fashion-color-wheel-backend",
+    "name": "Fashion Color Wheel",
+    "slug": "fashion-color-wheel",
     "scheme": "colorwheel",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0B0B0C"
+      "backgroundColor": "#D8C7DD"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -22,13 +23,23 @@
     },
     "ios": {
       "bundleIdentifier": "com.fashioncolorwheel.app",
-      "buildNumber": "50",
-      "supportsTablet": false,
+      "buildNumber": "51",
+      "supportsTablet": true,
+      "requireFullScreen": false,
       "infoPlist": {
-        "NSCameraUsageDescription": "Allow camera access to sample colors from photos.",
-        "NSPhotoLibraryUsageDescription": "Allow photo library access to import images.",
-        "NSPhotoLibraryAddUsageDescription": "Allow saving palettes/images to your library.",
-        "ITSAppUsesNonExemptEncryption": false
+        "NSCameraUsageDescription": "This app uses the camera to capture photos and extract color information for creating fashion color palettes.",
+        "NSPhotoLibraryUsageDescription": "This app accesses your photo library to analyze images and extract color palettes for fashion coordination.",
+        "NSPhotoLibraryAddUsageDescription": "This app can save your custom color palettes and fashion combinations to your photo library.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false,
+          "NSExceptionDomains": {
+            "colorwheelapp-production.up.railway.app": {
+              "NSExceptionAllowsInsecureHTTPLoads": false,
+              "NSExceptionMinimumTLSVersion": "TLSv1.2"
+            }
+          }
+        }
       }
     },
     "android": {

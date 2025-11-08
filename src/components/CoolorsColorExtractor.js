@@ -209,13 +209,20 @@ export default function CoolorsColorExtractor({
       
       // Use the proper ApiService method for backend extraction
       await ApiService.ready; // ensure token is loaded from SecureStore first
-      const response = await ApiService.extractColorsFromImage(assetSafe.uri, {
-        onProgress: (progress) => {
-          if (__DEV__) {
-            console.log(`Upload progress: ${progress}%`);
+      
+      // Add timeout to prevent hanging
+      const response = await Promise.race([
+        ApiService.extractColorsFromImage(assetSafe.uri, {
+          onProgress: (progress) => {
+            if (__DEV__) {
+              console.log(`Upload progress: ${progress}%`);
+            }
           }
-        }
-      });
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Image processing timeout')), 30000)
+        )
+      ]);
       
       const { dominant, palette, imageId } = response;
       setImageToken(imageId || null);

@@ -1,16 +1,36 @@
-// App.patched.js — hardened App entry with retry for ColorWheel import
+// App.patched.js — hardened App entry with crash-safe imports
 import 'react-native-gesture-handler';
 import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, View, Text, AppState, Platform, LogBox, TouchableOpacity } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
-import * as Updates from 'expo-updates';
-import ApiService from './src/services/api';
+
+// Wrap potentially problematic imports
+let StatusBar, NavigationContainer, createBottomTabNavigator;
+let GestureHandlerRootView, AsyncStorage, SafeAreaProvider, SafeAreaView;
+let SecureStore, Updates, ApiService;
+
+try {
+  ({ StatusBar } = require('expo-status-bar'));
+  ({ NavigationContainer } = require('@react-navigation/native'));
+  ({ createBottomTabNavigator } = require('@react-navigation/bottom-tabs'));
+  ({ GestureHandlerRootView } = require('react-native-gesture-handler'));
+  AsyncStorage = require('@react-native-async-storage/async-storage').default;
+  ({ SafeAreaProvider, SafeAreaView } = require('react-native-safe-area-context'));
+  SecureStore = require('expo-secure-store');
+  Updates = require('expo-updates');
+  ApiService = require('./src/services/api').default;
+  
+  if (!__DEV__) console.log('App modules loaded successfully');
+} catch (e) {
+  console.error('FATAL: Module import failed at launch:', e?.message);
+  console.error('Stack:', e?.stack);
+  // Provide minimal fallbacks to prevent RCTFatal
+  StatusBar = () => null;
+  NavigationContainer = ({ children }) => children;
+  createBottomTabNavigator = () => ({ Navigator: View, Screen: View });
+  GestureHandlerRootView = View;
+  SafeAreaProvider = View;
+  SafeAreaView = View;
+}
 
 // Production JS fatal handler
 if (!__DEV__ && global?.ErrorUtils?.setGlobalHandler) {
@@ -30,10 +50,14 @@ const linking = {
 // Quiet RN warnings in production
 if (!__DEV__) LogBox.ignoreAllLogs(true);
 
-// Dynamic imports with safe fallbacks
+// Dynamic imports with safe fallbacks - prevent launch crashes
 let ColorWheelScreen;
-try { ColorWheelScreen = require('./src/screens/ColorWheelScreen').default; }
-catch {
+try { 
+  ColorWheelScreen = require('./src/screens/ColorWheelScreen').default; 
+  if (!__DEV__) console.log('ColorWheelScreen loaded successfully');
+} catch (e) {
+  if (!__DEV__) console.log('ColorWheelScreen load failed:', e?.message);
+  console.error('Critical module load error:', e);
   const FallbackWheel = ({ onLogout, onRetry }) => (
     <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
       <Text style={{ fontSize: 18, color: '#ff6b6b', textAlign: 'center', marginBottom: 12 }}>Color Wheel Unavailable</Text>
@@ -59,7 +83,12 @@ try {
   LoginScreen = require('./src/screens/LoginScreen').default;
   SignUpScreen = require('./src/screens/SignUpScreen').default;
   UserSettingsScreen = require('./src/screens/UserSettingsScreen').default;
-} catch {}
+  
+  if (!__DEV__) console.log('All screen modules loaded successfully');
+} catch (e) {
+  console.error('Screen module load error:', e?.message);
+  console.error('Stack:', e?.stack);
+}
 
 const makePlaceholder = (title) => () => (
   <View style={{ flex:1, alignItems:'center', justifyContent:'center', padding:20 }}>
@@ -310,8 +339,17 @@ export default function App() {
       <SafeAreaProvider>
         <SafeAreaView style={{ flex: 1 }}>
           <StatusBar style={Platform.OS === 'ios' ? 'dark' : 'auto'} />
-          <LoginScreen onLoginSuccess={handleLoginSuccess} onSignUpPress={() => setShowSignUp(true)} />
-          {/* If you want to show SignUp separately, toggle with showSignUp */}
+          {showSignUp ? (
+            <SignUpScreen 
+              onSignUpComplete={handleSignUpComplete} 
+              onBackToLogin={() => setShowSignUp(false)} 
+            />
+          ) : (
+            <LoginScreen 
+              onLoginSuccess={handleLoginSuccess} 
+              onSignUpPress={() => setShowSignUp(true)} 
+            />
+          )}
         </SafeAreaView>
       </SafeAreaProvider>
     );

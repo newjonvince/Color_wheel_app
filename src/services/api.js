@@ -7,15 +7,35 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
-const HOST = (process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || '').replace(/\/+$/, '');
+// Get API base URL from Expo config or environment
+const getApiBaseUrl = () => {
+  // Try Expo Constants first (app.json extra config)
+  try {
+    const Constants = require('expo-constants').default;
+    if (Constants?.expoConfig?.extra?.EXPO_PUBLIC_API_BASE_URL) {
+      return Constants.expoConfig.extra.EXPO_PUBLIC_API_BASE_URL;
+    }
+  } catch {}
+  
+  // Fallback to process.env
+  return process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || '';
+};
+
+const HOST = getApiBaseUrl().replace(/\/+$/, '');
 const API_ROOT = /\/api$/.test(HOST) ? HOST : `${HOST}/api`;
 
 // Log API base URL at startup for debugging
 if (__DEV__) {
   console.log('🌐 API Configuration:');
+  console.log('  From app.json extra:', getApiBaseUrl());
   console.log('  EXPO_PUBLIC_API_BASE_URL:', process.env.EXPO_PUBLIC_API_BASE_URL);
   console.log('  API_BASE_URL:', process.env.API_BASE_URL);
   console.log('  Final API_ROOT:', API_ROOT);
+  
+  if (!HOST) {
+    console.warn('⚠️  WARNING: No API base URL configured! Requests will fail.');
+    console.warn('   Set EXPO_PUBLIC_API_BASE_URL in app.json extra config or environment');
+  }
 }
 
 // Helper used by fetch-based endpoints
@@ -24,6 +44,15 @@ const auth = () => {
   if (authToken) h.Authorization = `Bearer ${authToken}`;
   return h;
 };
+
+// Helper for axios requests with auth headers
+const withAuthHeaders = (config = {}) => ({
+  ...config,
+  headers: {
+    ...config.headers,
+    ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+  }
+});
 
 
 
@@ -52,6 +81,97 @@ export const api = axios.create({
   baseURL: API_ROOT,
   timeout: 20000,
 });
+
+// ---- Auth Functions ----
+export const login = async (email, password) => {
+  const { data } = await api.post('/auth/login', { email, password });
+  return data;
+};
+
+export const register = async (userData) => {
+  const { data } = await api.post('/auth/register', userData);
+  return data;
+};
+
+export const demoLogin = async () => {
+  const { data } = await api.post('/auth/demo-login');
+  return data;
+};
+
+export const getUserProfile = async () => {
+  await ready;
+  const { data } = await api.get('/auth/profile', withAuthHeaders());
+  return data;
+};
+
+export const updateUserProfile = async (updates) => {
+  await ready;
+  const { data } = await api.put('/auth/profile', updates, withAuthHeaders());
+  return data;
+};
+
+// ---- Image Functions ----
+export const extractColorsFromImage = async (imageUri, options = {}) => {
+  const form = new FormData();
+  form.append('image', {
+    uri: imageUri,
+    name: options.fileName || 'upload.jpg',
+    type: options.mime || 'image/jpeg'
+  });
+  
+  const { data } = await _try(
+    () => _postMultipart('/images/extract-colors', form),
+    () => _postMultipart('/extract-colors', form)
+  );
+  return data;
+};
+
+// ---- Color Match Functions ----
+export const createColorMatch = async (colorMatch) => {
+  await ready;
+  const { data } = await api.post('/color-matches', colorMatch, withAuthHeaders());
+  return data;
+};
+
+export const getColorMatches = async (params = {}) => {
+  const { data } = await api.get('/color-matches', { params });
+  return data;
+};
+
+export const getUserColorMatches = async (userId) => {
+  await ready;
+  const url = userId ? `/color-matches/user/${userId}` : '/color-matches/user';
+  const { data } = await api.get(url, withAuthHeaders());
+  return data;
+};
+
+export const getColorMatch = async (id) => {
+  const { data } = await api.get(`/color-matches/${id}`);
+  return data;
+};
+
+export const updateColorMatch = async (id, updates) => {
+  await ready;
+  const { data } = await api.put(`/color-matches/${id}`, updates, withAuthHeaders());
+  return data;
+};
+
+export const deleteColorMatch = async (id) => {
+  await ready;
+  const { data } = await api.delete(`/color-matches/${id}`, withAuthHeaders());
+  return data;
+};
+
+// ---- Community Functions ----
+export const getCommunityFeed = async (params = {}) => {
+  const { data } = await api.get('/community/feed', { params });
+  return data;
+};
+
+// ---- Utility Functions ----
+export const validateHexLocal = (hex) => {
+  return /^#[0-9A-F]{6}$/i.test(hex);
+};
 
 // RESPONSE interceptor: normalize 401
 api.interceptors.response.use(
@@ -157,11 +277,6 @@ export const setAuthToken = (t) => setToken(t);
 
 export const getToken = () => authToken;
 
-function withAuthHeaders(extra = {}) {
-  const headers = { ...(extra.headers || {}) };
-  if (authToken) headers.Authorization = `Bearer ${authToken}`;
-  return { ...extra, headers };
-}
 
 // Request interceptor: wait for bootstrap, inject Authorization unconditionally
 api.interceptors.request.use(async (cfg) => {
@@ -290,15 +405,6 @@ export const validateHex = async (hex) => {
 };
 
 // ---- Community convenience (optional) ----
-export const getCommunityFeed = async (params = {}) => {
-  await ready; // Ensure token is loaded before making request
-  const cleanParams = Object.fromEntries(
-    Object.entries(params).filter(([_, value]) => value !== undefined && value !== '' && value !== null)
-  );
-  const qs = Object.keys(cleanParams).length ? `?${new URLSearchParams(cleanParams).toString()}` : '';
-  const { data } = await api.get(`/community/posts/community${qs}`, withAuthHeaders());
-  return data;
-};
 
 export const ping = async () => {
   await ready; // Ensure token is loaded before making request
@@ -327,16 +433,7 @@ export const logout = async () => {
   }
 };
 
-export const getUserProfile = async () => {
-  const { data } = await api.get('/auth/profile', withAuthHeaders());
-  return data;
-};
 
-// Missing function that's referenced in default export
-export const updateUserProfile = async (profileData) => {
-  const { data } = await api.put('/auth/profile', profileData, withAuthHeaders());
-  return data;
-};
 
 
 // Feature health check function (renamed to avoid duplicate)
@@ -365,7 +462,7 @@ const ApiService = {
   // legacy image methods (preserved)
   sampleImageColor, closeImageSession,
   // colors
-  createColorMatch, getColorMatches, getUserColorMatches, getColorMatch, updateColorMatch, deleteColorMatch, validateHex,
+  createColorMatch, getColorMatches, getUserColorMatches, getColorMatch, updateColorMatch, deleteColorMatch, validateHex, validateHexLocal,
   // community
   getCommunityFeed,
   // health check

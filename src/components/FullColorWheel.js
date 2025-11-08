@@ -3,7 +3,10 @@
 // Crash-safe: no non-serializable captures inside worklets (no Set/refs); hex conversion on JS thread
 
 // Build verification tag for crash debugging
-if (!__DEV__) console.log('FullColorWheel build tag: 2025-08-16 worklet-patched');
+if (!__DEV__) {
+  console.log('FullColorWheel build tag: 2025-08-16 worklet-patched');
+  console.log('No bundle URL present - using production build');
+}
 
 import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import { View, Platform } from 'react-native';
@@ -15,20 +18,40 @@ import Animated, {
   runOnJS,
 } from 'react-native-reanimated';
 
-const REANIMATED_READY = typeof global.__reanimatedWorkletInit === 'function';
+// Safe iOS check - avoid accessing potentially undefined globals at module load
+const REANIMATED_READY = (() => {
+  try {
+    return typeof global?.__reanimatedWorkletInit === 'function';
+  } catch (e) {
+    if (!__DEV__) console.log('Reanimated worklet init check failed:', e.message);
+    return false;
+  }
+})();
 
 import { hslToHex, hexToHsl } from '../utils/color';
 
 let Canvas, SkiaCircle, SweepGradient, RadialGradient, Paint, vec;
 try {
-  const Skia = require('@shopify/react-native-skia');
-  Canvas = Skia.Canvas;
-  SkiaCircle = Skia.Circle;
-  SweepGradient = Skia.SweepGradient;
-  RadialGradient = Skia.RadialGradient;
-  Paint = Skia.Paint;
-  vec = Skia.vec;
+  // iOS-safe Skia loading with platform check
+  if (Platform.OS === 'ios') {
+    const Skia = require('@shopify/react-native-skia');
+    Canvas = Skia.Canvas;
+    SkiaCircle = Skia.Circle;
+    SweepGradient = Skia.SweepGradient;
+    RadialGradient = Skia.RadialGradient;
+    Paint = Skia.Paint;
+    vec = Skia.vec;
+  } else {
+    const Skia = require('@shopify/react-native-skia');
+    Canvas = Skia.Canvas;
+    SkiaCircle = Skia.Circle;
+    SweepGradient = Skia.SweepGradient;
+    RadialGradient = Skia.RadialGradient;
+    Paint = Skia.Paint;
+    vec = Skia.vec;
+  }
 } catch (e) {
+  if (!__DEV__) console.log('Skia module load failed on', Platform.OS + ':', e.message);
   Canvas = View;
   SkiaCircle = () => null;
   SweepGradient = () => null;

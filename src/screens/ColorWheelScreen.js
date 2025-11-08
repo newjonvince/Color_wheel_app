@@ -16,7 +16,7 @@ const mod = (a, n) => ((a % n) + n) % n;
 
 const SCHEMES = ['complementary','analogous','split-complementary','triadic','tetradic','monochromatic'];
 
-export default function ColorWheelScreen({ navigation, currentUser }) {
+export default function ColorWheelScreen({ navigation, currentUser, onLogout }) {
   const [selectedFollowsActive, setSelectedFollowsActive] = React.useState(true);
   const wheelRef = React.useRef(null);
   const [selectedScheme, setSelectedScheme] = useState('complementary');
@@ -90,11 +90,15 @@ export default function ColorWheelScreen({ navigation, currentUser }) {
       await ApiService.ready;
       await ApiService.getUserColorMatches();
     } catch (error) {
+      console.warn('Failed to load user data:', error);
       if (error.isAuthError) {
-        navigation?.navigate('Login');
+        // Use proper logout handler instead of navigation
+        if (typeof onLogout === 'function') {
+          onLogout();
+        }
       }
     }
-  }, [currentUser, navigation]);
+  }, [currentUser, onLogout]);
   useFocusEffect(useCallback(() => { loadUserData(); }, [loadUserData]));
 
   const schemeColors = useMemo(() => {
