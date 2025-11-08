@@ -23,7 +23,7 @@ const {
   registerValidation, 
   loginValidation, 
   updateProfileValidation 
-} = require('../../middleware/validation');
+} = require('../../middleware/validation/index');
 const { ERROR_MESSAGES } = require('../../constants');
 
 const router = express.Router();

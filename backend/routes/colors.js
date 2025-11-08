@@ -1,4 +1,4 @@
 // routes/colors.js - Backwards compatibility wrapper
 // This file maintains compatibility while using the new modular structure
 
-module.exports = require('./colors');
+module.exports = require('./colors/index');

@@ -16,7 +16,7 @@ const {
 const { 
   coordinatesValidation,
   sessionValidation 
-} = require('../../middleware/validation');
+} = require('../../middleware/validation/index');
 const { UPLOAD_LIMITS } = require('../../constants');
 
 const router = express.Router();

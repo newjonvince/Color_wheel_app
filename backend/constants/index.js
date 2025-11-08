@@ -1,7 +1,7 @@
 // constants/index.js - Shared constants across the backend
 
 // HTTP Status Codes
-export const HTTP_STATUS = {
+const HTTP_STATUS = {
   OK: 200,
   CREATED: 201,
   NO_CONTENT: 204,
@@ -17,7 +17,7 @@ export const HTTP_STATUS = {
 };
 
 // Error Messages
-export const ERROR_MESSAGES = {
+const ERROR_MESSAGES = {
   // Authentication
   INVALID_CREDENTIALS: 'Invalid email or password',
   USER_NOT_FOUND: 'User not found',
@@ -49,7 +49,7 @@ export const ERROR_MESSAGES = {
 };
 
 // Success Messages
-export const SUCCESS_MESSAGES = {
+const SUCCESS_MESSAGES = {
   USER_CREATED: 'User created successfully',
   USER_UPDATED: 'User updated successfully',
   USER_DELETED: 'User deleted successfully',
@@ -61,7 +61,7 @@ export const SUCCESS_MESSAGES = {
 };
 
 // Validation Rules
-export const VALIDATION_RULES = {
+const VALIDATION_RULES = {
   EMAIL: {
     MIN_LENGTH: 5,
     MAX_LENGTH: 255,
@@ -82,7 +82,7 @@ export const VALIDATION_RULES = {
 };
 
 // Color Schemes
-export const COLOR_SCHEMES = [
+const COLOR_SCHEMES = [
   'analogous',
   'complementary', 
   'split-complementary',
@@ -92,14 +92,14 @@ export const COLOR_SCHEMES = [
 ];
 
 // Pagination
-export const PAGINATION = {
+const PAGINATION = {
   DEFAULT_LIMIT: 20,
   MAX_LIMIT: 100,
   DEFAULT_OFFSET: 0,
 };
 
 // Cache TTL (Time To Live)
-export const CACHE_TTL = {
+const CACHE_TTL = {
   SHORT: 5 * 60, // 5 minutes
   MEDIUM: 30 * 60, // 30 minutes
   LONG: 60 * 60, // 1 hour
@@ -107,7 +107,7 @@ export const CACHE_TTL = {
 };
 
 // File Upload
-export const UPLOAD_LIMITS = {
+const UPLOAD_LIMITS = {
   MAX_FILE_SIZE: 20 * 1024 * 1024, // 20MB
   ALLOWED_MIME_TYPES: [
     'image/jpeg',
@@ -119,15 +119,28 @@ export const UPLOAD_LIMITS = {
 };
 
 // Session Configuration
-export const SESSION_CONFIG = {
+const SESSION_CONFIG = {
   TTL_MS: 10 * 60 * 1000, // 10 minutes
   CLEANUP_INTERVAL: 5 * 60 * 1000, // 5 minutes
 };
 
 // Database Configuration
-export const DB_CONFIG = {
+const DB_CONFIG = {
   MAX_CONNECTIONS: 20,
   ACQUIRE_TIMEOUT: 60000,
   TIMEOUT: 60000,
   SLOW_QUERY_MS: 1000,
+};
+
+module.exports = {
+  HTTP_STATUS,
+  ERROR_MESSAGES,
+  SUCCESS_MESSAGES,
+  VALIDATION_RULES,
+  COLOR_SCHEMES,
+  PAGINATION,
+  CACHE_TTL,
+  UPLOAD_LIMITS,
+  SESSION_CONFIG,
+  DB_CONFIG,
 };

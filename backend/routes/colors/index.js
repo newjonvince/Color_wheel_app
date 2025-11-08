@@ -18,7 +18,7 @@ const {
   createColorMatchValidation,
   updateColorMatchValidation,
   colorValidation 
-} = require('../../middleware/validation');
+} = require('../../middleware/validation/index');
 
 const router = express.Router();
 
