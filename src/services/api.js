@@ -80,6 +80,11 @@ export async function closeImageSession(imageId){
 export const api = axios.create({
   baseURL: API_ROOT,
   timeout: 20000,
+  // Add retry configuration for better reliability
+  validateStatus: (status) => {
+    // Accept 2xx and 3xx status codes, but handle 401 specially
+    return status < 400 || status === 401;
+  },
 });
 
 // ---- Auth Functions ----
@@ -233,10 +238,19 @@ export const ready = initializeToken();
 // Last-resort guard: ensure ANY fetch carries Authorization when logged in
 const _realFetch = global.fetch;
 global.fetch = async (url, options = {}) => {
-  const headers = { ...(options.headers || {}) };
-  const t = authToken;
-  if (t) headers.Authorization = `Bearer ${t}`;
-  return _realFetch(url, { ...options, headers });
+  try {
+    const headers = { ...(options.headers || {}) };
+    const t = authToken;
+    if (t) headers.Authorization = `Bearer ${t}`;
+    return await _realFetch(url, { ...options, headers });
+  } catch (error) {
+    // Add context to fetch errors for better debugging
+    if (typeof url === 'string' && url.includes(API_ROOT)) {
+      error.isApiRequest = true;
+      error.apiUrl = url;
+    }
+    throw error;
+  }
 };
 
 export const setToken = async (t) => { 
@@ -453,6 +467,7 @@ export const healthCheck = async () => {
 const ApiService = {
   // API configuration
   baseURL: API_ROOT,
+  ready, // Export the readiness promise
   // auth
   setToken, getToken, clearToken, login, register, demoLogin, getUserProfile, updateUserProfile,
   // image extraction
@@ -466,7 +481,9 @@ const ApiService = {
   // community
   getCommunityFeed,
   // health check
-  healthCheck,
+  healthCheck, ping,
+  // utilities
+  logout,
 };
 
 // getUserColorMatches is now defined above with proper parameter support

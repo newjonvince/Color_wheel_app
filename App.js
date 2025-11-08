@@ -195,7 +195,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadSavedColorMatches]);
 
   useEffect(() => {
     const t = setTimeout(() => { initializeApp(); }, 50);
@@ -203,10 +203,18 @@ export default function App() {
   }, [initializeApp]);
 
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'active' && !isInitialized) initializeApp();
-    });
-    return () => sub?.remove();
+    const handleAppStateChange = (nextAppState) => {
+      if (nextAppState === 'active' && !isInitialized) {
+        initializeApp();
+      }
+    };
+    
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => {
+      if (subscription?.remove) {
+        subscription.remove();
+      }
+    };
   }, [isInitialized, initializeApp]);
 
   const loadSavedColorMatches = useCallback(async (key) => {
@@ -233,34 +241,59 @@ export default function App() {
   }, [user?.id, loadSavedColorMatches]);
 
   const saveColorMatch = useCallback(async (colorMatch) => {
-    // Validate
-    if (!colorMatch || typeof colorMatch !== 'object') throw new Error('Invalid color match data: must be an object');
-    if (!Array.isArray(colorMatch.colors) || colorMatch.colors.length === 0) throw new Error('Invalid color match data: colors array is required');
-    if (!colorMatch.base_color || typeof colorMatch.base_color !== 'string') throw new Error('Invalid color match data: base_color is required');
-    if (!colorMatch.scheme || typeof colorMatch.scheme !== 'string') throw new Error('Invalid color match data: scheme is required');
     try {
-      const savedResp = await ApiService.createColorMatch({
-        base_color: colorMatch.base_color,
-        scheme: colorMatch.scheme,
-        colors: colorMatch.colors,
-        title: colorMatch.title || `${colorMatch.scheme} palette`,
-        description: colorMatch.description || '',
-        is_public: !!colorMatch.is_public
-      });
-      const savedMatch = (savedResp && savedResp.data) ? savedResp.data : savedResp;
-      const updated = [...savedColorMatches, savedMatch];
-      setSavedColorMatches(updated);
-      const key = getMatchesKey(user?.id);
-      await AsyncStorage.setItem(key, JSON.stringify(updated));
-      return savedMatch;
-    } catch {
-      // Offline/local fallback
-      const key = getMatchesKey(user?.id);
-      const localMatch = { ...colorMatch, id: Date.now().toString(), created_at: new Date().toISOString() };
-      const updated = [...savedColorMatches, localMatch];
-      setSavedColorMatches(updated);
-      await AsyncStorage.setItem(key, JSON.stringify(updated));
-      return localMatch;
+      // Validate input
+      if (!colorMatch || typeof colorMatch !== 'object') {
+        throw new Error('Invalid color match data: must be an object');
+      }
+      if (!Array.isArray(colorMatch.colors) || colorMatch.colors.length === 0) {
+        throw new Error('Invalid color match data: colors array is required');
+      }
+      if (!colorMatch.base_color || typeof colorMatch.base_color !== 'string') {
+        throw new Error('Invalid color match data: base_color is required');
+      }
+      if (!colorMatch.scheme || typeof colorMatch.scheme !== 'string') {
+        throw new Error('Invalid color match data: scheme is required');
+      }
+
+      // Attempt to save to backend
+      try {
+        const savedResp = await ApiService.createColorMatch({
+          base_color: colorMatch.base_color,
+          scheme: colorMatch.scheme,
+          colors: colorMatch.colors,
+          title: colorMatch.title || `${colorMatch.scheme} palette`,
+          description: colorMatch.description || '',
+          is_public: !!colorMatch.is_public
+        });
+        
+        const savedMatch = (savedResp && savedResp.data) ? savedResp.data : savedResp;
+        const updated = [...savedColorMatches, savedMatch];
+        setSavedColorMatches(updated);
+        
+        const key = getMatchesKey(user?.id);
+        await AsyncStorage.setItem(key, JSON.stringify(updated));
+        return savedMatch;
+      } catch (apiError) {
+        console.warn('Failed to save to backend, using local storage:', apiError);
+        
+        // Offline/local fallback
+        const key = getMatchesKey(user?.id);
+        const localMatch = { 
+          ...colorMatch, 
+          id: Date.now().toString(), 
+          created_at: new Date().toISOString(),
+          _isLocal: true // Mark as local for sync later
+        };
+        
+        const updated = [...savedColorMatches, localMatch];
+        setSavedColorMatches(updated);
+        await AsyncStorage.setItem(key, JSON.stringify(updated));
+        return localMatch;
+      }
+    } catch (error) {
+      console.error('saveColorMatch error:', error);
+      throw error; // Re-throw for UI error handling
     }
   }, [user?.id, savedColorMatches]);
 
