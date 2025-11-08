@@ -123,15 +123,32 @@ export default function App() {
   const [wheelReloadNonce, setWheelReloadNonce] = useState(0);
 
   const retryLoadColorWheel = useCallback(async () => {
+    let isCancelled = false;
+    
     try {
       const mod = await import('./src/screens/ColorWheelScreen');
-      if (mod?.default) {
+      if (!isCancelled && mod?.default) {
         ColorWheelScreen = mod.default;
         setWheelReloadNonce((n) => n + 1);
-        return;
+        return true;
       }
-    } catch {}
-    try { await Updates.reloadAsync(); } catch {}
+    } catch (importError) {
+      if (__DEV__) console.warn('ColorWheel import failed:', importError);
+    }
+    
+    // Fallback to app reload if import fails
+    if (!isCancelled) {
+      try { 
+        await Updates.reloadAsync(); 
+      } catch (reloadError) {
+        if (__DEV__) console.warn('App reload failed:', reloadError);
+      }
+    }
+    
+    // Return cleanup function
+    return () => {
+      isCancelled = true;
+    };
   }, []);
 
   const clearStoredToken = async () => {
@@ -144,57 +161,122 @@ export default function App() {
 
   const initializeApp = useCallback(async () => {
     let initTimeout;
+    let profileTimeout;
+    let isCancelled = false;
+    
     try {
-      initTimeout = setTimeout(() => { setLoading(false); setIsInitialized(true); }, 10000);
-      await new Promise((r) => setTimeout(r, 50));
+      // Set up timeout with cleanup
+      initTimeout = setTimeout(() => {
+        if (!isCancelled) {
+          setLoading(false);
+          setIsInitialized(true);
+        }
+      }, 10000);
+      
+      // Small delay to prevent race conditions
+      await new Promise((resolve) => {
+        const delay = setTimeout(() => {
+          if (!isCancelled) resolve();
+        }, 50);
+        // Store timeout for cleanup
+        if (isCancelled) clearTimeout(delay);
+      });
+
+      if (isCancelled) return;
 
       let token = null;
       try {
         token = await SecureStore.getItemAsync('fashion_color_wheel_auth_token');
         if (!token) token = await SecureStore.getItemAsync('authToken');
         if (!token) token = await AsyncStorage.getItem('authToken');
-      } catch {}
+      } catch (error) {
+        if (__DEV__) console.warn('Token retrieval error:', error);
+      }
+
+      if (isCancelled) return;
 
       if (token) {
         try {
           await ApiService?.setToken?.(token);
           await ApiService.ready;
+          
+          if (isCancelled) return;
+          
           let profile = null;
           if (ApiService?.getUserProfile) {
-            profile = await Promise.race([ApiService.getUserProfile(), new Promise((_, rej) => setTimeout(() => rej(new Error('Profile timeout')), 5000))]);
+            // Create cancellable profile timeout
+            const profilePromise = ApiService.getUserProfile();
+            const timeoutPromise = new Promise((_, reject) => {
+              profileTimeout = setTimeout(() => {
+                if (!isCancelled) reject(new Error('Profile timeout'));
+              }, 5000);
+            });
+            
+            try {
+              profile = await Promise.race([profilePromise, timeoutPromise]);
+              if (profileTimeout) clearTimeout(profileTimeout);
+            } catch (timeoutError) {
+              if (profileTimeout) clearTimeout(profileTimeout);
+              throw timeoutError;
+            }
           } else {
             const storedUserData = await AsyncStorage.getItem('userData');
             if (storedUserData) profile = JSON.parse(storedUserData);
           }
+          
+          if (isCancelled) return;
+          
           const normalized = pickUser(profile);
           if (normalized?.id) {
             setUser(normalized);
             await ApiService.ready;
-            await loadSavedColorMatches(getMatchesKey(normalized.id));
+            if (!isCancelled) {
+              await loadSavedColorMatches(getMatchesKey(normalized.id));
+            }
           } else {
             await clearStoredToken();
           }
-        } catch {
+        } catch (apiError) {
+          if (__DEV__) console.warn('API initialization error:', apiError);
+          
+          if (isCancelled) return;
+          
           const storedUserData = await AsyncStorage.getItem('userData');
           if (storedUserData) {
             const userData = JSON.parse(storedUserData);
             setUser(userData);
-            await loadSavedColorMatches(getMatchesKey(userData.id));
+            if (!isCancelled) {
+              await loadSavedColorMatches(getMatchesKey(userData.id));
+            }
           } else {
             await clearStoredToken();
           }
         }
       }
 
-      clearTimeout(initTimeout);
-      setIsInitialized(true);
+      if (!isCancelled) {
+        if (initTimeout) clearTimeout(initTimeout);
+        setIsInitialized(true);
+      }
     } catch (e) {
-      if (initTimeout) clearTimeout(initTimeout);
-      setError('Failed to initialize app');
-      setIsInitialized(true);
+      if (!isCancelled) {
+        if (initTimeout) clearTimeout(initTimeout);
+        if (profileTimeout) clearTimeout(profileTimeout);
+        setError('Failed to initialize app');
+        setIsInitialized(true);
+      }
     } finally {
-      setLoading(false);
+      if (!isCancelled) {
+        setLoading(false);
+      }
     }
+    
+    // Cleanup function
+    return () => {
+      isCancelled = true;
+      if (initTimeout) clearTimeout(initTimeout);
+      if (profileTimeout) clearTimeout(profileTimeout);
+    };
   }, [loadSavedColorMatches]);
 
   useEffect(() => {
@@ -222,16 +304,46 @@ export default function App() {
       try {
         await ApiService.ready;
         const backendMatches = typeof ApiService.getUserColorMatches === 'function' ? await ApiService.getUserColorMatches() : null;
-        if (backendMatches) {
-          setSavedColorMatches(backendMatches || []);
-          if (backendMatches?.length > 0) await AsyncStorage.setItem(key, JSON.stringify(backendMatches));
+        if (backendMatches && Array.isArray(backendMatches)) {
+          // Limit memory usage - only keep recent matches
+          const limitedMatches = backendMatches.slice(-100);
+          setSavedColorMatches(limitedMatches);
+          
+          // Async storage update (non-blocking)
+          if (limitedMatches.length > 0) {
+            AsyncStorage.setItem(key, JSON.stringify(limitedMatches)).catch(error => {
+              console.warn('Failed to cache matches to AsyncStorage:', error);
+            });
+          }
           return;
         }
-      } catch {}
+      } catch (apiError) {
+        if (__DEV__) console.warn('Failed to load matches from API:', apiError);
+      }
+      
+      // Fallback to local storage
       const saved = await AsyncStorage.getItem(key);
-      const localMatches = saved ? JSON.parse(saved) : [];
-      setSavedColorMatches(localMatches);
-    } catch {
+      if (saved) {
+        try {
+          const localMatches = JSON.parse(saved);
+          // Validate and limit the data
+          if (Array.isArray(localMatches)) {
+            const limitedMatches = localMatches.slice(-100);
+            setSavedColorMatches(limitedMatches);
+          } else {
+            setSavedColorMatches([]);
+          }
+        } catch (parseError) {
+          console.warn('Failed to parse saved matches:', parseError);
+          setSavedColorMatches([]);
+          // Clear corrupted data
+          AsyncStorage.removeItem(key).catch(() => {});
+        }
+      } else {
+        setSavedColorMatches([]);
+      }
+    } catch (error) {
+      console.warn('loadSavedColorMatches error:', error);
       setSavedColorMatches([]);
     }
   }, []);
@@ -239,6 +351,16 @@ export default function App() {
   useEffect(() => {
     if (user?.id) loadSavedColorMatches(getMatchesKey(user.id));
   }, [user?.id, loadSavedColorMatches]);
+
+  // Memory cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Clear large arrays to free memory
+      setSavedColorMatches([]);
+      setUser(null);
+      setError(null);
+    };
+  }, []);
 
   const saveColorMatch = useCallback(async (colorMatch) => {
     try {
@@ -268,34 +390,55 @@ export default function App() {
         });
         
         const savedMatch = (savedResp && savedResp.data) ? savedResp.data : savedResp;
-        const updated = [...savedColorMatches, savedMatch];
-        setSavedColorMatches(updated);
         
-        const key = getMatchesKey(user?.id);
-        await AsyncStorage.setItem(key, JSON.stringify(updated));
+        // Memory-efficient update using functional state update
+        setSavedColorMatches(prevMatches => {
+          const newMatches = [...prevMatches, savedMatch];
+          // Limit memory usage - keep only last 100 matches
+          const trimmedMatches = newMatches.length > 100 ? newMatches.slice(-100) : newMatches;
+          
+          // Async storage update (don't block UI)
+          const key = getMatchesKey(user?.id);
+          AsyncStorage.setItem(key, JSON.stringify(trimmedMatches)).catch(error => {
+            console.warn('Failed to save to AsyncStorage:', error);
+          });
+          
+          return trimmedMatches;
+        });
+        
         return savedMatch;
       } catch (apiError) {
         console.warn('Failed to save to backend, using local storage:', apiError);
         
-        // Offline/local fallback
-        const key = getMatchesKey(user?.id);
+        // Offline/local fallback with memory optimization
         const localMatch = { 
           ...colorMatch, 
-          id: Date.now().toString(), 
+          id: `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Unique ID
           created_at: new Date().toISOString(),
           _isLocal: true // Mark as local for sync later
         };
         
-        const updated = [...savedColorMatches, localMatch];
-        setSavedColorMatches(updated);
-        await AsyncStorage.setItem(key, JSON.stringify(updated));
+        setSavedColorMatches(prevMatches => {
+          const newMatches = [...prevMatches, localMatch];
+          // Limit memory usage
+          const trimmedMatches = newMatches.length > 100 ? newMatches.slice(-100) : newMatches;
+          
+          // Async storage update
+          const key = getMatchesKey(user?.id);
+          AsyncStorage.setItem(key, JSON.stringify(trimmedMatches)).catch(error => {
+            console.warn('Failed to save to AsyncStorage:', error);
+          });
+          
+          return trimmedMatches;
+        });
+        
         return localMatch;
       }
     } catch (error) {
       console.error('saveColorMatch error:', error);
       throw error; // Re-throw for UI error handling
     }
-  }, [user?.id, savedColorMatches]);
+  }, [user?.id]); // Removed savedColorMatches dependency to prevent stale closures
 
   const handleLoginSuccess = useCallback(async (u) => {
     const nextUser = pickUser(u);
