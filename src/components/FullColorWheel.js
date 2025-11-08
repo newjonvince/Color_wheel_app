@@ -164,13 +164,17 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
     freedIdxSV.value = [];
     const { h=0, s=100, l=50 } = hexToHsl(initialHex) || {};
     const s01 = s/100;
+    
+    // Initialize handles based on scheme
     for (let i=1; i<count; i++) {
-      handleAngles[i].value = mod(h + (offsets[i] ?? 0), 360);
+      const offset = offsets[i] ?? 0;
+      handleAngles[i].value = mod(h + offset, 360);
       handleSats[i].value = s01;
       handleLights[i].value = l;
     }
+    
     emitPalette();
-  }, [scheme]);
+  }, [scheme, count, offsets, initialHex]);
 
   // Sync prop → state
   useEffect(() => {
@@ -183,15 +187,39 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
     if (!linked) return;
     const base = handleAngles[0].value;
     const sat0 = handleSats[0].value;
-    for (let i=1; i<count; i++) {
-      if (!freed.current.has(i)) {
-        handleAngles[i].value = mod(base + offsets[i], 360);
+    const light0 = handleLights[0].value;
+    
+    // Special handling for different schemes (Canva-style)
+    if (scheme === 'complementary') {
+      handleAngles[1].value = mod(base + 180, 360);
+      handleSats[1].value = sat0;
+      handleLights[1].value = light0;
+    } else if (scheme === 'analogous' || scheme === 'triadic' || scheme === 'tetradic' || scheme === 'split-complementary') {
+      // Multi-handle schemes: All handles move together maintaining relative spacing
+      const schemeOffsets = SCHEME_OFFSETS[scheme] || [0];
+      const handleCount = SCHEME_COUNTS[scheme] || 1;
+      
+      for (let i = 0; i < handleCount; i++) {
+        const offset = schemeOffsets[i] || 0;
+        handleAngles[i].value = mod(base + offset, 360);
         handleSats[i].value = sat0;
+        handleLights[i].value = light0;
+      }
+    } else {
+      // Handle other schemes
+      for (let i=1; i<count; i++) {
+        if (!freed.current.has(i)) {
+          const offset = offsets[i] ?? 0;
+          handleAngles[i].value = mod(base + offset, 360);
+          handleSats[i].value = sat0;
+          handleLights[i].value = light0;
+        }
       }
     }
+    
     emitPalette();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linked, scheme]);
+  }, [linked, scheme, count, offsets]);
 
   // ===== Palette emission: compute hexes on JS (avoid calling hslToHex in a worklet) =====
   const jsEmitPalette = (triples, activePref) => {
@@ -285,8 +313,43 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       const ang = (Math.atan2(e.y - cy, e.x - cx) * 180) / Math.PI;
       const deg = mod(ang + 450, 360);
       const sat = clamp01(Math.hypot(e.x - cx, e.y - cy) / radius);
-      if (linked && idx !== 0) {
-        // Keep UI-thread state and JS Set in sync without capturing Set in the worklet
+      
+      // Update the dragged handle
+      handleAngles[idx].value = deg;
+      handleSats[idx].value = sat;
+      
+      // Canva-style synchronized movement for different schemes
+      if (linked && scheme === 'complementary') {
+        const complementaryIdx = idx === 0 ? 1 : 0;
+        const complementaryAngle = mod(deg + 180, 360);
+        handleAngles[complementaryIdx].value = complementaryAngle;
+        handleSats[complementaryIdx].value = sat; // Match saturation
+      } else if (linked && (scheme === 'analogous' || scheme === 'triadic' || scheme === 'tetradic' || scheme === 'split-complementary')) {
+        // Synchronized movement for multi-handle schemes
+        const baseAngle = deg;
+        const schemeOffsets = SCHEME_OFFSETS[scheme] || [0];
+        const handleCount = SCHEME_COUNTS[scheme] || 1;
+        
+        for (let k = 0; k < handleCount; k++) {
+          if (k !== idx) { // Don't update the handle being dragged
+            const offset = schemeOffsets[k] || 0;
+            handleAngles[k].value = mod(baseAngle + offset, 360);
+            handleSats[k].value = sat; // Match saturation
+          }
+        }
+      } else if (linked && idx === 0) {
+        // Handle other schemes (non-complementary)
+        const c = schemeCount.value;
+        for (let k = 1; k < c; k++) {
+          const freedArray = Array.isArray(freedIdxSV.value) ? freedIdxSV.value : [];
+          if (freedArray.indexOf(k) === -1) {
+            const offset = k < SCHEME_OFFSETS[scheme]?.length ? SCHEME_OFFSETS[scheme][k] : 0;
+            handleAngles[k].value = mod(deg + offset, 360);
+            handleSats[k].value = sat;
+          }
+        }
+      } else if (linked && idx !== 0) {
+        // Mark non-primary handles as freed when dragged independently
         const arr = Array.isArray(freedIdxSV.value) ? freedIdxSV.value.slice() : [];
         if (arr.indexOf(idx) === -1) {
           arr.push(idx);
@@ -294,8 +357,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
         }
         callJS((k) => { freed.current.add(k); }, idx);
       }
-      handleAngles[idx].value = deg;
-      handleSats[idx].value = sat;
+      
       emitPalette();
     })
     .onFinalize((e) => {
@@ -313,15 +375,41 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
     handleAngles[i].value = mod(h, 360);
     handleSats[i].value = clamp01(s / 100);
     handleLights[i].value = Math.max(0, Math.min(100, l));
-    if (linked && i === 0) {
-      for (let k=1;k<c;k++) {
-        if (!freed.current.has(k)) {
-          handleAngles[k].value = mod(h + offsets[k], 360);
-          handleSats[k].value = clamp01(s/100);
-          handleLights[k].value = Math.max(0, Math.min(100, l));
+    
+    if (linked) {
+      // Canva-style synchronization for different schemes
+      if (scheme === 'complementary') {
+        const complementaryIdx = i === 0 ? 1 : 0;
+        const complementaryAngle = mod(h + 180, 360);
+        handleAngles[complementaryIdx].value = complementaryAngle;
+        handleSats[complementaryIdx].value = clamp01(s / 100);
+        handleLights[complementaryIdx].value = Math.max(0, Math.min(100, l));
+      } else if (scheme === 'analogous' || scheme === 'triadic' || scheme === 'tetradic' || scheme === 'split-complementary') {
+        // Multi-handle schemes: All handles move together maintaining relative spacing
+        const schemeOffsets = SCHEME_OFFSETS[scheme] || [0];
+        const handleCount = SCHEME_COUNTS[scheme] || 1;
+        
+        for (let k = 0; k < handleCount; k++) {
+          if (k !== i) { // Don't update the handle being set
+            const offset = schemeOffsets[k] || 0;
+            handleAngles[k].value = mod(h + offset, 360);
+            handleSats[k].value = clamp01(s / 100);
+            handleLights[k].value = Math.max(0, Math.min(100, l));
+          }
+        }
+      } else if (i === 0) {
+        // Handle other schemes when primary handle changes
+        for (let k=1; k<c; k++) {
+          if (!freed.current.has(k)) {
+            const offset = offsets[k] ?? 0;
+            handleAngles[k].value = mod(h + offset, 360);
+            handleSats[k].value = clamp01(s/100);
+            handleLights[k].value = Math.max(0, Math.min(100, l));
+          }
         }
       }
     }
+    
     emitPalette();
   };
 
