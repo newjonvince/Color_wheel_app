@@ -1,6 +1,6 @@
 {
   "cli": {
-    "version": ">= 12.0.0",
+    "version": ">= 13.0.0",
     "appVersionSource": "remote"
   },
   "build": {
@@ -18,7 +18,8 @@
       "distribution": "internal",
       "ios": {
         "simulator": false,
-        "buildConfiguration": "Release"
+        "buildConfiguration": "Release",
+        "image": "macos-sonoma-14.5-xcode-15.4"
       },
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://colorwheelapp-production.up.railway.app"
@@ -27,7 +28,7 @@
     "production": {
       "autoIncrement": true,
       "ios": {
-        "image": "latest"
+        "image": "macos-sonoma-14.5-xcode-15.4"
       },
       "env": {
         "NODE_ENV": "production",
