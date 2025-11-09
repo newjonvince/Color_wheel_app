@@ -607,7 +607,8 @@ export function clearColorCache() {
 
 // Re-export optimized versions of common functions for backward compatibility
 export { hexToRgbOptimized as hexToRgb };
-export { rgbToHsl as hexToHsl }; // Note: this now takes RGB params, wrapper needed
+
+// Proper hexToHsl function that takes hex input
 export function hexToHsl(hex) {
   const colorData = getCachedColorData(hex);
   return colorData.hsl;
