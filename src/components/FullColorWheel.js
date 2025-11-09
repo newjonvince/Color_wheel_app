@@ -60,28 +60,8 @@ try {
   vec = () => null;
 }
 
-export const SCHEME_OFFSETS = {
-  complementary: [0, 180],
-  analogous: [0, 30, -30],
-  triadic: [0, 120, 240],
-  tetradic: [0, 90, 180, 270],
-  'split-complementary': [0, 150, -150],
-  monochromatic: [0, 0, 0],
-  compound: [0, 150, 180, 210],
-  shades: [0, 0, 0, 0, 0],
-  tints: [0, 0, 0, 0, 0],
-};
-export const SCHEME_COUNTS = {
-  complementary: 2,
-  analogous: 3,
-  triadic: 3,
-  tetradic: 4,
-  'split-complementary': 3,
-  monochromatic: 3,
-  compound: 4,
-  shades: 5,
-  tints: 5,
-};
+// Import constants from shared location
+export { SCHEME_OFFSETS, SCHEME_COUNTS } from '../constants/colorWheelConstants';
 
 // Helper: run callback on JS when invoked from a worklet
 const callJS = (fn, ...args) => {

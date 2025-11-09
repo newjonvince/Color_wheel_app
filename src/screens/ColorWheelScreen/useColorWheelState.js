@@ -1,7 +1,7 @@
 // screens/ColorWheelScreen/useColorWheelState.js - State management hook
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { hexToHsl, hslToHex } from '../../utils/optimizedColor';
-import { SCHEME_COUNTS, SCHEME_OFFSETS } from '../../components/FullColorWheel';
+import { SCHEME_COUNTS, SCHEME_OFFSETS } from '../../constants/colorWheelConstants';
 import { DEFAULT_COLOR, DEFAULT_SCHEME, validateHSL, generateRandomColor, mod } from './constants';
 
 export const useColorWheelState = () => {

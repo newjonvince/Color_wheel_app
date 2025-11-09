@@ -3,7 +3,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import { hexToHsl, hslToHex } from '../../utils/optimizedColor';
-import { SCHEME_COUNTS, SCHEME_OFFSETS } from '../../components/FullColorWheel';
+import { SCHEME_COUNTS, SCHEME_OFFSETS } from '../../constants/colorWheelConstants';
 import { DEFAULT_COLOR, DEFAULT_SCHEME, validateHSL, generateRandomColor, mod } from './constants';
 import { useThrottledCallbacks } from '../../utils/throttledCallbacks';
 import { useOptimizedColorProcessing } from '../../hooks/useOptimizedColorProcessing';
