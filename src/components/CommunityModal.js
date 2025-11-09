@@ -4,7 +4,7 @@ import {
   Image, Alert, Dimensions, ActivityIndicator, SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import ApiService from '../services/api';
+import ApiService from '../services/safeApiService';
 
 const { width: screenWidth } = Dimensions.get('window');
 

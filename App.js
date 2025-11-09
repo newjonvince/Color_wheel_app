@@ -1,4 +1,48 @@
-// App.js — Clean, organized app entry point
+// App.js — Ultra-minimal version to test native crash
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+
+// Absolute minimal app - no external dependencies
+export default function MinimalApp() {
+  return (
+    <View style={styles.container}>
+      <Text style={styles.text}>🎨 Fashion Color Wheel</Text>
+      <Text style={styles.subtitle}>Minimal Test Version</Text>
+      <Text style={styles.info}>If you see this, React Native works!</Text>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    padding: 20,
+  },
+  text: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  subtitle: {
+    fontSize: 18,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  info: {
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+});
+
+// Original app code (temporarily disabled)
+/*
 import 'react-native-gesture-handler';
 import React, { useState, useEffect } from 'react';
 import { AppState } from 'react-native';
@@ -16,7 +60,7 @@ import { AppNavigation } from './src/components/AppNavigation';
 // Initialize app configuration
 initializeAppConfig();
 
-export default function App() {
+function OriginalApp() {
   // Load modules with fallbacks
   const { modules } = loadModules();
   const { screens } = loadScreens();
@@ -128,3 +172,4 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
+*/

@@ -1,7 +1,7 @@
 // hooks/useColorMatches.js - Color matches state management
 import { useState, useCallback, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import ApiService from '../services/api';
+import ApiService from '../services/safeApiService';
 
 const getMatchesKey = (userId) => `savedColorMatches:${userId || 'anon'}`;
 

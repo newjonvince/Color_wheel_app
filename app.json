@@ -60,7 +60,8 @@
             "deploymentTarget": "15.1",
             "newArchEnabled": false,
             "useFrameworks": "static",
-            "flipper": false
+            "flipper": false,
+            "ccacheEnabled": false
           },
           "android": {
             "newArchEnabled": false

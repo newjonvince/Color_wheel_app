@@ -28,7 +28,7 @@ IMPROVEMENTS MADE:
     Animated,
   } from 'react-native';
   import { Ionicons } from '@expo/vector-icons';
-  import ApiService from '../services/api';
+  import ApiService from '../services/safeApiService';
   import CommunityModal from '../components/CommunityModal';
 
   // Double-tap like wrapper with heart burst animation

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, FlatList, Dimensions, Alert, Modal, TextInput, ScrollView } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
-import ApiService from '../services/api';
+import ApiService from '../services/safeApiService';
 import { getColorScheme as computeScheme } from '../utils/color';
 
 const { width: screenWidth } = Dimensions.get('window');

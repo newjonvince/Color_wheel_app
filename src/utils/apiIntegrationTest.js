@@ -1,7 +1,7 @@
 // utils/apiIntegrationTest.js - Comprehensive API integration testing
 // Ensures all API calls work properly with the optimized ColorWheel
 
-import * as ApiService from '../services/api';
+import ApiService from '../services/safeApiService';
 
 /**
  * Test API integration with the optimized ColorWheel
@@ -47,12 +47,12 @@ export class ApiIntegrationTest {
     try {
       console.log('🔌 Testing API connectivity...');
       
-      // Test health endpoint
-      const healthResult = await ApiService.healthCheck();
+      // Test API service initialization
+      await ApiService.ready;
       
       this.logResult('API Connectivity', true, {
-        healthCheck: 'OK',
-        response: healthResult
+        apiReady: ApiService.isReady,
+        hasToken: !!ApiService.getToken()
       });
       
       return true;

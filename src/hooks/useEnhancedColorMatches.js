@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as ApiService from '../services/api';
+import ApiService from '../services/safeApiService';
 import { useUserPreferences } from '../utils/userPreferences';
 
 const STORAGE_KEY = '@ColorMatches_Enhanced';

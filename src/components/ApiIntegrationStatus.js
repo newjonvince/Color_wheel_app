@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
-import * as ApiService from '../services/api';
+import ApiService from '../services/safeApiService';
 import { quickApiTest } from '../utils/apiIntegrationTest';
 
 const ApiIntegrationStatus = () => {

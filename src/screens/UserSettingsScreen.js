@@ -13,7 +13,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import ApiService from '../services/api';
+import ApiService from '../services/safeApiService';
 import { wipeLocalSession, performSecureLogout, performSecureAccountDeletion } from '../utils/session';
 
 export default function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {

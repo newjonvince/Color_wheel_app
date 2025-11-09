@@ -15,7 +15,7 @@ import { View, Text, Image, TouchableOpacity, Alert, StyleSheet, Dimensions, Pan
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
-import ApiService from '../services/api'; // <- uses the new file
+import ApiService from '../services/safeApiService';
 
 // Safe wrapper to log real errors + stack traces from component layer
 const safe = (fn, context = 'unknown') => (...args) => {

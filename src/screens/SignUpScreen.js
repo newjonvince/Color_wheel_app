@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, TextInput, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import ApiService from '../services/api';
+import ApiService from '../services/safeApiService';
 import { saveToken } from '../services/secureStore';
 import useDebounce from '../hooks/useDebounce';
 
