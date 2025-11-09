@@ -11,6 +11,7 @@ const boardRoutes = require('./routes/boards');
 const userRoutes = require('./routes/users');
 const communityRoutes = require('./routes/community');
 const imageRoutes = require('./routes/images');
+const likesRoutes = require('./routes/likes');
 const { initializeTables, healthCheck } = require('./config/database');
 
 const app = express();
@@ -169,6 +170,7 @@ app.use('/api/colors', colorRoutes);
 app.use('/api/boards', boardRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/images', imageRoutes);
+app.use('/api/likes', likesRoutes);
 app.use('/api/community', communityRoutes); // Dedicated prefix to avoid collisions
 
 // 404 handler

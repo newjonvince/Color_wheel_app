@@ -396,7 +396,74 @@ async function initializeTables() {
       ) ENGINE=InnoDB
     `);
 
-    console.log('✅ Database tables initialized successfully');
+    // Posts table for community features (matching Railway database)
+    await query(`
+      CREATE TABLE IF NOT EXISTS posts (
+        id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        title VARCHAR(255),
+        content TEXT,
+        image_url VARCHAR(500),
+        color_match_id VARCHAR(36),
+        privacy ENUM('public', 'private') DEFAULT 'public',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT fk_posts_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_posts_color_match FOREIGN KEY (color_match_id) REFERENCES color_matches(id) ON DELETE SET NULL,
+        INDEX idx_posts_user_id (user_id),
+        INDEX idx_posts_created_at (created_at),
+        INDEX idx_posts_privacy (privacy)
+      ) ENGINE=InnoDB
+    `);
+
+    // Post comments table (matching Railway database)
+    await query(`
+      CREATE TABLE IF NOT EXISTS post_comments (
+        id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
+        post_id VARCHAR(36) NOT NULL,
+        user_id VARCHAR(36) NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT fk_post_comments_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
+        CONSTRAINT fk_post_comments_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_post_comments_post_id (post_id),
+        INDEX idx_post_comments_user_id (user_id),
+        INDEX idx_post_comments_created_at (created_at)
+      ) ENGINE=InnoDB
+    `);
+
+    // Post likes table (matching Railway database)
+    await query(`
+      CREATE TABLE IF NOT EXISTS post_likes (
+        id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
+        post_id VARCHAR(36) NOT NULL,
+        user_id VARCHAR(36) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT unique_post_like UNIQUE (post_id, user_id),
+        CONSTRAINT fk_post_likes_post FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE,
+        CONSTRAINT fk_post_likes_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_post_likes_post_id (post_id),
+        INDEX idx_post_likes_user_id (user_id)
+      ) ENGINE=InnoDB
+    `);
+
+    // User follows table (matching Railway database - different from follows table)
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_follows (
+        id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
+        follower_id VARCHAR(36) NOT NULL,
+        following_id VARCHAR(36) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT unique_user_follow UNIQUE (follower_id, following_id),
+        CONSTRAINT fk_user_follows_follower FOREIGN KEY (follower_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_user_follows_following FOREIGN KEY (following_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_user_follows_follower_id (follower_id),
+        INDEX idx_user_follows_following_id (following_id)
+      ) ENGINE=InnoDB
+    `);
+
+    console.log('✅ Database tables initialized successfully (all Railway tables included)');
   } catch (error) {
     console.error('❌ Database table initialization error:', error.message);
     console.error('❌ Stack:', error.stack);

@@ -111,20 +111,20 @@ export function getColorScheme(baseColor, scheme) {
     
     case 'shades':
       return [
-        hslToHex(h, s, Math.max(5, l - 40)),
-        hslToHex(h, s, Math.max(10, l - 25)),
+        hslToHex(h, Math.min(100, s + 5), Math.max(5, l - 40)),
+        hslToHex(h, Math.min(100, s + 3), Math.max(10, l - 25)),
         baseColor,
-        hslToHex(h, s, Math.max(15, l - 10)),
+        hslToHex(h, Math.min(100, s + 1), Math.max(15, l - 10)),
         hslToHex(h, s, Math.max(20, l - 5))
       ];
     
     case 'tints':
       return [
-        hslToHex(h, s, Math.min(95, l + 40)),
-        hslToHex(h, s, Math.min(90, l + 25)),
+        hslToHex(h, Math.max(10, s - 15), Math.min(95, l + 40)),
+        hslToHex(h, Math.max(10, s - 10), Math.min(90, l + 25)),
         baseColor,
-        hslToHex(h, s, Math.min(85, l + 10)),
-        hslToHex(h, s, Math.min(80, l + 5))
+        hslToHex(h, Math.max(10, s - 5), Math.min(85, l + 10)),
+        hslToHex(h, Math.max(10, s - 2), Math.min(80, l + 5))
       ];
     
     default:

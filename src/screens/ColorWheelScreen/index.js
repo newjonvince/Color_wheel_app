@@ -11,9 +11,10 @@ import { ColorControls } from './components/ColorControls';
 import { HSLInputs } from './components/HSLInputs';
 import { ColorSwatches } from './components/ColorSwatches';
 import CoolorsColorExtractor from '../../components/CoolorsColorExtractor';
+import ApiIntegrationStatus from '../../components/ApiIntegrationStatus';
 
 // Hooks and utilities
-import { useColorWheelState } from './useColorWheelState';
+import { useOptimizedColorWheelState as useColorWheelState } from './useOptimizedColorWheelState';
 import { getColorScheme } from '../../utils/color';
 import { styles } from './styles';
 import ApiService from '../../services/api';
@@ -54,9 +55,26 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     
     try {
       await ApiService.ready;
-      await ApiService.getUserColorMatches();
+      const userMatches = await ApiService.getUserColorMatches();
+      
+      if (__DEV__) {
+        console.log('✅ API Integration Status:', {
+          authenticated: !!ApiService.getToken(),
+          userDataLoaded: !!userMatches,
+          matchCount: userMatches?.data?.length || 0,
+          apiReady: true
+        });
+      }
     } catch (error) {
       console.warn('Failed to load user data:', error);
+      if (__DEV__) {
+        console.error('❌ API Integration Issue:', {
+          error: error.message,
+          isAuthError: error.isAuthError,
+          hasToken: !!ApiService.getToken()
+        });
+      }
+      
       if (error.isAuthError && typeof onLogout === 'function') {
         onLogout();
       }
@@ -103,9 +121,40 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
         description: `Generated color palette using ${selectedScheme} scheme`,
       };
       
-      await onSaveColorMatch(colorMatch);
+      if (__DEV__) {
+        console.log('💾 Saving Color Match:', {
+          baseColor: colorMatch.base_color,
+          scheme: colorMatch.scheme,
+          colorsCount: colorMatch.colors.length,
+          colors: colorMatch.colors
+        });
+      }
+      
+      const result = await onSaveColorMatch(colorMatch);
+      
+      if (__DEV__) {
+        console.log('✅ Color Match Saved:', {
+          success: !!result,
+          matchId: result?.id,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      return result;
     } catch (error) {
       console.error('Failed to save color match:', error);
+      if (__DEV__) {
+        console.error('❌ Save Color Match Error:', {
+          error: error.message,
+          isAuthError: error.isAuthError,
+          colorMatch: {
+            baseColor: selectedColor,
+            scheme: selectedScheme,
+            colorsCount: schemeColors.length
+          }
+        });
+      }
+      throw error;
     }
   }, [onSaveColorMatch, currentUser, selectedColor, selectedScheme, schemeColors]);
 
@@ -165,6 +214,9 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
           onClose={closeExtractor}
         />
       )}
+
+      {/* API Integration Status (Development Only) */}
+      <ApiIntegrationStatus />
     </ScrollView>
   );
 };

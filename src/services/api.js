@@ -167,6 +167,38 @@ export const deleteColorMatch = async (id) => {
   return data;
 };
 
+// ---- Color Match Likes Functions ----
+export const likeColorMatch = async (colorMatchId) => {
+  await ready;
+  const { data } = await api.post(`/likes/color-matches/${colorMatchId}`, {}, withAuthHeaders());
+  return data;
+};
+
+export const unlikeColorMatch = async (colorMatchId) => {
+  await ready;
+  const { data } = await api.delete(`/likes/color-matches/${colorMatchId}`, withAuthHeaders());
+  return data;
+};
+
+export const getColorMatchLikes = async (colorMatchId) => {
+  const { data } = await api.get(`/likes/color-matches/${colorMatchId}`);
+  return data;
+};
+
+export const getUserLikedColorMatches = async (params = {}) => {
+  await ready;
+  const { data } = await api.get('/likes/user/color-matches', { 
+    params,
+    ...withAuthHeaders() 
+  });
+  return data;
+};
+
+export const getPopularColorMatches = async (params = {}) => {
+  const { data } = await api.get('/likes/popular/color-matches', { params });
+  return data;
+};
+
 // ---- Community Functions ----
 export const getCommunityFeed = async (params = {}) => {
   const { data } = await api.get('/community/feed', { params });

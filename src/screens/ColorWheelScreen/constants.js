@@ -39,6 +39,9 @@ export const getAccessibilityLabel = (scheme) => {
     triadic: 'Triadic color scheme with 3 evenly spaced colors',
     tetradic: 'Tetradic color scheme with 4 colors forming a rectangle',
     monochromatic: 'Monochromatic color scheme with variations of one color',
+    compound: 'Compound color scheme with split-complementary and complementary colors',
+    shades: 'Shades color scheme with darker variations of the base color',
+    tints: 'Tints color scheme with lighter variations of the base color',
   };
   return labels[scheme] || 'Color scheme selector';
 };
