@@ -17,7 +17,7 @@ import ApiIntegrationStatus from '../../components/ApiIntegrationStatus';
 import { useOptimizedColorWheelState as useColorWheelState } from './useOptimizedColorWheelState';
 import { getColorScheme } from '../../utils/color';
 import { styles } from './styles';
-import ApiService from '../../services/api';
+import ApiService from '../../services/safeApiService';
 
 const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch }) => {
   const wheelRef = useRef(null);

@@ -1,8 +1,7 @@
 // screens/LoginScreen/useLoginState.js - Login state management hook
 import { useState, useCallback, useRef } from 'react';
-import * as SecureStore from 'expo-secure-store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import ApiService from '../../services/api';
+import { safeStorage } from '../../utils/safeStorage';
+import ApiService from '../../services/safeApiService';
 import { 
   validateForm, 
   withTimeout, 

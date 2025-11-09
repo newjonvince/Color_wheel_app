@@ -14,9 +14,21 @@ export const loadModules = () => {
     ({ GestureHandlerRootView: modules.GestureHandlerRootView } = require('react-native-gesture-handler'));
     modules.AsyncStorage = require('@react-native-async-storage/async-storage').default;
     ({ SafeAreaProvider: modules.SafeAreaProvider, SafeAreaView: modules.SafeAreaView } = require('react-native-safe-area-context'));
-    modules.SecureStore = require('expo-secure-store');
-    modules.Updates = require('expo-updates');
-    modules.ApiService = require('../services/api').default;
+    try {
+      modules.SecureStore = require('expo-secure-store');
+    } catch (e) {
+      console.warn('SecureStore not available:', e.message);
+      modules.SecureStore = null;
+    }
+    
+    try {
+      modules.Updates = require('expo-updates');
+    } catch (e) {
+      console.warn('Updates not available:', e.message);
+      modules.Updates = null;
+    }
+    
+    modules.ApiService = require('../services/safeApiService').default;
     
     if (!__DEV__) console.log('App modules loaded successfully');
   } catch (e) {

@@ -1,8 +1,7 @@
 // hooks/useAuth.js - Authentication state management
 import { useState, useCallback, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SecureStore from 'expo-secure-store';
-import ApiService from '../services/api';
+import { safeStorage } from '../utils/safeStorage';
+import ApiService from '../services/safeApiService';
 
 const pickUser = (u) => (u?.user ? u.user : u);
 
@@ -13,9 +12,7 @@ export const useAuth = () => {
 
   const clearStoredToken = useCallback(async () => {
     try {
-      await SecureStore?.deleteItemAsync?.('fashion_color_wheel_auth_token');
-      await SecureStore?.deleteItemAsync?.('authToken');
-      await AsyncStorage.removeItem('authToken');
+      await safeStorage.clearAuth();
     } catch (error) {
       console.warn('Failed to clear stored tokens:', error);
     }
@@ -39,9 +36,8 @@ export const useAuth = () => {
 
       let token = null;
       try {
-        token = await SecureStore.getItemAsync('fashion_color_wheel_auth_token');
-        if (!token) token = await SecureStore.getItemAsync('authToken');
-        if (!token) token = await AsyncStorage.getItem('authToken');
+        token = await safeStorage.getItem('fashion_color_wheel_auth_token');
+        if (!token) token = await safeStorage.getItem('authToken');
       } catch (error) {
         if (__DEV__) console.warn('Token retrieval error:', error);
       }

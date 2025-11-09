@@ -2,8 +2,10 @@
 import React from 'react';
 import { View, TouchableOpacity } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import FullColorWheel from '../../../components/FullColorWheel';
+import SafeColorWheel from '../../../components/SafeColorWheel';
 import { styles, WHEEL_SIZE } from '../styles';
+
+// Temporarily using SafeColorWheel instead of FullColorWheel to prevent Skia crashes
 
 export const ColorWheelContainer = React.memo(({ 
   wheelRef,
@@ -20,14 +22,9 @@ export const ColorWheelContainer = React.memo(({
 }) => {
   return (
     <View style={styles.wheelContainer}>
-      <FullColorWheel
-        ref={wheelRef}
-        selectedFollowsActive={selectedFollowsActive}
-        size={WHEEL_SIZE}
+      <SafeColorWheel
         scheme={selectedScheme}
         initialHex={baseHex}
-        linked={linked}
-        onToggleLinked={onToggleLinked}
         onColorsChange={onColorsChange}
         onHexChange={onHexChange}
         onActiveHandleChange={onActiveHandleChange}
