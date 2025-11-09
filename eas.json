@@ -19,7 +19,7 @@
       "ios": {
         "simulator": false,
         "buildConfiguration": "Release",
-        "image": "macos-ventura-13.6-xcode-15.0"
+        "image": "macos-sonoma-14.5-xcode-15.1"
       },
       "env": {
         "EXPO_PUBLIC_API_BASE_URL": "https://colorwheelapp-production.up.railway.app"
@@ -28,7 +28,7 @@
     "production": {
       "autoIncrement": true,
       "ios": {
-        "image": "macos-ventura-13.6-xcode-15.0"
+        "image": "macos-sonoma-14.5-xcode-15.1"
       },
       "env": {
         "NODE_ENV": "production",
