@@ -85,6 +85,14 @@ export const withTimeout = (promise, ms = 10000) => Promise.race([
 
 // Response parsing utilities
 export const parseLoginResponse = (response) => {
+  // Handle new standardized API response format
+  if (response?.success && response?.data) {
+    const user = response.data.user;
+    const token = response.data.token || response.data.accessToken;
+    return { user, token };
+  }
+  
+  // Handle legacy response format
   const user = response?.user || response?.data?.user;
   const token = response?.token || response?.data?.token || response?.accessToken;
   
@@ -92,7 +100,14 @@ export const parseLoginResponse = (response) => {
 };
 
 export const getErrorMessage = (error) => {
+  // Handle new standardized API error format
+  if (error?.response?.data?.success === false) {
+    return error.response.data.message || 'Request failed';
+  }
+  
+  // Handle legacy error formats
   return error?.response?.data?.message ||
+         error?.response?.data?.error ||
          error?.message ||
          'Something went wrong. Please try again.';
 };

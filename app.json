@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Fashion Color Wheel",
-    "slug": "fashion-color-wheel",
+    "slug": "fashion-color-wheel-backend",
     "scheme": "colorwheel",
     "version": "1.0.0",
     "orientation": "portrait",
