@@ -42,15 +42,6 @@
         }
       }
     },
-    "android": {
-      "package": "com.fashioncolorwheel.app",
-      "versionCode": 50,
-      "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.RECORD_AUDIO"
-      ]
-    },
     "plugins": [
       "expo-image-picker",
       [
@@ -62,9 +53,6 @@
             "useFrameworks": "static",
             "flipper": false,
             "ccacheEnabled": false
-          },
-          "android": {
-            "newArchEnabled": false
           }
         }
       ],

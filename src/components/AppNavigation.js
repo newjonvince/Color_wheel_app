@@ -1,23 +1,8 @@
 // components/AppNavigation.js - Main navigation component
 import React from 'react';
-import { Text, StyleSheet, Image } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { APP_CONFIG } from '../config/app';
-
-const TabIcon = React.memo(({ name, focused }) => {
-  const icon = focused ? APP_CONFIG.tabIcons[name]?.focused : APP_CONFIG.tabIcons[name]?.unfocused;
-  
-  // Handle image icons (require() objects) vs emoji strings
-  if (typeof icon === 'string') {
-    // Emoji icon (fallback)
-    return <Text style={styles.tabIcon}>{icon}</Text>;
-  } else if (icon) {
-    // Image icon
-    return <Image source={icon} style={styles.tabIconImage} resizeMode="contain" />;
-  }
-  
-  // Fallback icon
-  return <Text style={styles.tabIcon}>📱</Text>;
-});
+import TabIcon from './TabIcon';
 
 export const AppNavigation = ({ 
   Tab, 

@@ -2,8 +2,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { safeStorage } from '../utils/safeStorage';
 import ApiService from '../services/safeApiService';
-
-const pickUser = (u) => (u?.user ? u.user : u);
+import { pickUser } from '../config/app';
 
 export const useAuth = () => {
   const [user, setUser] = useState(null);

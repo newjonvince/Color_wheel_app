@@ -1,175 +1,349 @@
-// App.js — Ultra-minimal version to test native crash
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+// App.js - Ultra-optimized Fashion Color Wheel App
+import 'react-native-gesture-handler';
+import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
+import { AppState, Platform, LogBox, StyleSheet } from 'react-native';
+import { enableScreens } from 'react-native-screens';
 
-// Absolute minimal app - no external dependencies
-export default function MinimalApp() {
-  return (
-    <View style={styles.container}>
-      <Text style={styles.text}>🎨 Fashion Color Wheel</Text>
-      <Text style={styles.subtitle}>Minimal Test Version</Text>
-      <Text style={styles.info}>If you see this, React Native works!</Text>
-    </View>
-  );
+// Performance optimizations
+enableScreens(true);
+
+// Suppress warnings in production
+if (!__DEV__) {
+  LogBox.ignoreAllLogs();
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    padding: 20,
-  },
-  text: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  subtitle: {
-    fontSize: 18,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  info: {
-    fontSize: 14,
-    color: '#999',
-    textAlign: 'center',
-  },
-});
+// Optimized imports with lazy loading
+const loadModules = () => import('./src/utils/moduleLoader').then(m => m.loadModules());
+const loadScreens = () => import('./src/utils/moduleLoader').then(m => m.loadScreens());
+const loadColorWheelScreen = () => import('./src/utils/moduleLoader').then(m => m.loadColorWheelScreen());
+const loadErrorBoundary = () => import('./src/utils/moduleLoader').then(m => m.loadErrorBoundary());
 
-// Original app code (temporarily disabled)
-/*
-import 'react-native-gesture-handler';
-import React, { useState, useEffect } from 'react';
-import { AppState } from 'react-native';
+// Lazy load components
+const LoadingScreen = React.lazy(() => import('./src/components/LoadingScreen').then(m => ({ default: m.LoadingScreen })));
+const AuthScreens = React.lazy(() => import('./src/components/AuthScreens').then(m => ({ default: m.AuthScreens })));
+const AppNavigation = React.lazy(() => import('./src/components/AppNavigation').then(m => ({ default: m.AppNavigation })));
 
-// Organized imports
-import { loadModules, loadScreens, loadColorWheelScreen, loadErrorBoundary } from './src/utils/moduleLoader';
-import { initializeAppConfig } from './src/config/app';
+// Hooks
 import { useAuth } from './src/hooks/useAuth';
 import { useEnhancedColorMatches } from './src/hooks/useEnhancedColorMatches';
 import { useColorWheelRetry } from './src/hooks/useColorWheelRetry';
-import { LoadingScreen } from './src/components/LoadingScreen';
-import { AuthScreens } from './src/components/AuthScreens';
-import { AppNavigation } from './src/components/AppNavigation';
 
-// Initialize app configuration
-initializeAppConfig();
+// Configuration
+import { initializeAppConfig } from './src/config/app';
 
-function OriginalApp() {
-  // Load modules with fallbacks
-  const { modules } = loadModules();
-  const { screens } = loadScreens();
-  const { ColorWheelScreen } = loadColorWheelScreen();
-  const ErrorBoundary = loadErrorBoundary();
+// App state management
+const APP_STATES = {
+  INITIALIZING: 'initializing',
+  LOADING_MODULES: 'loading_modules',
+  AUTHENTICATING: 'authenticating',
+  READY: 'ready',
+  ERROR: 'error'
+};
 
-  // Extract modules for easier use
-  const {
-    StatusBar,
-    NavigationContainer,
-    createBottomTabNavigator,
-    GestureHandlerRootView,
-    SafeAreaProvider,
-    SafeAreaView,
-    Updates,
-  } = modules;
+// Performance monitoring (development only)
+const performanceMonitor = __DEV__ ? {
+  startTime: Date.now(),
+  logTiming: (label) => {
+    console.log(`⏱️ ${label}: ${Date.now() - performanceMonitor.startTime}ms`);
+  }
+} : { logTiming: () => {} };
 
-  // Create Tab navigator
-  const Tab = createBottomTabNavigator();
-
-  // State management hooks
+// Optimized App component
+function OptimizedApp() {
+  // App state
+  const [appState, setAppState] = useState(APP_STATES.INITIALIZING);
   const [showSignUp, setShowSignUp] = useState(false);
-  const [error] = useState(null);
+  const [modules, setModules] = useState(null);
+  const [screens, setScreens] = useState(null);
+  const [ColorWheelScreen, setColorWheelScreen] = useState(null);
+  const [ErrorBoundary, setErrorBoundary] = useState(React.Fragment);
+  const [error, setError] = useState(null);
+
+  // Custom hooks with error boundaries
+  const authHook = useAuth();
+  const colorMatchesHook = useEnhancedColorMatches();
   
-  // Custom hooks for organized state management
+  // Memoized destructuring to prevent unnecessary re-renders
   const {
     user,
-    loading,
+    loading: authLoading,
     isInitialized,
     initializeAuth,
     handleLoginSuccess,
     handleSignUpComplete,
     handleLogout,
     handleAccountDeleted,
-  } = useAuth();
+  } = authHook;
 
-  const { colorMatches: savedColorMatches, saveColorMatch } = useEnhancedColorMatches();
+  const { 
+    colorMatches: savedColorMatches, 
+    saveColorMatch,
+    loading: colorMatchesLoading 
+  } = colorMatchesHook;
+
+  // Initialize Updates module for retry functionality
+  const Updates = modules?.Updates;
   const { wheelReloadNonce, retryLoadColorWheel } = useColorWheelRetry(Updates);
 
-  // Initialize app on mount
-  useEffect(() => {
-    const timeout = setTimeout(() => { initializeAuth(); }, 50);
-    return () => clearTimeout(timeout);
-  }, [initializeAuth]);
+  // Memoized loading state
+  const isLoading = useMemo(() => {
+    return authLoading || colorMatchesLoading || appState === APP_STATES.LOADING_MODULES;
+  }, [authLoading, colorMatchesLoading, appState]);
 
-  // Handle app state changes
+  // Optimized module loading with error handling
+  const initializeModules = useCallback(async () => {
+    try {
+      setAppState(APP_STATES.LOADING_MODULES);
+      performanceMonitor.logTiming('Module loading started');
+
+      // Load modules in parallel for better performance
+      const [
+        { modules: loadedModules },
+        { screens: loadedScreens },
+        { ColorWheelScreen: loadedColorWheel },
+        loadedErrorBoundary
+      ] = await Promise.all([
+        loadModules(),
+        loadScreens(),
+        loadColorWheelScreen(),
+        loadErrorBoundary()
+      ]);
+
+      setModules(loadedModules);
+      setScreens(loadedScreens);
+      setColorWheelScreen(loadedColorWheel);
+      setErrorBoundary(loadedErrorBoundary);
+
+      performanceMonitor.logTiming('Modules loaded');
+      setAppState(APP_STATES.AUTHENTICATING);
+
+    } catch (moduleError) {
+      console.error('Failed to load modules:', moduleError);
+      setError(moduleError);
+      setAppState(APP_STATES.ERROR);
+    }
+  }, []);
+
+  // Initialize app with optimized timing
   useEffect(() => {
-    const handleAppStateChange = (nextAppState) => {
-      if (nextAppState === 'active' && !isInitialized) {
-        initializeAuth();
+    let isMounted = true;
+
+    const initialize = async () => {
+      try {
+        // Initialize app configuration first
+        initializeAppConfig();
+        performanceMonitor.logTiming('App config initialized');
+
+        // Load modules
+        await initializeModules();
+
+        if (isMounted) {
+          // Initialize auth after modules are loaded
+          const authTimeout = setTimeout(() => {
+            if (isMounted) {
+              initializeAuth();
+              setAppState(APP_STATES.READY);
+              performanceMonitor.logTiming('App fully initialized');
+            }
+          }, 50);
+
+          return () => clearTimeout(authTimeout);
+        }
+      } catch (initError) {
+        console.error('App initialization failed:', initError);
+        if (isMounted) {
+          setError(initError);
+          setAppState(APP_STATES.ERROR);
+        }
       }
     };
-    
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+    initialize();
+
     return () => {
-      if (subscription?.remove) {
-        subscription.remove();
-      }
+      isMounted = false;
     };
-  }, [isInitialized, initializeAuth]);
+  }, [initializeModules, initializeAuth]);
 
-  // Render loading state
-  if (loading || !isInitialized) {
+  // Optimized app state change handler
+  const handleAppStateChange = useCallback((nextAppState) => {
+    if (nextAppState === 'active' && !isInitialized && appState === APP_STATES.READY) {
+      initializeAuth();
+    }
+  }, [isInitialized, initializeAuth, appState]);
+
+  // App state listener with cleanup
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    
+    return () => {
+      subscription?.remove?.();
+    };
+  }, [handleAppStateChange]);
+
+  // Memoized extracted modules for performance
+  const extractedModules = useMemo(() => {
+    if (!modules) return {};
+    
+    return {
+      StatusBar: modules.StatusBar,
+      NavigationContainer: modules.NavigationContainer,
+      createBottomTabNavigator: modules.createBottomTabNavigator,
+      GestureHandlerRootView: modules.GestureHandlerRootView,
+      SafeAreaProvider: modules.SafeAreaProvider,
+      SafeAreaView: modules.SafeAreaView,
+    };
+  }, [modules]);
+
+  // Memoized Tab navigator
+  const Tab = useMemo(() => {
+    return extractedModules.createBottomTabNavigator?.();
+  }, [extractedModules.createBottomTabNavigator]);
+
+  // Error boundary fallback
+  if (error || appState === APP_STATES.ERROR) {
+    const { SafeAreaProvider, SafeAreaView } = extractedModules;
+    
     return (
-      <LoadingScreen 
-        SafeAreaProvider={SafeAreaProvider}
-        SafeAreaView={SafeAreaView}
-        error={error}
-      />
+      <Suspense fallback={<MinimalLoadingScreen />}>
+        <LoadingScreen 
+          SafeAreaProvider={SafeAreaProvider || React.Fragment}
+          SafeAreaView={SafeAreaView || React.Fragment}
+          error={error}
+        />
+      </Suspense>
     );
   }
 
-  // Render authentication screens
+  // Loading state with progress indication
+  if (isLoading || !isInitialized || appState !== APP_STATES.READY) {
+    const { SafeAreaProvider, SafeAreaView } = extractedModules;
+    
+    return (
+      <Suspense fallback={<MinimalLoadingScreen />}>
+        <LoadingScreen 
+          SafeAreaProvider={SafeAreaProvider || React.Fragment}
+          SafeAreaView={SafeAreaView || React.Fragment}
+          error={null}
+        />
+      </Suspense>
+    );
+  }
+
+  // Authentication screens
   if (!user) {
+    const { SafeAreaProvider, SafeAreaView, StatusBar } = extractedModules;
+    
     return (
-      <AuthScreens
-        SafeAreaProvider={SafeAreaProvider}
-        SafeAreaView={SafeAreaView}
-        StatusBar={StatusBar}
-        showSignUp={showSignUp}
-        setShowSignUp={setShowSignUp}
-        screens={screens}
-        handleLoginSuccess={handleLoginSuccess}
-        handleSignUpComplete={handleSignUpComplete}
-      />
+      <Suspense fallback={<MinimalLoadingScreen />}>
+        <AuthScreens
+          SafeAreaProvider={SafeAreaProvider}
+          SafeAreaView={SafeAreaView}
+          StatusBar={StatusBar}
+          showSignUp={showSignUp}
+          setShowSignUp={setShowSignUp}
+          screens={screens}
+          handleLoginSuccess={handleLoginSuccess}
+          handleSignUpComplete={handleSignUpComplete}
+        />
+      </Suspense>
     );
   }
 
-  // Render main app navigation
+  // Main app navigation
+  const { 
+    GestureHandlerRootView, 
+    SafeAreaProvider, 
+    NavigationContainer, 
+    StatusBar 
+  } = extractedModules;
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <AppNavigation
-          Tab={Tab}
-          NavigationContainer={NavigationContainer}
-          ErrorBoundary={ErrorBoundary}
-          StatusBar={StatusBar}
-          user={user}
-          screens={screens}
-          ColorWheelScreen={ColorWheelScreen}
-          wheelReloadNonce={wheelReloadNonce}
-          saveColorMatch={saveColorMatch}
-          savedColorMatches={savedColorMatches}
-          handleLogout={handleLogout}
-          handleAccountDeleted={handleAccountDeleted}
-          retryLoadColorWheel={retryLoadColorWheel}
-        />
+        <Suspense fallback={<MinimalLoadingScreen />}>
+          <AppNavigation
+            Tab={Tab}
+            NavigationContainer={NavigationContainer}
+            ErrorBoundary={ErrorBoundary}
+            StatusBar={StatusBar}
+            user={user}
+            screens={screens}
+            ColorWheelScreen={ColorWheelScreen}
+            wheelReloadNonce={wheelReloadNonce}
+            saveColorMatch={saveColorMatch}
+            savedColorMatches={savedColorMatches}
+            handleLogout={handleLogout}
+            handleAccountDeleted={handleAccountDeleted}
+            retryLoadColorWheel={retryLoadColorWheel}
+          />
+        </Suspense>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
-*/
+
+// Minimal loading screen for Suspense fallbacks
+function MinimalLoadingScreen() {
+  const { View, Text } = require('react-native');
+  
+  return (
+    <View style={minimalStyles.container}>
+      <Text style={minimalStyles.text}>🎨 Loading Fashion Color Wheel...</Text>
+    </View>
+  );
+}
+
+const minimalStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
+  text: {
+    fontSize: 18,
+    color: '#666',
+    textAlign: 'center',
+  },
+});
+
+// Error boundary wrapper
+class AppErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('App Error Boundary caught an error:', error, errorInfo);
+    
+    // In production, you might want to log this to a crash reporting service
+    if (!__DEV__) {
+      // logErrorToService(error, errorInfo);
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <MinimalLoadingScreen />
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// Main app export with error boundary
+export default function App() {
+  return (
+    <AppErrorBoundary>
+      <OptimizedApp />
+    </AppErrorBoundary>
+  );
+}

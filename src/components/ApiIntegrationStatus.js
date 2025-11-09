@@ -4,7 +4,26 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
 import ApiService from '../services/safeApiService';
-import { quickApiTest } from '../utils/apiIntegrationTest';
+// Inline API test function (replaces removed apiIntegrationTest.js)
+const quickApiTest = async () => {
+  try {
+    await ApiService.ready;
+    const token = ApiService.getToken();
+    const profile = await ApiService.getUserProfile();
+    return {
+      success: true,
+      hasToken: !!token,
+      hasProfile: !!profile,
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString()
+    };
+  }
+};
 
 const ApiIntegrationStatus = () => {
   const [status, setStatus] = useState({
