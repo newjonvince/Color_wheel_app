@@ -380,6 +380,22 @@ async function initializeTables() {
       ) ENGINE=InnoDB
     `);
 
+    // Color match likes table (for social features)
+    await query(`
+      CREATE TABLE IF NOT EXISTS color_match_likes (
+        id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
+        user_id VARCHAR(36) NOT NULL,
+        color_match_id VARCHAR(36) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT unique_user_color_like UNIQUE (user_id, color_match_id),
+        CONSTRAINT fk_color_match_likes_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_color_match_likes_color_match FOREIGN KEY (color_match_id) REFERENCES color_matches(id) ON DELETE CASCADE,
+        INDEX idx_color_match_likes_user_id (user_id),
+        INDEX idx_color_match_likes_color_match_id (color_match_id),
+        INDEX idx_color_match_likes_created_at (created_at)
+      ) ENGINE=InnoDB
+    `);
+
     console.log('✅ Database tables initialized successfully');
   } catch (error) {
     console.error('❌ Database table initialization error:', error.message);

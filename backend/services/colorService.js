@@ -308,6 +308,8 @@ class ColorService {
       privacy: colorMatch.privacy,
       created_at: colorMatch.created_at,
       updated_at: colorMatch.updated_at,
+      like_count: colorMatch.like_count || 0,
+      is_liked: Boolean(colorMatch.is_liked),
     };
   }
 }
