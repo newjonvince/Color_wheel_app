@@ -1,7 +1,7 @@
 // components/SafeColorWheel.js - Fallback color wheel without Skia
 import React, { useState, useEffect } from 'react';
 import { View, TouchableOpacity, Text, Dimensions } from 'react-native';
-import { getColorScheme } from '../utils/color';
+import { getColorScheme } from '../utils/optimizedColor';
 
 const { width } = Dimensions.get('window');
 const WHEEL_SIZE = Math.min(width * 0.8, 300);

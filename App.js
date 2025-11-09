@@ -51,7 +51,7 @@ import { AppState } from 'react-native';
 import { loadModules, loadScreens, loadColorWheelScreen, loadErrorBoundary } from './src/utils/moduleLoader';
 import { initializeAppConfig } from './src/config/app';
 import { useAuth } from './src/hooks/useAuth';
-import { useColorMatches } from './src/hooks/useColorMatches';
+import { useEnhancedColorMatches } from './src/hooks/useEnhancedColorMatches';
 import { useColorWheelRetry } from './src/hooks/useColorWheelRetry';
 import { LoadingScreen } from './src/components/LoadingScreen';
 import { AuthScreens } from './src/components/AuthScreens';
@@ -97,7 +97,7 @@ function OriginalApp() {
     handleAccountDeleted,
   } = useAuth();
 
-  const { savedColorMatches, saveColorMatch } = useColorMatches(user);
+  const { colorMatches: savedColorMatches, saveColorMatch } = useEnhancedColorMatches();
   const { wheelReloadNonce, retryLoadColorWheel } = useColorWheelRetry(Updates);
 
   // Initialize app on mount

@@ -3,7 +3,7 @@ import { StyleSheet, Text, View, TouchableOpacity, FlatList, Dimensions, Alert, 
 import * as ImagePicker from 'expo-image-picker';
 import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 import ApiService from '../services/safeApiService';
-import { getColorScheme as computeScheme } from '../utils/color';
+import { getColorScheme as computeScheme } from '../utils/optimizedColor';
 
 const { width: screenWidth } = Dimensions.get('window');
 const boardWidth = (screenWidth - 45) / 2; // 2 columns with margins

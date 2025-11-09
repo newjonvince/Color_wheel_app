@@ -28,7 +28,7 @@ const REANIMATED_READY = (() => {
   }
 })();
 
-import { hslToHex, hexToHsl } from '../utils/color';
+import { hslToHex, hexToHsl } from '../utils/optimizedColor';
 
 let Canvas, SkiaCircle, SweepGradient, RadialGradient, Paint, vec;
 try {

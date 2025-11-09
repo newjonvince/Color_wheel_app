@@ -2,7 +2,7 @@
 // Drop-in replacement for useColorWheelState with optimized color processing
 
 import { useState, useCallback, useEffect, useMemo } from 'react';
-import { hexToHsl, hslToHex } from '../../utils/color';
+import { hexToHsl, hslToHex } from '../../utils/optimizedColor';
 import { SCHEME_COUNTS, SCHEME_OFFSETS } from '../../components/FullColorWheel';
 import { DEFAULT_COLOR, DEFAULT_SCHEME, validateHSL, generateRandomColor, mod } from './constants';
 import { useThrottledCallbacks } from '../../utils/throttledCallbacks';

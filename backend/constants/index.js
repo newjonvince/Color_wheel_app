@@ -81,14 +81,17 @@ const VALIDATION_RULES = {
   },
 };
 
-// Color Schemes
+// Color Schemes - Updated to match frontend optimized color system
 const COLOR_SCHEMES = [
   'analogous',
   'complementary', 
   'split-complementary',
   'triadic',
   'tetradic',
-  'monochromatic'
+  'monochromatic',
+  'compound',
+  'shades',
+  'tints'
 ];
 
 // Pagination

@@ -195,7 +195,7 @@ export const generateColorScheme = (baseColor, scheme) => {
   }
 
   // Import and use hexToHsl here to avoid circular imports
-  const { hexToHsl } = require('../utils/color');
+  const { hexToHsl } = require('../utils/optimizedColor');
   const { h, s, l } = hexToHsl(baseColor) || { h: 0, s: 100, l: 50 };
   
   return definition.generator(h, s, l, baseColor);

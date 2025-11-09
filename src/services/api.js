@@ -11,6 +11,28 @@ import safeApiService from './safeApiService';
 // Export the safe API service as default
 export default safeApiService;
 
-// Export individual methods for backward compatibility if needed
-// Note: Some legacy methods may not be available in the safe API
-// Check safeApiService.js for available methods
+// Export individual methods for backward compatibility
+export const {
+  ready,
+  getToken,
+  setToken,
+  login,
+  demoLogin,
+  getUserProfile,
+  getUserColorMatches,
+  logout,
+  updateSettings,
+  deleteAccount,
+  requestDataExport,
+  // Color match methods
+  createColorMatch,
+  getColorMatches,
+  getColorMatch,
+  updateColorMatch,
+  deleteColorMatch,
+  validateHex,
+  // Community methods
+  likeColorMatch,
+  unlikeColorMatch,
+  getColorMatchLikes
+} = safeApiService;

@@ -157,6 +157,67 @@ class SafeApiService {
       method: 'POST',
     });
   }
+
+  // Color match methods
+  async createColorMatch(colorMatchData) {
+    return this.request('/colors/matches', {
+      method: 'POST',
+      data: colorMatchData,
+    });
+  }
+
+  async getColorMatches(options = {}) {
+    const params = new URLSearchParams();
+    if (options.limit) params.append('limit', options.limit);
+    if (options.offset) params.append('offset', options.offset);
+    if (options.scheme) params.append('scheme', options.scheme);
+    if (options.privacy) params.append('privacy', options.privacy);
+    if (options.public) params.append('public', options.public);
+
+    const queryString = params.toString();
+    return this.request(`/colors/matches${queryString ? '?' + queryString : ''}`);
+  }
+
+  async getColorMatch(matchId) {
+    return this.request(`/colors/matches/${matchId}`);
+  }
+
+  async updateColorMatch(matchId, updateData) {
+    return this.request(`/colors/matches/${matchId}`, {
+      method: 'PUT',
+      data: updateData,
+    });
+  }
+
+  async deleteColorMatch(matchId) {
+    return this.request(`/colors/matches/${matchId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async validateHex(hexColor) {
+    return this.request('/colors/validate', {
+      method: 'POST',
+      data: { hex: hexColor },
+    });
+  }
+
+  // Community/likes methods
+  async likeColorMatch(matchId) {
+    return this.request(`/likes/color-matches/${matchId}`, {
+      method: 'POST',
+    });
+  }
+
+  async unlikeColorMatch(matchId) {
+    return this.request(`/likes/color-matches/${matchId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getColorMatchLikes(matchId) {
+    return this.request(`/likes/color-matches/${matchId}`);
+  }
 }
 
 // Create singleton instance

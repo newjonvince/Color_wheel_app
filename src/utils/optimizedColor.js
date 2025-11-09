@@ -612,3 +612,104 @@ export function hexToHsl(hex) {
   const colorData = getCachedColorData(hex);
   return colorData.hsl;
 }
+
+/**
+ * Get color scheme colors based on base color and scheme type (optimized with caching)
+ */
+export function getColorScheme(baseColor, scheme) {
+  const { h, s, l } = hexToHsl(baseColor);
+  
+  switch (scheme) {
+    case 'analogous':
+      return [
+        baseColor,
+        hslToHex((h + 30) % 360, s, l),
+        hslToHex((h - 30 + 360) % 360, s, l)
+      ];
+    
+    case 'complementary':
+      return [
+        baseColor,
+        hslToHex((h + 180) % 360, s, l)
+      ];
+    
+    case 'split-complementary':
+      return [
+        baseColor,
+        hslToHex((h + 150) % 360, s, l),
+        hslToHex((h + 210) % 360, s, l)
+      ];
+    
+    case 'triadic':
+      return [
+        baseColor,
+        hslToHex((h + 120) % 360, s, l),
+        hslToHex((h + 240) % 360, s, l)
+      ];
+    
+    case 'tetradic':
+      return [
+        baseColor,
+        hslToHex((h + 90) % 360, s, l),
+        hslToHex((h + 180) % 360, s, l),
+        hslToHex((h + 270) % 360, s, l)
+      ];
+    
+    case 'monochromatic':
+      return [
+        hslToHex(h, s, Math.max(10, l - 30)),
+        hslToHex(h, s, Math.max(10, l - 15)),
+        baseColor,
+        hslToHex(h, s, Math.min(90, l + 15)),
+        hslToHex(h, s, Math.min(90, l + 30))
+      ];
+    
+    case 'compound':
+      return [
+        baseColor,
+        hslToHex((h + 150) % 360, s, l),
+        hslToHex((h + 180) % 360, s, l),
+        hslToHex((h + 210) % 360, s, l)
+      ];
+    
+    case 'shades':
+      return [
+        hslToHex(h, Math.min(100, s + 5), Math.max(5, l - 40)),
+        hslToHex(h, Math.min(100, s + 3), Math.max(10, l - 25)),
+        baseColor,
+        hslToHex(h, Math.min(100, s + 1), Math.max(15, l - 10)),
+        hslToHex(h, s, Math.max(20, l - 5))
+      ];
+    
+    case 'tints':
+      return [
+        hslToHex(h, Math.max(10, s - 15), Math.min(95, l + 40)),
+        hslToHex(h, Math.max(10, s - 10), Math.min(90, l + 25)),
+        baseColor,
+        hslToHex(h, Math.max(10, s - 5), Math.min(85, l + 10)),
+        hslToHex(h, Math.max(10, s - 2), Math.min(80, l + 5))
+      ];
+    
+    default:
+      return [baseColor];
+  }
+}
+
+/**
+ * Calculate contrast ratio between two colors (optimized with caching)
+ */
+export function contrastRatio(color1, color2) {
+  return getContrastRatio(color1, color2);
+}
+
+/**
+ * Find nearest accessible color with sufficient contrast (optimized)
+ */
+export function nearestAccessible(background, target, minRatio = 4.5) {
+  const ratio = contrastRatio(background, target);
+  if (ratio >= minRatio) return target;
+  
+  // Simple fallback - return high contrast color
+  const bgLum = contrastRatio(background, '#000000');
+  return bgLum > 3 ? '#000000' : '#FFFFFF';
+}

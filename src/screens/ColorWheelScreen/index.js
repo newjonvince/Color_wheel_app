@@ -15,7 +15,7 @@ import ApiIntegrationStatus from '../../components/ApiIntegrationStatus';
 
 // Hooks and utilities
 import { useOptimizedColorWheelState as useColorWheelState } from './useOptimizedColorWheelState';
-import { getColorScheme } from '../../utils/color';
+import { getColorScheme } from '../../utils/optimizedColor';
 import { styles } from './styles';
 import ApiService from '../../services/safeApiService';
 
