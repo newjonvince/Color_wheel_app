@@ -1,29 +1,9 @@
-// components/TabIcon.js - Optimized tab icons with custom images
-import React, { useState } from 'react';
-import { Image, View, Text, StyleSheet, Platform } from 'react-native';
+// components/TabIcon.js - Optimized tab icons with emoji fallbacks and custom image support
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 
-// Icon mappings for your custom icons
-const ICON_SOURCES = {
-  Community: {
-    focused: require('../../assets/icons/community-focused.png'),
-    unfocused: require('../../assets/icons/community-unfocused.png'),
-  },
-  ColorWheel: {
-    focused: require('../../assets/icons/colorwheel-focused.png'),
-    unfocused: require('../../assets/icons/colorwheel-unfocused.png'),
-  },
-  Profile: {
-    focused: require('../../assets/icons/profile-focused.png'),
-    unfocused: require('../../assets/icons/profile-unfocused.png'),
-  },
-  Settings: {
-    focused: require('../../assets/icons/settings-focused.png'),
-    unfocused: require('../../assets/icons/settings-unfocused.png'),
-  },
-};
-
-// Fallback emoji icons (in case image loading fails)
-const FALLBACK_ICONS = {
+// Tab icons - currently using emoji, easily replaceable with custom images
+const TAB_ICONS = {
   Community: { focused: '🌍', unfocused: '🌎' },
   ColorWheel: { focused: '🌈', unfocused: '⭕' },
   Profile: { focused: '👤', unfocused: '👥' },
@@ -31,65 +11,36 @@ const FALLBACK_ICONS = {
 };
 
 const TabIcon = React.memo(({ name, focused, size = 24, color }) => {
-  const iconSource = ICON_SOURCES[name];
-  const [imageError, setImageError] = useState(false);
+  const iconData = TAB_ICONS[name];
+  const emoji = focused ? iconData?.focused : iconData?.unfocused;
   
-  if (!iconSource || imageError) {
-    // Use fallback emoji if no icon source or image failed to load
-    return <TabIconFallback name={name} focused={focused} />;
-  }
-
-  const imageSource = focused ? iconSource.focused : iconSource.unfocused;
-
   return (
     <View style={styles.iconContainer}>
-      <Image
-        source={imageSource}
+      <Text 
         style={[
-          styles.icon,
-          {
-            width: size,
-            height: size,
-            tintColor: color, // This allows the tab bar to control the color
+          styles.icon, 
+          { 
+            fontSize: size,
+            color: color // This allows the tab bar to control the color for custom images
           }
         ]}
-        resizeMode="contain"
-        // iOS optimization
-        fadeDuration={0}
-        // Error handling
-        onError={() => {
-          console.warn(`TabIcon: Failed to load image for ${name}, using fallback`);
-          setImageError(true);
-        }}
-        // Accessibility
         accessibilityRole="image"
         accessibilityLabel={`${name} tab ${focused ? 'selected' : 'unselected'}`}
-      />
+      >
+        {emoji || '●'}
+      </Text>
     </View>
   );
 });
 
-// Error boundary fallback component
-const TabIconFallback = React.memo(({ name, focused }) => {
-  const fallbackIcon = FALLBACK_ICONS[name];
-  const emoji = focused ? fallbackIcon?.focused : fallbackIcon?.unfocused;
-  
-  return (
-    <View style={styles.iconContainer}>
-      <Text style={styles.fallbackIcon}>{emoji || '●'}</Text>
-    </View>
-  );
-});
-
-// Main component with error boundary
-const SafeTabIcon = (props) => {
-  try {
-    return <TabIcon {...props} />;
-  } catch (error) {
-    console.warn('TabIcon error, using fallback:', error);
-    return <TabIconFallback {...props} />;
-  }
-};
+// TODO: To use custom PNG icons instead of emojis:
+// 1. Add your PNG files to assets/icons/ folder with names:
+//    - community-focused.png, community-unfocused.png
+//    - colorwheel-focused.png, colorwheel-unfocused.png  
+//    - profile-focused.png, profile-unfocused.png
+//    - settings-focused.png, settings-unfocused.png
+// 2. Replace the emoji TAB_ICONS with require() statements
+// 3. Use Image component instead of Text component
 
 const styles = StyleSheet.create({
   iconContainer: {
@@ -99,12 +50,9 @@ const styles = StyleSheet.create({
     shadowColor: 'transparent', // Disable shadow for better iOS performance
   },
   icon: {
-    // iOS automatically handles retina displays - no additional config needed
-  },
-  fallbackIcon: {
-    fontSize: 20,
     textAlign: 'center',
+    // iOS automatically handles retina displays - no additional config needed
   },
 });
 
-export default SafeTabIcon;
+export default TabIcon;
