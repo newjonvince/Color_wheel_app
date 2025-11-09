@@ -1,11 +1,22 @@
 // components/AppNavigation.js - Main navigation component
 import React from 'react';
-import { Text, StyleSheet } from 'react-native';
-import { APP_CONFIG, createTabIcon } from '../config/app';
+import { Text, StyleSheet, Image } from 'react-native';
+import { APP_CONFIG } from '../config/app';
 
-const EmojiTabIcon = React.memo(({ name, focused }) => {
-  const iconText = createTabIcon(APP_CONFIG.tabIcons)({ name, focused });
-  return <Text style={styles.tabIcon}>{iconText}</Text>;
+const TabIcon = React.memo(({ name, focused }) => {
+  const icon = focused ? APP_CONFIG.tabIcons[name]?.focused : APP_CONFIG.tabIcons[name]?.unfocused;
+  
+  // Handle image icons (require() objects) vs emoji strings
+  if (typeof icon === 'string') {
+    // Emoji icon (fallback)
+    return <Text style={styles.tabIcon}>{icon}</Text>;
+  } else if (icon) {
+    // Image icon
+    return <Image source={icon} style={styles.tabIconImage} resizeMode="contain" />;
+  }
+  
+  // Fallback icon
+  return <Text style={styles.tabIcon}>📱</Text>;
 });
 
 export const AppNavigation = ({ 
@@ -31,7 +42,7 @@ export const AppNavigation = ({
           {...APP_CONFIG.tabNavigation.options}
           initialRouteName={APP_CONFIG.tabNavigation.initialRouteName}
           screenOptions={({ route }) => ({
-            tabBarIcon: ({ focused }) => <EmojiTabIcon focused={focused} name={route.name} />,
+            tabBarIcon: ({ focused }) => <TabIcon focused={focused} name={route.name} />,
             ...APP_CONFIG.tabNavigation.screenOptions,
             tabBarStyle: styles.tabBar,
             tabBarLabelStyle: styles.tabLabel,
@@ -100,5 +111,9 @@ const styles = StyleSheet.create({
     height: 65 
   },
   tabIcon: { fontSize: 24 },
+  tabIconImage: { 
+    width: 24, 
+    height: 24 
+  },
   tabLabel: { fontSize: 12, fontWeight: '600' },
 });

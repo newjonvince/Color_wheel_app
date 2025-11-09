@@ -84,11 +84,5 @@ export const pickUser = (u) => (u?.user ? u.user : u);
 
 export const getMatchesKey = (userId) => `savedColorMatches:${userId || 'anon'}`;
 
-// Tab icon component factory
-export const createTabIcon = (tabIcons) => {
-  return ({ name, focused }) => {
-    const icons = tabIcons;
-    const icon = focused ? icons[name]?.focused : icons[name]?.unfocused;
-    return icon || '📱';
-  };
-};
+// Tab icon helper (legacy - now handled directly in AppNavigation)
+// Kept for backward compatibility if needed elsewhere
