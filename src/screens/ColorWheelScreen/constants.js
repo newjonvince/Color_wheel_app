@@ -5,7 +5,10 @@ export const SCHEMES = [
   'split-complementary',
   'triadic',
   'tetradic',
-  'monochromatic'
+  'monochromatic',
+  'compound',
+  'shades',
+  'tints'
 ];
 
 export const DEFAULT_COLOR = '#FF6B6B';

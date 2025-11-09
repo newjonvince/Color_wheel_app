@@ -67,6 +67,9 @@ export const SCHEME_OFFSETS = {
   tetradic: [0, 90, 180, 270],
   'split-complementary': [0, 150, -150],
   monochromatic: [0, 0, 0],
+  compound: [0, 150, 180, 210],
+  shades: [0, 0, 0, 0, 0],
+  tints: [0, 0, 0, 0, 0],
 };
 export const SCHEME_COUNTS = {
   complementary: 2,
@@ -75,6 +78,9 @@ export const SCHEME_COUNTS = {
   tetradic: 4,
   'split-complementary': 3,
   monochromatic: 3,
+  compound: 4,
+  shades: 5,
+  tints: 5,
 };
 
 // Helper: run callback on JS when invoked from a worklet
