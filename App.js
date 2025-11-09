@@ -39,6 +39,7 @@ const Tab = createBottomTabNavigator();
 function FashionColorWheelApp() {
   const [isLoading, setIsLoading] = useState(true);
   const [showSignUp, setShowSignUp] = useState(false);
+  const [hasSeenLogin, setHasSeenLogin] = useState(false);
   
   // Auth hook
   const {
@@ -50,6 +51,12 @@ function FashionColorWheelApp() {
     handleSignUpComplete,
     handleLogout,
   } = useAuth();
+
+  // Custom login success handler that marks login as seen
+  const onLoginSuccess = (userData) => {
+    setHasSeenLogin(true);
+    handleLoginSuccess(userData);
+  };
 
   // Initialize auth
   useEffect(() => {
@@ -66,8 +73,8 @@ function FashionColorWheelApp() {
     initialize();
   }, [initializeAuth]);
 
-  // Loading screen
-  if (isLoading || authLoading || !isInitialized) {
+  // Loading screen - only show briefly during initial auth check
+  if (isLoading || authLoading) {
     return (
       <SafeAreaProvider>
         <SafeAreaView style={styles.loadingContainer}>
@@ -77,8 +84,9 @@ function FashionColorWheelApp() {
     );
   }
 
-  // Login screen
-  if (!user) {
+  // Login screen - this should be the first screen users see
+  // Show login if: no user, not initialized, or haven't seen login screen yet
+  if (!user || !isInitialized || !hasSeenLogin) {
     return (
       <SafeAreaProvider>
         <SafeAreaView style={styles.container}>
@@ -97,7 +105,7 @@ function FashionColorWheelApp() {
             </View>
           ) : (
             <LoginScreen 
-              onLoginSuccess={handleLoginSuccess}
+              onLoginSuccess={onLoginSuccess}
               onSwitchToSignUp={() => setShowSignUp(true)}
             />
           )}
