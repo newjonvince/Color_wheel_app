@@ -23,7 +23,7 @@
     },
     "ios": {
       "bundleIdentifier": "com.fashioncolorwheel.app",
-      "buildNumber": "51",
+      "buildNumber": "52",
       "supportsTablet": true,
       "requireFullScreen": false,
       "infoPlist": {
