@@ -258,7 +258,7 @@ async function initializeTables() {
         id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
         user_id VARCHAR(36) NOT NULL,
         base_color VARCHAR(7) NOT NULL,
-        scheme ENUM('analogous', 'complementary', 'split-complementary', 'triadic', 'tetradic', 'monochromatic') NOT NULL,
+        scheme ENUM('analogous', 'complementary', 'split-complementary', 'triadic', 'tetradic', 'monochromatic', 'compound', 'shades', 'tints') NOT NULL,
         colors JSON NOT NULL,
         title VARCHAR(255),
         description TEXT,
