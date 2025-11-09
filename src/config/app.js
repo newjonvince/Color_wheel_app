@@ -31,10 +31,22 @@ export const APP_CONFIG = {
 
   // Tab icons configuration
   tabIcons: {
-    Community: { focused: '🌍', unfocused: '🌎' },
-    ColorWheel: { focused: '🎨', unfocused: '⚪' },
-    Profile: { focused: '👤', unfocused: '👥' },
-    Settings: { focused: '⚙️', unfocused: '🔧' },
+    Community: { 
+      focused: require('../assets/icons/community.png'),
+      unfocused: require('../assets/icons/community-inactive.png')
+    },
+    ColorWheel: { 
+      focused: require('../assets/icons/colorwheel.png'),
+      unfocused: require('../assets/icons/colorwheel-inactive.png')
+    },
+    Profile: { 
+      focused: require('../assets/icons/profile.png'),
+      unfocused: require('../assets/icons/profile-inactive.png')
+    },
+    Settings: { 
+      focused: require('../assets/icons/settings.png'),
+      unfocused: require('../assets/icons/settings-inactive.png')
+    },
   },
 
   // App initialization settings
