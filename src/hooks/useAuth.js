@@ -1,5 +1,6 @@
 // hooks/useAuth.js - Authentication state management
 import { useState, useCallback, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { safeStorage } from '../utils/safeStorage';
 import ApiService from '../services/safeApiService';
 import { pickUser } from '../config/app';
@@ -104,6 +105,16 @@ export const useAuth = () => {
         if (initTimeout) clearTimeout(initTimeout);
         if (profileTimeout) clearTimeout(profileTimeout);
         console.error('Auth initialization failed:', e);
+        
+        // Log more details for debugging
+        if (__DEV__) {
+          console.error('Auth initialization error details:', {
+            message: e.message,
+            stack: e.stack,
+            name: e.name
+          });
+        }
+        
         setIsInitialized(true);
       }
     } finally {

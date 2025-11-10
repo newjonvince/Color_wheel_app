@@ -2,7 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth-enhanced');
 const router = express.Router();
 
 // Get all boards for a user

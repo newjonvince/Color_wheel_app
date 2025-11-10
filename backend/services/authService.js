@@ -1,10 +1,9 @@
 // services/authService.js - Authentication business logic
 
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
 const { ERROR_MESSAGES, SUCCESS_MESSAGES } = require('../constants');
+const { generateSecureToken, generateRefreshToken, createSessionData, verifySecureToken } = require('../utils/jwt');
 
 class AuthService {
   /**
@@ -51,15 +50,18 @@ class AuthService {
 
     const user = userResult.rows[0];
     
-    // Generate token
-    const token = this.generateToken(user.id);
-    
-    // Create session
-    await this.createSession(user.id, token);
+    // Generate token with session (requires IP and User-Agent for security)
+    const tokenData = await this.generateTokenWithSession(
+      user, 
+      'registration', // IP not available in service layer
+      'registration'  // User-Agent not available in service layer
+    );
 
     return {
       user: this.formatUserResponse(user),
-      token,
+      token: tokenData.accessToken,
+      refreshToken: tokenData.refreshToken,
+      expiresAt: tokenData.expiresAt,
       message: SUCCESS_MESSAGES.USER_CREATED,
     };
   }
@@ -91,15 +93,18 @@ class AuthService {
       throw new Error(ERROR_MESSAGES.INVALID_CREDENTIALS);
     }
 
-    // Generate token
-    const token = this.generateToken(user.id);
-    
-    // Create session
-    await this.createSession(user.id, token);
+    // Generate token with session (requires IP and User-Agent for security)
+    const tokenData = await this.generateTokenWithSession(
+      user, 
+      'login', // IP not available in service layer
+      'login'  // User-Agent not available in service layer
+    );
 
     return {
       user: this.formatUserResponse(user),
-      token,
+      token: tokenData.accessToken,
+      refreshToken: tokenData.refreshToken,
+      expiresAt: tokenData.expiresAt,
       message: SUCCESS_MESSAGES.LOGIN_SUCCESS,
     };
   }
@@ -121,12 +126,16 @@ class AuthService {
       is_active: true,
     };
 
-    // Generate token for demo user
-    const token = this.generateToken(demoUser.id);
+    // Generate token for demo user (demo doesn't create real session)
+    const tokenData = generateSecureToken(
+      { userId: demoUser.id, email: demoUser.email },
+      { expiresIn: '1h' } // Demo tokens expire quickly
+    );
 
     return {
       user: this.formatUserResponse(demoUser),
-      token,
+      token: tokenData.token,
+      expiresAt: tokenData.expiresAt,
       message: SUCCESS_MESSAGES.LOGIN_SUCCESS,
     };
   }
@@ -201,16 +210,54 @@ class AuthService {
   }
 
   /**
-   * Generate JWT token
+   * Generate JWT token with session
    */
-  static generateToken(userId) {
-    const payload = {
-      userId,
-      iat: Math.floor(Date.now() / 1000),
-      exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours
+  static async generateTokenWithSession(user, ipAddress, userAgent) {
+    const tokenData = generateSecureToken(
+      { userId: user.id, email: user.email },
+      { expiresIn: '7d' }
+    );
+    
+    const refreshData = generateRefreshToken(
+      { userId: user.id, email: user.email },
+      tokenData.jti
+    );
+    
+    // Create session record
+    const sessionData = createSessionData({
+      userId: user.id,
+      jti: tokenData.jti,
+      expiresAt: tokenData.expiresAt,
+      ipAddress,
+      userAgent
+    });
+    
+    // Insert session into database
+    const sessionResult = await query(
+      `INSERT INTO user_sessions (
+        user_id, jti, expires_at, ip_address, user_agent, 
+        created_at, revoked_at, refresh_count, refresh_jti, refresh_expires_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        sessionData.user_id,
+        sessionData.jti,
+        sessionData.expires_at,
+        sessionData.ip_address,
+        sessionData.user_agent,
+        sessionData.created_at,
+        sessionData.revoked_at,
+        sessionData.refresh_count,
+        refreshData.jti,
+        refreshData.expiresAt
+      ]
+    );
+    
+    return {
+      accessToken: tokenData.token,
+      refreshToken: refreshData.refreshToken,
+      expiresAt: tokenData.expiresAt,
+      sessionId: sessionResult.insertId
     };
-
-    return jwt.sign(payload, process.env.JWT_SECRET);
   }
 
   /**
@@ -218,36 +265,69 @@ class AuthService {
    */
   static verifyToken(token) {
     try {
-      return jwt.verify(token, process.env.JWT_SECRET);
+      return verifySecureToken(token);
     } catch (error) {
       throw new Error(ERROR_MESSAGES.INVALID_TOKEN);
     }
   }
 
   /**
-   * Create user session
+   * Create user session (legacy method - use generateTokenWithSession instead)
    */
-  static async createSession(userId, token) {
-    const jti = uuidv4();
-    const expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000)); // 24 hours
-
+  static async createSession(userId, token, ipAddress = null, userAgent = null) {
+    // This is kept for backward compatibility but should be replaced
+    console.warn('AuthService.createSession is deprecated. Use generateTokenWithSession instead.');
+    
+    const tokenData = generateSecureToken(
+      { userId, email: 'legacy@example.com' },
+      { expiresIn: '24h' }
+    );
+    
+    const sessionData = createSessionData({
+      userId,
+      jti: tokenData.jti,
+      expiresAt: tokenData.expiresAt,
+      ipAddress,
+      userAgent
+    });
+    
     await query(
-      `INSERT INTO user_sessions (user_id, session_token, expires_at, jti, created_at)
-       VALUES (?, ?, ?, ?, NOW())`,
-      [userId, token, expiresAt, jti]
+      `INSERT INTO user_sessions (
+        user_id, jti, expires_at, ip_address, user_agent, 
+        created_at, revoked_at, refresh_count
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        sessionData.user_id,
+        sessionData.jti,
+        sessionData.expires_at,
+        sessionData.ip_address,
+        sessionData.user_agent,
+        sessionData.created_at,
+        sessionData.revoked_at,
+        sessionData.refresh_count
+      ]
     );
 
-    return jti;
+    return tokenData.jti;
   }
 
   /**
    * Revoke user session
    */
-  static async revokeSession(userId, token) {
-    await query(
-      'UPDATE user_sessions SET revoked_at = NOW() WHERE user_id = ? AND session_token = ?',
-      [userId, token]
-    );
+  static async revokeSession(userId, jti = null) {
+    if (jti) {
+      // Revoke specific session by JTI
+      await query(
+        'UPDATE user_sessions SET revoked_at = NOW() WHERE user_id = ? AND jti = ?',
+        [userId, jti]
+      );
+    } else {
+      // Revoke all sessions for user
+      await query(
+        'UPDATE user_sessions SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL',
+        [userId]
+      );
+    }
   }
 
   /**
@@ -274,16 +354,16 @@ class AuthService {
   }
 
   /**
-   * Validate session
+   * Validate user session
    */
-  static async validateSession(userId, token) {
+  static async validateSession(userId, jti) {
     const result = await query(
-      `SELECT id FROM user_sessions 
-       WHERE user_id = ? AND session_token = ? AND expires_at > NOW() AND revoked_at IS NULL`,
-      [userId, token]
+      `SELECT id, expires_at FROM user_sessions 
+       WHERE user_id = ? AND jti = ? AND expires_at > NOW() AND revoked_at IS NULL`,
+      [userId, jti]
     );
 
-    return result.rows.length > 0;
+    return result.rows && result.rows.length > 0 ? result.rows[0] : null;
   }
 }
 

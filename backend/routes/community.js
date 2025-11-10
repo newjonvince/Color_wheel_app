@@ -15,7 +15,7 @@ IMPROVEMENTS MADE:
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const { query } = require('../config/database');
-const { authenticateToken: authMiddleware } = require('../middleware/auth');
+const { authenticateToken: authMiddleware } = require('../middleware/auth-enhanced');
 const { communityLimiter } = require('../middleware/rateLimiting');
 
 const router = express.Router();

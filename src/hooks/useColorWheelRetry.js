@@ -8,7 +8,7 @@ export const useColorWheelRetry = (Updates) => {
     let isCancelled = false;
     
     try {
-      const mod = await import('../screens/ColorWheelScreen');
+      const mod = await import('../screens/ColorWheelScreen/index');
       if (!isCancelled && mod?.default) {
         // Update the global ColorWheelScreen reference
         global.ColorWheelScreen = mod.default;

@@ -2,7 +2,7 @@
 import React from 'react';
 import { View, Text } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { styles } from '../styles';
+import { optimizedStyles as styles } from '../styles';
 
 export const ErrorBanner = React.memo(({ message, onDismiss }) => {
   if (!message) return null;

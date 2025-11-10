@@ -1,7 +1,7 @@
 // screens/LoginScreen/components/LoginForm.js
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
-import { styles } from '../styles';
+import { optimizedStyles as styles } from '../styles';
 
 export const LoginForm = React.memo(({ 
   email,

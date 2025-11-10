@@ -18,15 +18,19 @@ const {
   registrationLimiter, 
   passwordResetLimiter 
 } = require('../../middleware/rateLimiting');
-const { authenticateToken } = require('../../middleware/auth');
+const { authenticateToken } = require('../../middleware/auth-enhanced');
 const { 
   registerValidation, 
   loginValidation, 
   updateProfileValidation 
 } = require('../../middleware/validation/index');
 const { ERROR_MESSAGES } = require('../../constants');
+const refreshRoutes = require('./refresh');
 
 const router = express.Router();
+
+// Mount refresh routes
+router.use('/', refreshRoutes);
 
 /**
  * @route   POST /auth/register

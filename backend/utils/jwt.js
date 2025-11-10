@@ -76,12 +76,63 @@ const createSessionData = ({ userId, jti, expiresAt, ipAddress, userAgent }) => 
     ip_address: ipAddress,
     user_agent: userAgent,
     created_at: new Date(),
-    revoked_at: null
+    revoked_at: null,
+    refresh_count: 0
   };
+};
+
+/**
+ * Generate refresh token with longer expiration
+ * @param {Object} payload - Token payload
+ * @param {string} payload.userId - User ID
+ * @param {string} payload.email - User email
+ * @param {string} originalJti - Original token JTI for tracking
+ * @returns {Object} - { refreshToken, jti, expiresAt }
+ */
+const generateRefreshToken = (payload, originalJti) => {
+  const jti = uuidv4();
+  const expiresIn = '30d'; // Refresh tokens last 30 days
+  
+  const tokenPayload = {
+    ...payload,
+    jti,
+    originalJti, // Link to original token
+    type: 'refresh',
+    iat: Math.floor(Date.now() / 1000),
+  };
+
+  const refreshToken = jwt.sign(tokenPayload, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, {
+    expiresIn,
+    algorithm: 'HS256',
+    issuer: 'fashion-color-wheel',
+    audience: 'fashion-color-wheel-refresh'
+  });
+
+  // Calculate expiration timestamp
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 30);
+
+  return { refreshToken, jti, expiresAt };
+};
+
+/**
+ * Verify refresh token
+ * @param {string} refreshToken - Refresh token to verify
+ * @returns {Object} - Decoded refresh token payload
+ */
+const verifyRefreshToken = (refreshToken) => {
+  return jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, {
+    algorithms: ['HS256'],
+    clockTolerance: 30,
+    issuer: 'fashion-color-wheel',
+    audience: 'fashion-color-wheel-refresh'
+  });
 };
 
 module.exports = {
   generateSecureToken,
   verifySecureToken,
-  createSessionData
+  createSessionData,
+  generateRefreshToken,
+  verifyRefreshToken
 };

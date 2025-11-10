@@ -55,6 +55,9 @@ const getCachedValidation = (key) => {
 };
 
 export const useOptimizedLoginState = (onLoginSuccess) => {
+  // Component mounted flag to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+  
   // Form state with optimized initial values
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -134,10 +137,13 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         }));
       }
 
-      if (validation && !validation.isValid) {
-        setErrors(prev => ({ ...prev, [field]: validation.message }));
-      } else {
-        setErrors(prev => ({ ...prev, [field]: '' }));
+      // Only update state if component is still mounted
+      if (isMountedRef.current) {
+        if (validation && !validation.isValid) {
+          setErrors(prev => ({ ...prev, [field]: validation.message }));
+        } else {
+          setErrors(prev => ({ ...prev, [field]: '' }));
+        }
       }
 
       const duration = endTimer();
@@ -166,13 +172,13 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     
     setEmail(value);
     clearFieldError('email');
-    
-    // Only validate if value has changed significantly
-    if (Math.abs(value.length - lastValidationRef.current.email.length) > 2 || 
-        value !== lastValidationRef.current.email) {
-      debouncedValidate('email', value);
-      lastValidationRef.current.email = value;
-    }
+        // Only validate if value has changed significantly and component is mounted
+      if (isMountedRef.current && 
+          (Math.abs(value.length - lastValidationRef.current.email.length) > 2 || 
+           value !== lastValidationRef.current.email)) {
+        debouncedValidate('email', value);
+        lastValidationRef.current.email = value;
+      }
     
     endTimer();
   }, [clearFieldError, debouncedValidate]);
@@ -182,13 +188,13 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     
     setPassword(value);
     clearFieldError('password');
-    
-    // Only validate if value has changed significantly
-    if (Math.abs(value.length - lastValidationRef.current.password.length) > 1 || 
-        value !== lastValidationRef.current.password) {
-      debouncedValidate('password', value);
-      lastValidationRef.current.password = value;
-    }
+        // Only validate if value has changed significantly and component is mounted
+      if (isMountedRef.current && 
+          (Math.abs(value.length - lastValidationRef.current.password.length) > 1 || 
+           value !== lastValidationRef.current.password)) {
+        debouncedValidate('password', value);
+        lastValidationRef.current.password = value;
+      }
     
     endTimer();
   }, [clearFieldError, debouncedValidate]);
@@ -291,19 +297,40 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       }
 
     } catch (error) {
-      const errorMessage = getErrorMessage(error);
-      setGlobalError(errorMessage);
+      let errorMessage = getErrorMessage(error);
+      
+      // Check if this is a network/connection error
+      if (error.message?.includes('Network Error') || 
+          error.message?.includes('fetch') || 
+          error.code === 'NETWORK_ERROR' ||
+          !navigator.onLine) {
+        errorMessage = 'Unable to connect to server. Please check your internet connection or try demo login.';
+      }
+      
+      // Only update state if component is still mounted
+      if (isMountedRef.current) {
+        setGlobalError(errorMessage);
+      }
       
       if (__DEV__) {
         console.error('❌ LoginState: Login failed:', error);
+        console.log('Error details:', {
+          message: error.message,
+          code: error.code,
+          response: error.response?.status,
+          isNetworkError: error.message?.includes('Network Error') || error.message?.includes('fetch')
+        });
       }
     } finally {
-      setLoading(false);
+      // Only update loading state if component is still mounted
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
       endTimer();
     }
   }, [email, password, onLoginSuccess, saveSession]);
 
-  // Optimized demo login with fallback
+  // Improved demo fallback with comprehensive error handling
   const handleLocalDemoFallback = useCallback(async () => {
     const endTimer = performanceMonitor.startTimer('demo fallback');
     
@@ -313,10 +340,27 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         createdAt: new Date().toISOString(),
       };
       
-      await safeStorage.setItem(STORAGE_KEYS.userData, JSON.stringify(demoUserWithTimestamp));
-      await safeStorage.setItem(STORAGE_KEYS.isLoggedIn, 'true');
+      // Wrap storage operations in try/catch for better error handling
+      try {
+        await safeStorage.setItem(STORAGE_KEYS.userData, JSON.stringify(demoUserWithTimestamp));
+        await safeStorage.setItem(STORAGE_KEYS.isLoggedIn, 'true');
+        
+        if (__DEV__) {
+          console.log('✅ LoginState: Demo fallback storage successful');
+        }
+      } catch (storageError) {
+        console.error('❌ LoginState: Demo fallback storage failed:', storageError);
+        throw new Error('Demo login fallback failed: Unable to save demo user data - ' + (storageError.message || storageError.toString()));
+      }
       
-      onLoginSuccess?.(demoUserWithTimestamp);
+      // Only call success callback if component is still mounted
+      if (isMountedRef.current) {
+        onLoginSuccess?.(demoUserWithTimestamp);
+      }
+      
+    } catch (error) {
+      // Re-throw with more descriptive error message
+      throw new Error('Demo login fallback failed: ' + (error.message || error.toString()));
     } finally {
       endTimer();
     }
@@ -352,16 +396,36 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       if (__DEV__) {
         console.log('🔍 LoginState: Backend demo failed, using local fallback');
       }
-      await handleLocalDemoFallback();
+      
+      // Wrap demo fallback in try/catch to handle fallback errors
+      try {
+        await handleLocalDemoFallback();
+      } catch (fallbackError) {
+        console.error('❌ LoginState: Demo fallback also failed:', fallbackError);
+        
+        // Only update state if component is still mounted
+        if (isMountedRef.current) {
+          setGlobalError('Demo login failed: ' + (fallbackError.message || 'Unable to create demo session'));
+        }
+      }
     } finally {
-      setLoading(false);
+      // Only update loading state if component is still mounted
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
       endTimer();
     }
   }, [onLoginSuccess, saveSession, handleLocalDemoFallback]);
 
-  // Cleanup effect
+  // Cleanup effect with unmount tracking
   useEffect(() => {
+    // Set mounted flag to true on mount
+    isMountedRef.current = true;
+    
     return () => {
+      // Set mounted flag to false on unmount
+      isMountedRef.current = false;
+      
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }

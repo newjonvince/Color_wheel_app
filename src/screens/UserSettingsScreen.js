@@ -15,8 +15,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import ApiService from '../services/safeApiService';
 import { wipeLocalSession, performSecureLogout, performSecureAccountDeletion } from '../utils/session';
+import { safeApiCall } from '../utils/apiHelpers';
 
-export default function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
+function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState('');
@@ -32,20 +33,26 @@ export default function UserSettingsScreen({ currentUser, onLogout, onAccountDel
   }, []);
 
   const loadUserSettings = async () => {
-    try {
-      setLoadingSettings(true);
-      await ApiService.ready; // ensure token is loaded from SecureStore first
-      const response = await ApiService.request('/users/preferences');
-      const preferences = response.preferences;
-      
+    setLoadingSettings(true);
+    
+    const result = await safeApiCall(
+      () => ApiService.request('/users/preferences'),
+      { 
+        errorMessage: 'Failed to load user settings',
+        showAlert: false // Don't show alert, just log error
+      }
+    );
+    
+    if (result.success) {
+      const preferences = result.data.preferences;
       setNotificationsEnabled(preferences.notifications_enabled ?? true);
-      setShareDataEnabled(preferences.share_usage_data ?? false);
-    } catch (error) {
-      console.error('Failed to load user settings:', error);
-      // Keep defaults if loading fails
-    } finally {
-      setLoadingSettings(false);
+      setShareDataEnabled(preferences.share_data_enabled ?? false);
+    } else {
+      console.error('Failed to load user settings:', result.error);
+      // Keep defaults on error
     }
+    
+    setLoadingSettings(false);
   };
 
   // Optimistic UI update for settings with rollback on failure
@@ -556,3 +563,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+export default UserSettingsScreen;

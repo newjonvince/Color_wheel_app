@@ -1,7 +1,7 @@
 // screens/LoginScreen/components/LoginButtons.js
 import React from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { styles } from '../styles';
+import { optimizedStyles as styles, optimizedColors } from '../styles';
 
 export const LoginButtons = React.memo(({ 
   loading,
@@ -22,7 +22,7 @@ export const LoginButtons = React.memo(({
       >
         {loading ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={optimizedColors.text.white} />
             <Text style={styles.loadingText}>Logging in...</Text>
           </View>
         ) : (

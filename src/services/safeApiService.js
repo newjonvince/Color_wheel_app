@@ -93,11 +93,24 @@ class SafeApiService {
     } catch (error) {
       console.warn(`API request failed for ${endpoint}:`, error.message);
       
-      // Return safe fallback responses
+      // Handle different types of errors
       if (error.response?.status === 401) {
         // Clear invalid token
         await this.setToken(null);
         throw new Error('Authentication required');
+      }
+      
+      // Handle network errors
+      if (error.code === 'ECONNREFUSED' || 
+          error.code === 'NETWORK_ERROR' ||
+          error.message?.includes('Network Error') ||
+          error.message?.includes('fetch')) {
+        throw new Error('Unable to connect to server. Please check your internet connection.');
+      }
+      
+      // Handle timeout errors
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        throw new Error('Request timed out. Please try again.');
       }
       
       throw error;
@@ -217,6 +230,58 @@ class SafeApiService {
 
   async getColorMatchLikes(matchId) {
     return this.request(`/likes/color-matches/${matchId}`);
+  }
+
+  // Generic HTTP methods for apiHelpers compatibility
+  async get(endpoint, options = {}) {
+    return this.request(endpoint, { ...options, method: 'GET' });
+  }
+
+  async post(endpoint, data = {}, options = {}) {
+    return this.request(endpoint, { ...options, method: 'POST', data });
+  }
+
+  async put(endpoint, data = {}, options = {}) {
+    return this.request(endpoint, { ...options, method: 'PUT', data });
+  }
+
+  async delete(endpoint, options = {}) {
+    return this.request(endpoint, { ...options, method: 'DELETE' });
+  }
+
+  // Registration and username methods for SignUpScreen
+  async register(registrationData) {
+    return this.request('/auth/register', {
+      method: 'POST',
+      data: registrationData,
+    });
+  }
+
+  async checkUsername(username) {
+    return this.request('/auth/check-username', {
+      method: 'POST',
+      data: { username },
+    });
+  }
+
+  // Health check method to test API connectivity
+  async healthCheck() {
+    try {
+      const response = await this.request('/health', {
+        method: 'GET',
+        timeout: 5000, // Short timeout for health check
+      });
+      return { available: true, response };
+    } catch (error) {
+      console.warn('API health check failed:', error.message);
+      return { 
+        available: false, 
+        error: error.message,
+        isNetworkError: error.message?.includes('Network Error') || 
+                       error.message?.includes('fetch') ||
+                       error.code === 'ECONNREFUSED'
+      };
+    }
   }
 }
 

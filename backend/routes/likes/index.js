@@ -11,7 +11,7 @@ const {
   asyncHandler,
   formatValidationErrors 
 } = require('../../utils/response');
-const { authenticateToken } = require('../../middleware/auth');
+const { authenticateToken } = require('../../middleware/auth-enhanced');
 const { idValidation } = require('../../middleware/validation/index');
 
 const router = express.Router();

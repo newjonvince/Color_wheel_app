@@ -212,12 +212,15 @@ export const parseLoginResponse = (response) => {
 
 // Optimized error message extraction
 const ERROR_MESSAGES = Object.freeze({
-  'Network Error': 'Network connection failed. Please check your internet connection.',
-  'timeout': 'Request timed out. Please try again.',
+  'Network Error': 'Unable to connect to server. Please check your internet connection or try demo login.',
+  'Unable to connect to server': 'Unable to connect to server. Please check your internet connection or try demo login.',
+  'fetch': 'Network connection failed. Please check your internet connection or try demo login.',
+  'timeout': 'Request timed out. Please try again or use demo login.',
   'Invalid credentials': 'Invalid email or password. Please try again.',
   'User not found': 'Account not found. Please check your email or sign up.',
   'Account locked': 'Account temporarily locked. Please try again later.',
-  'Server error': 'Server error. Please try again later.',
+  'Server error': 'Server error. Please try again later or use demo login.',
+  'Authentication required': 'Please log in again.',
 });
 
 export const getErrorMessage = (error) => {

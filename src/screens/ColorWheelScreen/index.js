@@ -14,10 +14,11 @@ import CoolorsColorExtractor from '../../components/CoolorsColorExtractor';
 import ApiIntegrationStatus from '../../components/ApiIntegrationStatus';
 
 // Hooks and utilities
-import { useOptimizedColorWheelState as useColorWheelState } from './useOptimizedColorWheelState';
+import { useOptimizedColorWheelState } from './useOptimizedColorWheelState';
 import { getColorScheme } from '../../utils/optimizedColor';
 import { styles } from './styles';
 import ApiService from '../../services/safeApiService';
+import { apiPatterns } from '../../utils/apiHelpers';
 
 const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch }) => {
   const wheelRef = useRef(null);
@@ -47,35 +48,32 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     handleColorsChange,
     handleHexChange,
     handleActiveHandleChange,
-  } = useColorWheelState();
+  } = useOptimizedColorWheelState();
 
-  // Load user data with proper error handling
+  // Load user data with proper error handling using apiHelpers
   const loadUserData = useCallback(async () => {
     if (!currentUser) return;
     
-    try {
-      await ApiService.ready;
-      const userMatches = await ApiService.getUserColorMatches();
-      
+    const result = await apiPatterns.loadUserData(currentUser.id);
+    
+    if (result.success) {
       if (__DEV__) {
         console.log('✅ API Integration Status:', {
           authenticated: !!ApiService.getToken(),
-          userDataLoaded: !!userMatches,
-          matchCount: userMatches?.data?.length || 0,
+          userDataLoaded: !!result.data,
           apiReady: true
         });
       }
-    } catch (error) {
-      console.warn('Failed to load user data:', error);
+    } else {
+      console.warn('Failed to load user data:', result.error);
       if (__DEV__) {
         console.error('❌ API Integration Issue:', {
-          error: error.message,
-          isAuthError: error.isAuthError,
+          error: result.error?.message,
+          isAuthError: result.error?.isAuthError,
           hasToken: !!ApiService.getToken()
         });
       }
-      
-      if (error.isAuthError && typeof onLogout === 'function') {
+      if (result.error?.isAuthError && typeof onLogout === 'function') {
         onLogout();
       }
     }

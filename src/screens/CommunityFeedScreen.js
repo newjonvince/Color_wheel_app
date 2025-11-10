@@ -26,10 +26,13 @@ IMPROVEMENTS MADE:
     Share,
     FlatList,
     Animated,
+    TextInput,
+    ScrollView,
   } from 'react-native';
   import { Ionicons } from '@expo/vector-icons';
   import ApiService from '../services/safeApiService';
   import CommunityModal from '../components/CommunityModal';
+  import { apiPatterns } from '../utils/apiHelpers';
 
   // Double-tap like wrapper with heart burst animation
   const DoubleTapLike = ({ children, onDoubleTap, onLongPress }) => {
@@ -67,7 +70,7 @@ IMPROVEMENTS MADE:
     );
   };
 
-  export default function CommunityFeedScreen({ navigation, currentUser }) {
+  function CommunityFeedScreen({ navigation, currentUser }) {
     const [posts, setPosts] = useState([]);
     const [refreshing, setRefreshing] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -93,13 +96,11 @@ IMPROVEMENTS MADE:
     const fetchPage = useCallback(async (cursor = null, replace = false) => {
       if (loading && !replace) return;
       setLoading(true);
-      try {
-        await ApiService.ready; // ensure token is loaded from SecureStore first
-        const params = cursor ? { cursor } : {};
-        const qs = new URLSearchParams(params).toString();
-        const endpoint = `/community/posts/community${qs ? `?${qs}` : ''}`;
-        const res = await ApiService.get(endpoint);
-
+      
+      const result = await apiPatterns.loadCommunityPosts(cursor);
+      
+      if (result.success) {
+        const res = result.data;
         const data = (res?.data ?? res) || [];
         const next = res?.nextCursor ?? null;
 
@@ -114,17 +115,17 @@ IMPROVEMENTS MADE:
         setPosts((prev) => (replace ? normalized : [...prev, ...normalized]));
         setPageCursor(next);
         setHasMore(Boolean(next) && normalized.length > 0);
-      } catch (error) {
-        console.error('Error fetching community page:', error);
+      } else {
+        console.error('Error fetching community page:', result.error);
         // On error, ensure we don't break pagination state
         if (replace) {
           setPosts([]);
-          setPageCursor(null);
-          setHasMore(false);
         }
-        throw error; // Re-throw so calling functions can handle it
+        setHasMore(false);
       }
-    }, [parseColors]);
+      
+      setLoading(false);
+    }, [parseColors, loading]);
 
     const loadInitial = useCallback(async () => {
       try {
@@ -766,3 +767,5 @@ ${post.image_url || ''}` : (post.image_url || ''),
       marginTop: 2,
     },
   });
+
+export default CommunityFeedScreen;

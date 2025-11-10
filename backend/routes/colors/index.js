@@ -13,7 +13,7 @@ const {
   asyncHandler,
   formatValidationErrors 
 } = require('../../utils/response');
-const { authenticateToken } = require('../../middleware/auth');
+const { authenticateToken } = require('../../middleware/auth-enhanced');
 const { 
   createColorMatchValidation,
   updateColorMatchValidation,

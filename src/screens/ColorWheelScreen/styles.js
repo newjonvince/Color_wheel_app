@@ -5,6 +5,36 @@ const { width: screenWidth } = Dimensions.get('window');
 
 export const WHEEL_SIZE = Math.min(screenWidth * 0.92, 380);
 
+// Color constants for ColorWheelScreen
+export const colorWheelColors = {
+  // Scheme selector colors
+  schemeBorderActive: '#0d47a1',
+  schemeBackgroundActive: '#E3F2FD',
+  schemeBorderInactive: '#bbb',
+  schemeBackgroundInactive: '#fff',
+  
+  // Control colors
+  linkedActive: '#e8f5e9',
+  linkedActiveBorder: '#2e7d32',
+  linkedInactive: '#ffebee',
+  linkedInactiveBorder: '#c62828',
+  
+  followsActive: '#e3f2fd',
+  followsActiveBorder: '#1565c0',
+  followsInactive: '#fff3e0',
+  followsInactiveBorder: '#ef6c00',
+  
+  // UI colors
+  iconPrimary: '#333',
+  textSecondary: '#555',
+  borderDefault: '#ddd',
+  borderLight: '#ccc',
+  borderMedium: '#999',
+  
+  // Shadow
+  shadowColor: '#000',
+};
+
 export const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
@@ -34,12 +64,12 @@ export const styles = StyleSheet.create({
     marginBottom: 6,
   },
   schemeButtonActive: {
-    borderColor: '#0d47a1',
-    backgroundColor: '#E3F2FD',
+    borderColor: colorWheelColors.schemeBorderActive,
+    backgroundColor: colorWheelColors.schemeBackgroundActive,
   },
   schemeButtonInactive: {
-    borderColor: '#bbb',
-    backgroundColor: '#fff',
+    borderColor: colorWheelColors.schemeBorderInactive,
+    backgroundColor: colorWheelColors.schemeBackgroundInactive,
   },
   schemeButtonText: {
     fontWeight: '600',
@@ -50,7 +80,7 @@ export const styles = StyleSheet.create({
     height: 28,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: colorWheelColors.borderDefault,
   },
 
   // Color Wheel Styles
@@ -71,7 +101,7 @@ export const styles = StyleSheet.create({
     height: 50,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: colorWheelColors.shadowColor,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
@@ -99,12 +129,12 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
   },
   linkedButtonActive: {
-    backgroundColor: '#e8f5e9',
-    borderColor: '#2e7d32',
+    backgroundColor: colorWheelColors.linkedActive,
+    borderColor: colorWheelColors.linkedActiveBorder,
   },
   linkedButtonInactive: {
-    backgroundColor: '#ffebee',
-    borderColor: '#c62828',
+    backgroundColor: colorWheelColors.linkedInactive,
+    borderColor: colorWheelColors.linkedInactiveBorder,
   },
   followsActiveButton: {
     marginLeft: 8,
@@ -114,12 +144,12 @@ export const styles = StyleSheet.create({
     borderWidth: 1,
   },
   followsActiveButtonActive: {
-    backgroundColor: '#e3f2fd',
-    borderColor: '#1565c0',
+    backgroundColor: colorWheelColors.followsActive,
+    borderColor: colorWheelColors.followsActiveBorder,
   },
   followsActiveButtonInactive: {
-    backgroundColor: '#fff3e0',
-    borderColor: '#ef6c00',
+    backgroundColor: colorWheelColors.followsInactive,
+    borderColor: colorWheelColors.followsInactiveBorder,
   },
   actionButtonsContainer: {
     flexDirection: 'row',
@@ -131,7 +161,7 @@ export const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#999',
+    borderColor: colorWheelColors.borderMedium,
   },
   actionButtonSpacing: {
     marginRight: 8,
@@ -162,11 +192,11 @@ export const styles = StyleSheet.create({
   },
   hslLabel: {
     fontSize: 12,
-    color: '#555',
+    color: colorWheelColors.textSecondary,
   },
   hslInput: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: colorWheelColors.borderLight,
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -187,7 +217,7 @@ export const styles = StyleSheet.create({
     height: 44,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: colorWheelColors.borderDefault,
   },
   schemeSwatchesContainer: {
     flexDirection: 'row',
@@ -197,7 +227,7 @@ export const styles = StyleSheet.create({
     height: 40,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: colorWheelColors.borderDefault,
   },
   schemeSwatchActive: {
     opacity: 1,

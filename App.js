@@ -20,8 +20,8 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 // Import screens directly
-import LoginScreen from './src/screens/LoginScreen';
-import ColorWheelScreen from './src/screens/ColorWheelScreen';
+import LoginScreen from './src/screens/LoginScreen/index';
+import ColorWheelScreen from './src/screens/ColorWheelScreen/index';
 import CommunityFeedScreen from './src/screens/CommunityFeedScreen';
 import BoardsScreen from './src/screens/BoardsScreen';
 import UserSettingsScreen from './src/screens/UserSettingsScreen';
@@ -48,7 +48,6 @@ function FashionColorWheelApp() {
     isInitialized,
     initializeAuth,
     handleLoginSuccess,
-    handleSignUpComplete,
     handleLogout,
   } = useAuth();
 
@@ -73,29 +72,25 @@ function FashionColorWheelApp() {
     initialize();
   }, [initializeAuth]);
 
-  // Loading screen - only show briefly during initial auth check
-  if (isLoading || authLoading) {
-    return (
-      <SafeAreaProvider>
+  // Render content based on app state
+  const renderContent = () => {
+    // Loading screen
+    if (isLoading || authLoading) {
+      return (
         <SafeAreaView style={styles.loadingContainer}>
           <Text style={styles.loadingText}>🎨 Loading Fashion Color Wheel...</Text>
         </SafeAreaView>
-      </SafeAreaProvider>
-    );
-  }
+      );
+    }
 
-  // Login screen - this should be the first screen users see
-  // Show login if: no user, not initialized, or haven't seen login screen yet
-  if (!user || !isInitialized || !hasSeenLogin) {
-    return (
-      <SafeAreaProvider>
+    // Login/SignUp screen
+    if (!user || !isInitialized || !hasSeenLogin) {
+      return (
         <SafeAreaView style={styles.container}>
-          <StatusBar style="auto" />
           {showSignUp ? (
             <View style={styles.authContainer}>
               <Text style={styles.authTitle}>Sign Up</Text>
               <Text style={styles.authSubtitle}>Create your account</Text>
-              {/* Add SignUpScreen component here when ready */}
               <Text 
                 style={styles.switchAuth}
                 onPress={() => setShowSignUp(false)}
@@ -110,16 +105,13 @@ function FashionColorWheelApp() {
             />
           )}
         </SafeAreaView>
-      </SafeAreaProvider>
-    );
-  }
+      );
+    }
 
-  // Main app with tab navigation
-  return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
+    // Main app with tab navigation
+    return (
+      <GestureHandlerRootView style={styles.fullScreen}>
         <NavigationContainer>
-          <StatusBar style="auto" />
           <Tab.Navigator
             initialRouteName="ColorWheel"
             screenOptions={({ route }) => ({
@@ -154,17 +146,31 @@ function FashionColorWheelApp() {
             />
           </Tab.Navigator>
         </NavigationContainer>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+      </GestureHandlerRootView>
+    );
+  };
+
+  // Single SafeAreaProvider wrapper with StatusBar
+  return (
+    <SafeAreaProvider>
+      <StatusBar style="auto" />
+      {renderContent()}
+    </SafeAreaProvider>
   );
 }
 
-// Styles
+// Consolidated styles
 const styles = StyleSheet.create({
+  // Base styles
+  fullScreen: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  
+  // Loading styles
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -176,6 +182,8 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
   },
+  
+  // Auth styles
   authContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -218,11 +226,9 @@ class AppErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <SafeAreaProvider>
-          <SafeAreaView style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Something went wrong. Please restart the app.</Text>
-          </SafeAreaView>
-        </SafeAreaProvider>
+        <SafeAreaView style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Something went wrong. Please restart the app.</Text>
+        </SafeAreaView>
       );
     }
 

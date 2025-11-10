@@ -1,7 +1,7 @@
 // screens/LoginScreen/components/LoginFooter.js
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
-import { styles } from '../styles';
+import { optimizedStyles as styles } from '../styles';
 
 export const LoginFooter = React.memo(({ onSignUpPress }) => {
   return (

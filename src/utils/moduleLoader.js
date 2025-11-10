@@ -58,9 +58,8 @@ export const loadScreens = () => {
 
   try {
     screens.BoardsScreen = require('../screens/BoardsScreen').default;
-    screens.DiscoverScreen = require('../screens/DiscoverScreen').default;
     screens.CommunityFeedScreen = require('../screens/CommunityFeedScreen').default;
-    screens.LoginScreen = require('../screens/LoginScreen').default;
+    screens.LoginScreen = require('../screens/LoginScreen/index').default;
     screens.SignUpScreen = require('../screens/SignUpScreen').default;
     screens.UserSettingsScreen = require('../screens/UserSettingsScreen').default;
     
@@ -96,7 +95,7 @@ export const loadColorWheelScreen = () => {
   let error = null;
 
   try { 
-    ColorWheelScreen = require('../screens/ColorWheelScreen').default; 
+    ColorWheelScreen = require('../screens/ColorWheelScreen/index').default; 
     if (!__DEV__) console.log('ColorWheelScreen loaded successfully');
   } catch (e) {
     if (!__DEV__) console.log('ColorWheelScreen load failed:', e?.message);

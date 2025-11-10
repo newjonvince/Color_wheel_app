@@ -1,7 +1,7 @@
 // screens/LoginScreen/components/LoginHeader.js
 import React from 'react';
 import { View, Text, Image } from 'react-native';
-import { styles } from '../styles';
+import { optimizedStyles as styles } from '../styles';
 
 export const LoginHeader = React.memo(() => {
   return (

@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import ApiService from '../services/safeApiService';
 import { saveToken } from '../services/secureStore';
 import useDebounce from '../hooks/useDebounce';
+import { safeApiCall, apiPatterns } from '../utils/apiHelpers';
 
 const SIGNUP_STEPS = {
   EMAIL: 'email',
@@ -61,20 +62,21 @@ export default function SignUpScreen({ onSignUpComplete, onBack }) {
       };
     }
 
-    try {
-      // Check username availability with backend API
-      const response = await ApiService.checkUsername(normalizedUsername);
+    // Use apiPatterns for username validation with fallback
+    const result = await apiPatterns.checkUsernameAvailability(normalizedUsername);
+
+    if (result.success) {
       return {
-        isValid: response.available,
-        message: response.available ? 'Username available!' : 'Username already taken'
+        isValid: result.data.available,
+        message: result.data.available ? 'Username available!' : 'Username already taken'
       };
-    } catch (error) {
-      console.error('Username validation error:', error);
+    } else {
+      console.error('Username validation error:', result.error);
       // Fallback to local validation if API fails
       const isUnique = !existingUsernames.includes(normalizedUsername);
       return {
         isValid: isUnique,
-        message: isUnique ? 'Username available!' : 'Username already taken'
+        message: isUnique ? 'Username available (offline check)' : 'Username already taken'
       };
     }
   };
@@ -193,46 +195,46 @@ export default function SignUpScreen({ onSignUpComplete, onBack }) {
   };
 
   const completeSignUp = async () => {
-    try {
-      // Register user with backend API
-      const registrationData = {
-        email: formData.email,
-        password: formData.password,
-        username: formData.username,
-        location: formData.location,
-        birthday: formData.birthday,
-        gender: formData.gender
-      };
+    // Register user with backend API using safeApiCall
+    const registrationData = {
+      email: formData.email,
+      password: formData.password,
+      username: formData.username,
+      location: formData.location,
+      birthday: formData.birthday,
+      gender: formData.gender
+    };
 
-      const response = await ApiService.register(registrationData);
-      
-      if (response.success && response.user) {
+    const result = await apiPatterns.registerUser(registrationData);
+
+    if (result.success && result.data.success && result.data.user) {
+      try {
         // Store user data and token securely
-        await AsyncStorage.setItem('userData', JSON.stringify(response.user));
+        await AsyncStorage.setItem('userData', JSON.stringify(result.data.user));
         await AsyncStorage.setItem('isLoggedIn', 'true');
         
-        if (response.token) {
-          await saveToken(response.token);
+        if (result.data.token) {
+          await saveToken(result.data.token);
           // Set token in ApiService for authenticated requests
-          ApiService.setToken(response.token);
+          ApiService.setToken(result.data.token);
         }  
+        
         setCurrentStep(SIGNUP_STEPS.COMPLETE);
         
         // Auto-complete after showing success
         setTimeout(() => {
-          onSignUpComplete(response.user);
+          onSignUpComplete(result.data.user);
         }, 2000);
-      } else {
-        Alert.alert('Registration Failed', response.message || 'Failed to create account');
+        
+      } catch (storageError) {
+        console.error('Storage error during signup:', storageError);
+        Alert.alert('Registration Error', 'Account created but failed to save locally. Please try logging in.');
       }
-    } catch (error) {
-      console.error('Registration error:', error);
-      if (error.message.includes('fetch')) {
-        Alert.alert('Connection Error', 'Unable to connect to server. Please check your internet connection.');
-      } else {
-        Alert.alert('Registration Error', error.message || 'Failed to create account. Please try again.');
-      }
+    } else if (result.success) {
+      // API call succeeded but registration failed
+      Alert.alert('Registration Failed', result.data.message || 'Failed to create account');
     }
+    // If result.success is false, safeApiCall already showed the error alert
   };
 
   const handleBack = () => {

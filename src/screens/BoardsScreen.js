@@ -4,6 +4,8 @@ import * as ImagePicker from 'expo-image-picker';
 import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
 import ApiService from '../services/safeApiService';
 import { getColorScheme as computeScheme } from '../utils/optimizedColor';
+import { getAllSchemes } from '../constants/colorSchemes';
+import { apiPatterns } from '../utils/apiHelpers';
 
 const { width: screenWidth } = Dimensions.get('window');
 const boardWidth = (screenWidth - 45) / 2; // 2 columns with margins
@@ -13,15 +15,27 @@ const MAIN_FOLDERS = [
   { id: 'public', name: 'Public', icon: '🌍', description: 'Visible to everyone' },
 ];
 
-const SCHEME_FOLDERS = [
-  { id: 'complementary', name: 'Complementary', icon: '🎨', description: 'Opposite colors on the wheel' },
-  { id: 'analogous', name: 'Analogous', icon: '🌈', description: 'Adjacent colors that blend well' },
-  { id: 'triadic', name: 'Triadic', icon: '🔺', description: 'Three evenly spaced colors' },
-  { id: 'tetradic', name: 'Tetradic', icon: '⬜', description: 'Four colors in rectangle' },
-  { id: 'monochromatic', name: 'Monochromatic', icon: '🎯', description: 'Same hue, different shades' },
-];
+// Generate scheme folders with proper icons from centralized definitions
+const SCHEME_ICONS = {
+  complementary: '🎨',
+  analogous: '🌈', 
+  triadic: '🔺',
+  tetradic: '⬜',
+  monochromatic: '🎯',
+  compound: '🔀',
+  shades: '🌑',
+  tints: '🌕',
+  'split-complementary': '🎭'
+};
 
-export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser }) {
+const SCHEME_FOLDERS = getAllSchemes().map(scheme => ({
+  id: scheme.key,
+  name: scheme.name,
+  icon: SCHEME_ICONS[scheme.key] || '🎨',
+  description: scheme.description
+}));
+
+function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser }) {
   const [selectedMainFolder, setSelectedMainFolder] = useState(null);
   const [selectedSchemeFolder, setSelectedSchemeFolder] = useState(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -46,28 +60,21 @@ export default function BoardsScreen({ savedColorMatches = [], onSaveColorMatch,
   const loadBoardsAndMatches = useCallback(async () => {
     if (!currentUser) return;
     setLoading(true);
-    try {
-      await ApiService.ready; // ensure token is loaded from SecureStore first
-      const boardsRes = await ApiService.getBoards();
-      const matchesRes = await ApiService.getColorMatches();
-
-      const boardsData = Array.isArray(boardsRes) ? boardsRes : boardsRes?.boards || boardsRes?.data || [];
+    
+    // Use apiHelpers for better error handling
+    const matchesResult = await apiPatterns.loadColorMatches();
+    
+    if (matchesResult.success) {
+      const matchesRes = matchesResult.data;
       const matchesData = Array.isArray(matchesRes) ? matchesRes : matchesRes?.colorMatches || matchesRes?.data || [];
-
-      setBoards(boardsData);
       setColorMatches(matchesData);
-    } catch (error) {
-      console.error('Failed to load boards and matches:', error);
-      if (error.isAuthError) {
-        // Navigate to login instead of showing unavailable
-        navigation.navigate('Login');
-        return;
-      }
-      setError('Failed to load data. Please try again.');
-    } finally {
-      setLoading(false);
+    } else {
+      console.error('Failed to load color matches:', matchesResult.error);
+      Alert.alert('Error', 'Failed to load color matches. Please try again.');
     }
-  }, [currentUser, savedColorMatches, navigation]);
+    
+    setLoading(false);
+  }, [currentUser]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -860,3 +867,5 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
 });
+
+export default BoardsScreen;
