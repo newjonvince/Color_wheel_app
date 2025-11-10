@@ -1,12 +1,8 @@
-// screens/ColorWheelScreen/useOptimizedColorWheelState.js - Performance-enhanced state hook
-// Drop-in replacement for useColorWheelState with optimized color processing
+// screens/ColorWheelScreen/useOptimizedColorWheelState.js - Enhanced state management for FullColorWheel
 
-import { useState, useCallback, useEffect, useMemo } from 'react';
-import { hexToHsl, hslToHex } from '../../utils/optimizedColor';
-import { SCHEME_COUNTS, SCHEME_OFFSETS } from '../../constants/colorWheelConstants';
-import { DEFAULT_COLOR, DEFAULT_SCHEME, validateHSL, generateRandomColor, mod } from './constants';
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { getColorScheme } from '../../utils/optimizedColor';
 import { useThrottledCallbacks } from '../../utils/throttledCallbacks';
-import { useOptimizedColorProcessing } from '../../hooks/useOptimizedColorProcessing';
 
 export const useOptimizedColorWheelState = (options = {}) => {
   const {
@@ -69,7 +65,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
     
     selectedFollowsActive,
     throttleFps,
-    immediateFps
+    immediateFps,
   });
 
   // Enhanced active handle change with throttling awareness

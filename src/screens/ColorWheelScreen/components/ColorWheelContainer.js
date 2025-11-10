@@ -1,11 +1,10 @@
 // screens/ColorWheelScreen/components/ColorWheelContainer.js
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, TouchableOpacity } from 'react-native';
+import PropTypes from 'prop-types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import SafeColorWheel from '../../../components/SafeColorWheel';
+import FullColorWheel from '../../../components/FullColorWheel';
 import { styles, WHEEL_SIZE, colorWheelColors } from '../styles';
-
-// Temporarily using SafeColorWheel instead of FullColorWheel to prevent Skia crashes
 
 export const ColorWheelContainer = React.memo(({ 
   wheelRef,
@@ -20,15 +19,21 @@ export const ColorWheelContainer = React.memo(({
   onOpenCamera,
   onOpenGallery,
 }) => {
+  // Always use FullColorWheel - no fallback needed
+  const wheelProps = {
+    ref: wheelRef,
+    scheme: selectedScheme,
+    initialHex: baseHex,
+    selectedFollowsActive: selectedFollowsActive,
+    linked,
+    onColorsChange,
+    onHexChange,
+    onActiveHandleChange,
+  };
+  
   return (
     <View style={styles.wheelContainer}>
-      <SafeColorWheel
-        scheme={selectedScheme}
-        initialHex={baseHex}
-        onColorsChange={onColorsChange}
-        onHexChange={onHexChange}
-        onActiveHandleChange={onActiveHandleChange}
-      />
+      <FullColorWheel {...wheelProps} />
 
       <View style={styles.cameraButtonsContainer}>
         <TouchableOpacity 
@@ -51,3 +56,26 @@ export const ColorWheelContainer = React.memo(({
     </View>
   );
 });
+
+// PropTypes for better development experience and documentation
+ColorWheelContainer.propTypes = {
+  wheelRef: PropTypes.object,
+  selectedFollowsActive: PropTypes.bool,
+  selectedScheme: PropTypes.string.isRequired,
+  baseHex: PropTypes.string.isRequired,
+  linked: PropTypes.bool,
+  onToggleLinked: PropTypes.func,
+  onColorsChange: PropTypes.func.isRequired,
+  onHexChange: PropTypes.func.isRequired,
+  onActiveHandleChange: PropTypes.func,
+  onOpenCamera: PropTypes.func.isRequired,
+  onOpenGallery: PropTypes.func.isRequired,
+};
+
+ColorWheelContainer.defaultProps = {
+  wheelRef: null,
+  selectedFollowsActive: true,
+  linked: true,
+  onToggleLinked: () => {},
+  onActiveHandleChange: () => {},
+};

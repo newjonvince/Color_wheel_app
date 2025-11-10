@@ -1,6 +1,7 @@
 // screens/LoginScreen/index.js - Ultra-optimized LoginScreen with performance enhancements
 import React, { Suspense, useMemo, useCallback } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, View, Text } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import PropTypes from 'prop-types';
 
 // Lazy load components for better performance
@@ -8,11 +9,10 @@ const LoginHeader = React.lazy(() => import('./components/LoginHeader').then(m =
 const ErrorBanner = React.lazy(() => import('./components/ErrorBanner').then(m => ({ default: m.ErrorBanner })));
 const LoginForm = React.lazy(() => import('./components/LoginForm').then(m => ({ default: m.LoginForm })));
 const LoginButtons = React.lazy(() => import('./components/LoginButtons').then(m => ({ default: m.LoginButtons })));
-const LoginFooter = React.lazy(() => import('./components/LoginFooter').then(m => ({ default: m.LoginFooter })));
 
 // Hooks and styles
 import { useOptimizedLoginState } from './useLoginState';
-import { optimizedStyles } from './styles';
+import { optimizedStyles, optimizedColors } from './styles';
 
 // Performance monitoring
 const performanceMonitor = __DEV__ ? {
@@ -134,10 +134,6 @@ const OptimizedLoginScreen = ({ onLoginSuccess, onSignUpPress }) => {
     onDemoLogin: handleDemoLogin,
   }), [loading, handleLogin, handleDemoLogin]);
 
-  // Memoized footer props
-  const footerProps = useMemo(() => ({
-    onSignUpPress,
-  }), [onSignUpPress]);
 
   // Memoized keyboard avoiding behavior
   const keyboardBehavior = useMemo(() => 
@@ -148,19 +144,28 @@ const OptimizedLoginScreen = ({ onLoginSuccess, onSignUpPress }) => {
 
   return (
     <LoginErrorBoundary>
-      <KeyboardAvoidingView 
-        style={optimizedStyles.keyboardAvoidingView}
-        behavior={keyboardBehavior}
+      <LinearGradient
+        colors={[
+          optimizedColors.gradientStart,
+          optimizedColors.gradientMid,
+          optimizedColors.gradientEnd
+        ]}
+        locations={[0, 0.5, 1]}
+        style={{ flex: 1 }}
       >
-        <ScrollView 
-          contentContainerStyle={optimizedStyles.scrollContainer}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-          // Performance optimizations
-          removeClippedSubviews={true}
-          maxToRenderPerBatch={10}
-          windowSize={10}
+        <KeyboardAvoidingView 
+          style={optimizedStyles.keyboardAvoidingView}
+          behavior={keyboardBehavior}
         >
+          <ScrollView 
+            contentContainerStyle={optimizedStyles.scrollContainer}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            // Performance optimizations
+            removeClippedSubviews={true}
+            maxToRenderPerBatch={10}
+            windowSize={10}
+          >
           <Suspense fallback={<LoginLoadingFallback />}>
             <LoginHeader />
           </Suspense>
@@ -179,11 +184,9 @@ const OptimizedLoginScreen = ({ onLoginSuccess, onSignUpPress }) => {
             </Suspense>
           </KeyboardAvoidingView>
           
-          <Suspense fallback={<LoginLoadingFallback />}>
-            <LoginFooter {...footerProps} />
-          </Suspense>
-        </ScrollView>
-      </KeyboardAvoidingView>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </LinearGradient>
     </LoginErrorBoundary>
   );
 };

@@ -9,21 +9,30 @@ const IS_SMALL_SCREEN = screenHeight < 700;
 
 // Memoized color palette (created once, reused)
 export const optimizedColors = Object.freeze({
-  primary: '#e60023',
-  secondary: '#8A2BE2',
-  background: '#D8C7DD',
-  surface: '#F5F0F7',
-  border: '#E8D5ED',
+  // gradient endpoints for background
+  gradientStart: '#ff6fb5',   // pink-ish
+  gradientMid: '#ff8a65',     // warm orange
+  gradientEnd: '#3dd6c9',     // teal -> gives rainbow-ish vibe when blended
+  // button gradient
+  buttonStart: '#ff4fa3',     // vivid pink
+  buttonEnd: '#ff6a83',       // magenta/pink
+  // fallback background (keeps compatibility)
+  background: '#ff6fb5',
+  surface: 'rgba(255,255,255,0.12)',        // translucent frosted card
+  surfaceBorder: 'rgba(255,255,255,0.22)', // subtle light border
   text: Object.freeze({
-    primary: '#333',
-    secondary: '#666',
+    primary: '#ffffff',  // white text for contrast
+    secondary: 'rgba(255,255,255,0.9)',
     white: '#fff',
-    placeholder: '#999',
+    placeholder: 'rgba(255,255,255,0.7)',
+    accent: '#FF2D55',
   }),
   error: '#d32f2f',
   success: '#2e7d32',
   disabled: 'rgba(0,0,0,0.6)',
   overlay: 'rgba(0,0,0,0.1)',
+  shadowLight: 'rgba(0,0,0,0.18)',
+  shadowHeavy: 'rgba(0,0,0,0.28)',
 });
 
 // Memoized spacing system
@@ -83,6 +92,7 @@ export const optimizedStyles = StyleSheet.create({
   
   scrollContainer: {
     flexGrow: 1,
+    // keep a fallback color for platforms that don't support gradient
     backgroundColor: optimizedColors.background,
     paddingHorizontal: spacing.md,
   },
@@ -91,30 +101,37 @@ export const optimizedStyles = StyleSheet.create({
   form: {
     flex: 2,
     justifyContent: 'center',
-    paddingVertical: spacing.lg,
+    paddingVertical: spacing.xxl,
+    minHeight: IS_SMALL_SCREEN ? 400 : 500,
   },
 
   // Input styles (optimized for performance)
   inputContainer: {
-    marginBottom: spacing.md,
+    marginBottom: spacing.lg,
   },
 
   input: {
     backgroundColor: optimizedColors.surface,
     borderWidth: 1,
-    borderColor: optimizedColors.border,
-    borderRadius: 8,
+    borderColor: optimizedColors.surfaceBorder,
+    borderRadius: 14,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md, // iOS-optimized padding
+    paddingVertical: spacing.md,
     fontSize: 16,
     color: optimizedColors.text.primary,
-    ...shadows.small,
+    // deeper shadow to pop on gradient
+    shadowColor: optimizedColors.shadowLight,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    elevation: 6,
   },
 
   inputFocused: {
-    borderColor: optimizedColors.primary,
-    borderWidth: 2,
-    ...shadows.medium,
+    borderColor: 'rgba(255,255,255,0.35)',
+    borderWidth: 1.5,
+    shadowRadius: 18,
+    shadowOpacity: 0.22,
   },
 
   inputError: {
@@ -137,7 +154,7 @@ export const optimizedStyles = StyleSheet.create({
   },
 
   passwordToggleText: {
-    color: optimizedColors.primary,
+    color: optimizedColors.text.primary,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -148,14 +165,16 @@ export const optimizedStyles = StyleSheet.create({
   },
 
   primaryButton: {
-    backgroundColor: optimizedColors.primary,
-    borderRadius: 8,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
+    borderRadius: 36,             // pill
+    paddingVertical: IS_SMALL_SCREEN ? 14 : 18,
+    paddingHorizontal: spacing.xl,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: spacing.md,
+    // fallback background for no-gradient
+    backgroundColor: optimizedColors.buttonStart,
     ...shadows.medium,
+    elevation: 8,
   },
 
   primaryButtonDisabled: {
@@ -165,23 +184,24 @@ export const optimizedStyles = StyleSheet.create({
 
   primaryButtonText: {
     color: optimizedColors.text.white,
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
 
   secondaryButton: {
     backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: optimizedColors.primary,
+    borderWidth: 0,
     borderRadius: 8,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: spacing.sm,
   },
 
   secondaryButtonText: {
-    color: optimizedColors.primary,
+    color: optimizedColors.text.primary,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -192,28 +212,40 @@ export const optimizedStyles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingTop: IS_SMALL_SCREEN ? spacing.xl : spacing.xxl,
-    minHeight: IS_SMALL_SCREEN ? 200 : 300,
+    minHeight: IS_SMALL_SCREEN ? 220 : 320, // slightly taller
   },
 
   logoContainer: {
     alignItems: 'center',
     marginBottom: spacing.md,
+    // small pastel square behind icon to match target
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    padding: 12,
+    borderRadius: 18,
+    ...shadows.medium,
   },
 
   logoImage: {
-    width: IS_SMALL_SCREEN ? 100 : 120,
-    height: IS_SMALL_SCREEN ? 100 : 120,
+    width: IS_SMALL_SCREEN ? 110 : 140,
+    height: IS_SMALL_SCREEN ? 110 : 140,
     marginBottom: spacing.sm,
   },
 
   title: {
-    ...typography.title,
+    fontSize: IS_SMALL_SCREEN ? 34 : 40,   // bigger title
+    fontWeight: '800',
+    color: optimizedColors.text.primary,
     textAlign: 'center',
     marginBottom: spacing.xs,
+    // text glow to pop on gradient
+    textShadowColor: 'rgba(0,0,0,0.18)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
   },
 
   subtitle: {
-    ...typography.subtitle,
+    fontSize: IS_SMALL_SCREEN ? 14 : 16,
+    color: optimizedColors.text.secondary,
     textAlign: 'center',
   },
 
@@ -256,11 +288,22 @@ export const optimizedStyles = StyleSheet.create({
     marginLeft: spacing.sm,
   },
 
+  errorBannerIcon: {
+    color: optimizedColors.text.white,
+    marginRight: spacing.xs,
+  },
+
   errorText: {
     color: optimizedColors.error,
     fontSize: 12,
     marginTop: spacing.xs,
     marginLeft: spacing.xs,
+  },
+
+  // small utility for gradient wrapper (optional)
+  gradientWrapper: {
+    borderRadius: 36,
+    overflow: 'hidden',
   },
 
   // Footer styles

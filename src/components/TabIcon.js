@@ -1,18 +1,67 @@
-// components/TabIcon.js - Optimized tab icons with emoji fallbacks and custom image support
+// components/TabIcon.js - Custom tab icons with emoji fallbacks
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Image } from 'react-native';
+import { MaterialIcons, Feather, Ionicons } from '@expo/vector-icons';
+import { COLOR_WHEEL_CONFIG } from '../config/colorWheelConfig';
 
-// Tab icons - currently using emoji, easily replaceable with custom images
+// Custom icon components using vector icons instead of emojis
 const TAB_ICONS = {
+  Community: {
+    focused: { name: 'people', library: 'MaterialIcons' },
+    unfocused: { name: 'people-outline', library: 'MaterialIcons' }
+  },
+  ColorWheel: {
+    focused: { name: 'color-palette', library: 'Ionicons' },
+    unfocused: { name: 'color-palette-outline', library: 'Ionicons' }
+  },
+  Profile: {
+    focused: { name: 'person', library: 'MaterialIcons' },
+    unfocused: { name: 'person-outline', library: 'MaterialIcons' }
+  },
+  Settings: {
+    focused: { name: 'settings', library: 'MaterialIcons' },
+    unfocused: { name: 'settings-outline', library: 'MaterialIcons' }
+  },
+};
+
+// Emoji fallbacks (kept for compatibility)
+const EMOJI_FALLBACKS = {
   Community: { focused: '🌍', unfocused: '🌎' },
   ColorWheel: { focused: '🌈', unfocused: '⭕' },
   Profile: { focused: '👤', unfocused: '👥' },
   Settings: { focused: '⚙️', unfocused: '🔧' },
 };
 
-const TabIcon = React.memo(({ name, focused, size = 24, color }) => {
+const TabIcon = React.memo(({ name, focused, size = 24, color = '#666' }) => {
   const iconData = TAB_ICONS[name];
-  const emoji = focused ? iconData?.focused : iconData?.unfocused;
+  const iconConfig = focused ? iconData?.focused : iconData?.unfocused;
+  
+  // Render vector icon if available
+  if (iconConfig) {
+    const IconComponent = {
+      MaterialIcons,
+      Feather,
+      Ionicons
+    }[iconConfig.library];
+    
+    if (IconComponent) {
+      return (
+        <View style={styles.iconContainer}>
+          <IconComponent
+            name={iconConfig.name}
+            size={size}
+            color={focused ? COLOR_WHEEL_CONFIG.ICON_COLORS.focused : COLOR_WHEEL_CONFIG.ICON_COLORS.unfocused}
+            accessibilityRole="image"
+            accessibilityLabel={`${name} tab ${focused ? 'selected' : 'unselected'}`}
+          />
+        </View>
+      );
+    }
+  }
+  
+  // Fallback to emoji if vector icon fails
+  const emojiData = EMOJI_FALLBACKS[name];
+  const emoji = focused ? emojiData?.focused : emojiData?.unfocused;
   
   return (
     <View style={styles.iconContainer}>
@@ -21,7 +70,7 @@ const TabIcon = React.memo(({ name, focused, size = 24, color }) => {
           styles.icon, 
           { 
             fontSize: size,
-            color: color // This allows the tab bar to control the color for custom images
+            color: color
           }
         ]}
         accessibilityRole="image"

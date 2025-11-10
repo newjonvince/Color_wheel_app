@@ -1,18 +1,17 @@
-// utils/throttledCallbacks.js - Throttling utilities for performance optimization
-// Provides throttled and debounced callback wrappers for color wheel updates
-
-import { useRef, useCallback, useEffect } from 'react';
+// utils/throttledCallbacks.js - Optimized callback throttling for FullColorWheel interactions
+import { useCallback, useRef, useEffect } from 'react';
 
 /**
- * Custom hook for throttling expensive callback functions
+ * Throttled callbacks for FullColorWheel interactions
  * Provides immediate visual feedback while throttling heavy operations
+ * Optimized for FullColorWheel's advanced multi-handle functionality
  */
 export const useThrottledCallbacks = ({
   onColorsChange,
   onHexChange,
   selectedFollowsActive = true,
   throttleFps = 30,
-  immediateFps = 60
+  immediateFps = 60,
 }) => {
   const throttleMs = 1000 / throttleFps;
   const immediateMs = 1000 / immediateFps;
@@ -73,22 +72,23 @@ export const useThrottledCallbacks = ({
   /**
    * Smart hex change callback with selectedFollowsActive logic
    * Provides immediate feedback for selected color preview
+   * Optimized for FullColorWheel's multi-handle functionality
    */
   const smartHexChange = useCallback((colors, activeIndex, isImmediate = false) => {
     if (!onHexChange || !colors || colors.length === 0) return;
 
-    // Determine if we should update based on selectedFollowsActive
+    // FullColorWheel: use selectedFollowsActive logic
     const shouldUpdate = selectedFollowsActive 
-      ? true // Update on any handle movement when following active
-      : activeIndex === 0; // Only update when base handle (index 0) moves
-
-    if (!shouldUpdate) return;
-
-    const selectedIdx = selectedFollowsActive 
-      ? Math.max(0, Math.min(activeIndex, colors.length - 1))
-      : 0;
+      ? (activeIndex !== undefined && activeIndex >= 0) 
+      : true;
     
-    const selectedColor = colors[selectedIdx];
+    if (!shouldUpdate) return;
+    
+    // Get the selected color (follow active handle or use first color)
+    const selectedColor = selectedFollowsActive && activeIndex !== undefined
+      ? colors[Math.max(0, Math.min(activeIndex, colors.length - 1))]
+      : colors[0];
+    
     const now = Date.now();
     
     if (isImmediate || now - lastSelectedEmit.current >= immediateMs) {
@@ -102,10 +102,8 @@ export const useThrottledCallbacks = ({
         pendingSelectedUpdate.current = null;
       }
     } else {
-      // Schedule immediate update (for smooth preview)
-      if (pendingSelectedUpdate.current) {
-        clearTimeout(pendingSelectedUpdate.current);
-      }
+      // Throttle during continuous interaction
+      if (pendingSelectedUpdate.current) return;
       
       const delay = immediateMs - (now - lastSelectedEmit.current);
       pendingSelectedUpdate.current = setTimeout(() => {

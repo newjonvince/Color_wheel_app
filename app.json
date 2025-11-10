@@ -53,12 +53,16 @@
             "useFrameworks": "static",
             "flipper": false,
             "ccacheEnabled": false
+          },
+          "android": {
+            "newArchEnabled": false
           }
         }
       ],
       "expo-font",
       "expo-secure-store",
-      "expo-asset"
+      "expo-asset",
+      "@shopify/react-native-skia/expo"
     ],
     "runtimeVersion": {
       "policy": "sdkVersion"

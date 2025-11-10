@@ -1,7 +1,7 @@
 // screens/LoginScreen/components/LoginForm.js
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity } from 'react-native';
-import { optimizedStyles as styles } from '../styles';
+import { optimizedStyles as styles, optimizedColors } from '../styles';
 
 export const LoginForm = React.memo(({ 
   email,
@@ -36,6 +36,7 @@ export const LoginForm = React.memo(({
           onFocus={onEmailFocus}
           onBlur={onBlur}
           placeholder="Email"
+          placeholderTextColor={optimizedColors.text.placeholder}
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
@@ -74,6 +75,7 @@ export const LoginForm = React.memo(({
             onFocus={onPasswordFocus}
             onBlur={onBlur}
             placeholder="Password"
+            placeholderTextColor={optimizedColors.text.placeholder}
             secureTextEntry={!showPassword}
             autoCapitalize="none"
             autoCorrect={false}
