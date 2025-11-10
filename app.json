@@ -61,8 +61,7 @@
       ],
       "expo-font",
       "expo-secure-store",
-      "expo-asset",
-      "@shopify/react-native-skia/expo"
+      "expo-asset"
     ],
     "runtimeVersion": {
       "policy": "sdkVersion"
