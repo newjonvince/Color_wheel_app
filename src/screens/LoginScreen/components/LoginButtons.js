@@ -1,75 +1,61 @@
-// screens/LoginScreen/components/LoginButtons.js
+// LoginButtons.js
 import React from 'react';
-import { View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { TouchableOpacity, Text, View, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { optimizedStyles as styles, optimizedColors } from '../styles';
 
-export const LoginButtons = React.memo(({ 
-  loading,
-  onLogin,
-  onDemoLogin,
-}) => {
+export default function LoginButtons({ loading = false, onLogin = () => {}, onDemo = () => {}, onSignUp = () => {} }) {
   return (
     <>
-      {/* Login Button with Gradient */}
-      <View style={styles.gradientWrapper}>
+      <TouchableOpacity 
+        onPress={onLogin} 
+        disabled={loading} 
+        activeOpacity={0.9} 
+        style={styles.gradientWrapper}
+        accessibilityRole="button"
+        accessibilityLabel={loading ? "Logging in, please wait" : "Log in"}
+        accessibilityState={{ disabled: loading }}
+      >
         <LinearGradient
           colors={[optimizedColors.buttonStart, optimizedColors.buttonEnd]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
           style={styles.primaryButton}
         >
-          <TouchableOpacity
-            style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}
-            onPress={onLogin}
-            disabled={loading}
-            accessibilityRole="button"
-            accessibilityLabel="Log in"
-            accessibilityState={{ disabled: loading }}
-            testID="login-button"
-          >
-            {loading ? (
-              <View style={styles.activityIndicatorContainer}>
-                <ActivityIndicator color={optimizedColors.text.white} />
-                <Text style={styles.activityIndicatorText}>Logging in...</Text>
-              </View>
-            ) : (
-              <Text style={styles.primaryButtonText}>Log in</Text>
-            )}
-          </TouchableOpacity>
+          {loading ? <ActivityIndicator color={optimizedColors.textPrimary} /> : <Text style={styles.primaryButtonText}>Log in</Text>}
         </LinearGradient>
-      </View>
+      </TouchableOpacity>
 
-      {/* Demo Button */}
-      <TouchableOpacity
-        style={styles.secondaryButton}
-        onPress={onDemoLogin}
+      <TouchableOpacity 
+        style={[styles.secondaryButton, loading && styles.disabledButton]} 
+        onPress={loading ? undefined : onDemo} 
         disabled={loading}
+        activeOpacity={loading ? 1 : 0.8}
         accessibilityRole="button"
         accessibilityLabel="Try Demo Account"
-        accessibilityHint="Login with a demo account to explore the app"
         accessibilityState={{ disabled: loading }}
-        testID="demo-button"
       >
-        <Text style={styles.secondaryButtonText}>
-          {loading ? 'Loading...' : 'Try Demo Account'}
+        <Text style={[styles.secondaryButtonText, loading && styles.disabledButtonText]}>
+          Try Demo Account
         </Text>
       </TouchableOpacity>
-      
-      {/* Sign up Button */}
-      <TouchableOpacity
-        style={styles.secondaryButton}
-        onPress={() => {}}
+
+      <TouchableOpacity 
+        style={[styles.secondaryButton, loading && styles.disabledButton]} 
+        onPress={loading ? undefined : onSignUp} 
         disabled={loading}
+        activeOpacity={loading ? 1 : 0.8}
         accessibilityRole="button"
         accessibilityLabel="Sign up"
         accessibilityState={{ disabled: loading }}
-        testID="signup-button"
       >
-        <Text style={styles.secondaryButtonText}>
+        <Text style={[styles.secondaryButtonText, loading && styles.disabledButtonText]}>
           Sign up
         </Text>
       </TouchableOpacity>
     </>
   );
-});
+}
+
+// Named export for backward compatibility
+export { LoginButtons };

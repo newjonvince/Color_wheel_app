@@ -3,6 +3,7 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react';
 import { safeStorage } from '../../utils/safeStorage';
 import ApiService from '../../services/safeApiService';
 import { optimizedConstants } from './constants';
+import { getNetworkStatus } from '../../hooks/useNetworkStatus';
 
 const {
   validateForm,
@@ -57,6 +58,12 @@ const getCachedValidation = (key) => {
 export const useOptimizedLoginState = (onLoginSuccess) => {
   // Component mounted flag to prevent state updates after unmount
   const isMountedRef = useRef(true);
+  
+  // Processing guard to prevent double-submission
+  const isProcessingRef = useRef(false);
+  
+  // AbortController for cancelling network requests
+  const abortControllerRef = useRef(null);
   
   // Form state with optimized initial values
   const [email, setEmail] = useState('');
@@ -237,6 +244,12 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     const endTimer = performanceMonitor.startTimer('save session');
     
     try {
+      // Validate token type before saving
+      if (token && typeof token !== 'string') {
+        console.warn('❌ LoginState: Invalid token type, expected string but got:', typeof token);
+        throw new Error('Invalid token format - must be a string');
+      }
+
       const sessionPromises = [
         safeStorage.setItem(STORAGE_KEYS.userData, JSON.stringify(user)),
         safeStorage.setItem(STORAGE_KEYS.isLoggedIn, 'true'),
@@ -261,8 +274,22 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
 
   // Optimized login handler with comprehensive error handling
   const handleLogin = useCallback(async () => {
+    // Prevent double-submission race condition
+    if (isProcessingRef.current) {
+      return;
+    }
+    
     const endTimer = performanceMonitor.startTimer('login process');
     
+    // Cancel any existing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
+    
+    isProcessingRef.current = true;
     setLoading(true);
     setGlobalError('');
     
@@ -271,6 +298,10 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       const formValidation = validateForm(email, password);
       if (!formValidation.isValid) {
         setErrors(formValidation.errors);
+        // clear processing/loading so UI is usable again
+        isProcessingRef.current = false;
+        if (isMountedRef.current) setLoading(false);
+        endTimer();
         return;
       }
 
@@ -279,7 +310,9 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       }
 
       const response = await withTimeout(
-        ApiService.login(email.trim(), password),
+        ApiService.login(email.trim(), password, { 
+          signal: abortControllerRef.current.signal 
+        }),
         TIMEOUTS.login
       );
 
@@ -299,12 +332,25 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     } catch (error) {
       let errorMessage = getErrorMessage(error);
       
-      // Check if this is a network/connection error
-      if (error.message?.includes('Network Error') || 
-          error.message?.includes('fetch') || 
-          error.code === 'NETWORK_ERROR' ||
-          !navigator.onLine) {
-        errorMessage = 'Unable to connect to server. Please check your internet connection or try demo login.';
+      // Check if this is a network/connection error using NetInfo
+      try {
+        const networkStatus = await getNetworkStatus();
+        const isNetworkError = error.message?.includes('Network Error') || 
+                              error.message?.includes('fetch') || 
+                              error.code === 'NETWORK_ERROR' ||
+                              networkStatus.isOffline;
+        
+        if (isNetworkError) {
+          errorMessage = 'Unable to connect to server. Please check your internet connection or try demo login.';
+        }
+      } catch (netError) {
+        // Fallback to original error handling if NetInfo fails
+        console.warn('Failed to check network status:', netError);
+        if (error.message?.includes('Network Error') || 
+            error.message?.includes('fetch') || 
+            error.code === 'NETWORK_ERROR') {
+          errorMessage = 'Unable to connect to server. Please check your internet connection or try demo login.';
+        }
       }
       
       // Only update state if component is still mounted
@@ -322,6 +368,9 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         });
       }
     } finally {
+      // Reset processing flag and loading state
+      isProcessingRef.current = false;
+      
       // Only update loading state if component is still mounted
       if (isMountedRef.current) {
         setLoading(false);
@@ -367,8 +416,22 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
   }, [onLoginSuccess]);
 
   const handleDemoLogin = useCallback(async () => {
+    // Prevent double-submission race condition
+    if (isProcessingRef.current) {
+      return;
+    }
+    
     const endTimer = performanceMonitor.startTimer('demo login');
     
+    // Cancel any existing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
+    
+    isProcessingRef.current = true;
     setLoading(true);
     setGlobalError('');
     
@@ -377,7 +440,10 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     }
     
     try {
-      const response = await withTimeout(ApiService.demoLogin(), TIMEOUTS.demoLogin);
+      const response = await withTimeout(
+        ApiService.demoLogin({ signal: abortControllerRef.current.signal }), 
+        TIMEOUTS.demoLogin
+      );
       const { user, token } = parseLoginResponse(response);
       
       if (user && token) {
@@ -409,6 +475,9 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         }
       }
     } finally {
+      // Reset processing flag and loading state
+      isProcessingRef.current = false;
+      
       // Only update loading state if component is still mounted
       if (isMountedRef.current) {
         setLoading(false);
@@ -426,18 +495,23 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       // Set mounted flag to false on unmount
       isMountedRef.current = false;
       
+      // Cancel any ongoing network requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
       
       // Log performance stats in development
-      if (__DEV__ && validationPerformance.emailValidations > 0) {
+      const totalValidations = validationPerformance.emailValidations + validationPerformance.passwordValidations;
+      if (__DEV__ && totalValidations > 0) {
         console.log('📊 LoginState Performance:', {
           emailValidations: validationPerformance.emailValidations,
           passwordValidations: validationPerformance.passwordValidations,
           totalValidationTime: validationPerformance.totalTime,
-          averageValidationTime: validationPerformance.totalTime / 
-            (validationPerformance.emailValidations + validationPerformance.passwordValidations)
+          averageValidationTime: validationPerformance.totalTime / totalValidations
         });
       }
     };
@@ -480,3 +554,6 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     handleLogin, handleDemoLogin, validationPerformance
   ]);
 };
+
+// Default export for compatibility
+export default useOptimizedLoginState;

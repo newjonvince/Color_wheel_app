@@ -2,9 +2,9 @@
 import React from 'react';
 import { View, Text } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { optimizedStyles as styles } from '../styles';
+import { optimizedStyles as styles, optimizedColors } from '../styles';
 
-export const ErrorBanner = React.memo(({ message, onDismiss }) => {
+const ErrorBanner = React.memo(({ message, onDismiss }) => {
   if (!message) return null;
 
   return (
@@ -12,7 +12,8 @@ export const ErrorBanner = React.memo(({ message, onDismiss }) => {
       <MaterialIcons 
         name="error-outline" 
         size={20} 
-        style={styles.errorBannerIcon}
+        color={optimizedColors.textPrimary}
+        style={{ marginRight: 8 }}
       />
       <Text 
         style={styles.errorBannerText}
@@ -24,3 +25,9 @@ export const ErrorBanner = React.memo(({ message, onDismiss }) => {
     </View>
   );
 });
+
+// Default export
+export default ErrorBanner;
+
+// Named export for backward compatibility
+export { ErrorBanner };

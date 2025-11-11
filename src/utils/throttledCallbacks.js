@@ -1,5 +1,5 @@
 // utils/throttledCallbacks.js - Optimized callback throttling for FullColorWheel interactions
-import { useCallback, useRef, useEffect } from 'react';
+import React, { useCallback, useRef, useEffect } from 'react';
 
 /**
  * Throttled callbacks for FullColorWheel interactions

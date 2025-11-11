@@ -104,6 +104,15 @@ const authenticateToken = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET, verifyOpts);
 
+    // Defensive token payload validation
+    if (!decoded || !decoded.userId || !decoded.jti) {
+      res.set('WWW-Authenticate', 'Bearer realm="API"');
+      return res.status(401).json({ 
+        error: 'unauthorized', 
+        message: 'Invalid token payload' 
+      });
+    }
+
     // Validate session in database
     const result = await query(
       `SELECT us.*, u.email, u.username
@@ -157,13 +166,11 @@ const authenticateToken = async (req, res, next) => {
     req.user = user;
     req.session = session;
 
-    // Add refresh token to response headers if refreshed
+    // Expose refreshed token securely (not in headers)
     if (refreshedToken) {
-      res.set({
-        'X-Token-Refreshed': 'true',
-        'X-New-Token': refreshedToken.token,
-        'X-Token-Expires': refreshedToken.expiresAt.toISOString()
-      });
+      // Avoid sending token in headers; instead attach to res.locals for route to return securely
+      res.locals.refreshedToken = refreshedToken;
+      res.set('X-Token-Refreshed', 'true'); // short flag OK
     }
 
     return next();
@@ -210,22 +217,31 @@ const requireFreshToken = async (req, res, next) => {
     const token = /^Bearer$/i.test(scheme) ? presentedToken : authHeader.trim();
 
     if (!token) {
-      return res.status(401).json({ 
+      return res.status(401).json({
         error: 'fresh_token_required',
         message: 'Fresh authentication token required for this operation'
       });
     }
 
+    // Verify token WITHOUT auto-refresh logic
     const decoded = jwt.verify(token, process.env.JWT_SECRET, {
       algorithms: ['HS256'],
       clockTolerance: 30
     });
 
-    // Check if token is fresh (issued within last hour)
+    // Defensive token payload validation
+    if (!decoded || !decoded.userId || !decoded.jti) {
+      res.set('WWW-Authenticate', 'Bearer realm="API"');
+      return res.status(401).json({ 
+        error: 'unauthorized', 
+        message: 'Invalid token payload' 
+      });
+    }
+
+    // Check token freshness (issued within last hour)
     const now = Math.floor(Date.now() / 1000);
     const tokenAge = now - decoded.iat;
     const maxFreshAge = 60 * 60; // 1 hour
-
     if (tokenAge > maxFreshAge) {
       return res.status(401).json({
         error: 'fresh_token_required',
@@ -233,9 +249,36 @@ const requireFreshToken = async (req, res, next) => {
       });
     }
 
-    // Continue with normal authentication
-    return authenticateToken(req, res, next);
-  } catch (error) {
+    // Verify session exists (same DB check used elsewhere)
+    const result = await query(
+      `SELECT us.*, u.email, u.username
+       FROM user_sessions us
+       JOIN users u ON u.id = us.user_id
+       WHERE us.jti = ? AND us.user_id = ? AND us.expires_at > NOW() AND us.revoked_at IS NULL`,
+      [decoded.jti, decoded.userId]
+    );
+    const list = Array.isArray(result) ? result : (result?.rows || []);
+    if (!list.length) {
+      return res.status(401).json({
+        error: 'fresh_token_required',
+        message: 'Session not found or expired'
+      });
+    }
+
+    const sessionData = list[0];
+    req.user = { 
+      userId: sessionData.user_id, 
+      email: sessionData.email, 
+      username: sessionData.username, 
+      sessionId: sessionData.id, 
+      jti: sessionData.jti || decoded.jti 
+    };
+    req.session = { 
+      id: sessionData.id, 
+      expiresAt: sessionData.expires_at 
+    };
+    return next();
+  } catch (err) {
     return res.status(401).json({
       error: 'fresh_token_required',
       message: 'Fresh authentication required'

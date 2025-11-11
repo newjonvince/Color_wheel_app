@@ -3,7 +3,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { optimizedStyles as styles } from '../styles';
 
-export const LoginFooter = React.memo(({ onSignUpPress }) => {
+const LoginFooter = React.memo(({ onSignUpPress }) => {
   return (
     <View style={styles.footer}>
       <Text style={styles.footerText}>Don't have an account? </Text>
@@ -19,3 +19,9 @@ export const LoginFooter = React.memo(({ onSignUpPress }) => {
     </View>
   );
 });
+
+// Default export
+export default LoginFooter;
+
+// Named export for backward compatibility
+export { LoginFooter };

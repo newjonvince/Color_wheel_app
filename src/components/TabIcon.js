@@ -34,7 +34,17 @@ const EMOJI_FALLBACKS = {
 
 const TabIcon = React.memo(({ name, focused, size = 24, color = '#666' }) => {
   const iconData = TAB_ICONS[name];
-  const iconConfig = focused ? iconData?.focused : iconData?.unfocused;
+  if (!iconData) {
+    // Unknown tab name — fallback to emoji dot
+    const emoji = focused ? '●' : '○';
+    return (
+      <View style={styles.iconContainer}>
+        <Text style={[styles.icon, { fontSize: size, color }]}>{emoji}</Text>
+      </View>
+    );
+  }
+  
+  const iconConfig = focused ? iconData.focused : iconData.unfocused;
   
   // Render vector icon if available
   if (iconConfig) {
@@ -45,12 +55,17 @@ const TabIcon = React.memo(({ name, focused, size = 24, color = '#666' }) => {
     }[iconConfig.library];
     
     if (IconComponent) {
+      // Use configured colors safely with fallbacks
+      const iconColor = focused 
+        ? (COLOR_WHEEL_CONFIG?.ICON_COLORS?.focused ?? color) 
+        : (COLOR_WHEEL_CONFIG?.ICON_COLORS?.unfocused ?? color);
+        
       return (
         <View style={styles.iconContainer}>
           <IconComponent
             name={iconConfig.name}
             size={size}
-            color={focused ? COLOR_WHEEL_CONFIG.ICON_COLORS.focused : COLOR_WHEEL_CONFIG.ICON_COLORS.unfocused}
+            color={iconColor}
             accessibilityRole="image"
             accessibilityLabel={`${name} tab ${focused ? 'selected' : 'unselected'}`}
           />
@@ -76,7 +91,7 @@ const TabIcon = React.memo(({ name, focused, size = 24, color = '#666' }) => {
         accessibilityRole="image"
         accessibilityLabel={`${name} tab ${focused ? 'selected' : 'unselected'}`}
       >
-        {emoji || '●'}
+        {emoji || (focused ? '●' : '○')}
       </Text>
     </View>
   );

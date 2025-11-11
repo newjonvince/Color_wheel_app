@@ -34,7 +34,10 @@ function getCachedColorData(hex) {
   const hexKey = `#${fullHex}`;
 
   if (colorCache.has(hexKey)) {
-    return colorCache.get(hexKey);
+    const existing = colorCache.get(hexKey);
+    existing.lastUsed = Date.now();
+    colorCache.set(hexKey, existing); // update insertion order
+    return existing;
   }
 
   // Compute all color data at once

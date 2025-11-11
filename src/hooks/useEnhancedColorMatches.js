@@ -20,6 +20,8 @@ export const useEnhancedColorMatches = () => {
   
   const { saveSchemeHistory } = useUserPreferences();
   const abortControllerRef = useRef(null);
+  const isMountedRef = useRef(true);
+  const isFetchingRef = useRef(false);
 
   // Load cached data on mount
   useEffect(() => {
@@ -72,8 +74,8 @@ export const useEnhancedColorMatches = () => {
    * Fetch color matches from API with enhanced error handling
    */
   const fetchColorMatches = useCallback(async (force = false) => {
-    // Skip if already loading or recently fetched (unless forced)
-    if (loading || (!force && lastFetch && Date.now() - lastFetch < 30000)) {
+    // Skip if already fetching or recently fetched (unless forced)
+    if (isFetchingRef.current || (!force && lastFetch && Date.now() - lastFetch < 30000)) {
       return;
     }
 
@@ -83,24 +85,34 @@ export const useEnhancedColorMatches = () => {
     }
 
     abortControllerRef.current = new AbortController();
+    isFetchingRef.current = true;
     setLoading(true);
     setError(null);
 
     try {
-      // Fetch user's color matches
-      const userMatches = await ApiService.getUserColorMatches();
+      // Fetch user's color matches with abort signal
+      const userMatches = await ApiService.getUserColorMatches({ 
+        signal: abortControllerRef.current?.signal 
+      });
+      
+      // Check if component is still mounted before processing
+      if (!isMountedRef.current) return;
       
       // Process and enhance matches with like information
       const enhancedMatches = await enhanceMatchesWithLikes(userMatches.data || userMatches);
       
-      setColorMatches(enhancedMatches);
-      setLastFetch(Date.now());
-      
-      // Cache the results
-      await cacheMatches(enhancedMatches);
+      // Only update state if component is still mounted
+      if (isMountedRef.current) {
+        setColorMatches(enhancedMatches);
+        setLastFetch(Date.now());
+        
+        // Cache the results
+        await cacheMatches(enhancedMatches);
+      }
       
     } catch (error) {
-      if (error.name !== 'AbortError') {
+      // Only handle errors if component is still mounted
+      if (error.name !== 'AbortError' && isMountedRef.current) {
         console.error('Failed to fetch color matches:', error);
         setError(error.message || 'Failed to load color matches');
         
@@ -112,10 +124,11 @@ export const useEnhancedColorMatches = () => {
         }
       }
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
       abortControllerRef.current = null;
     }
-  }, [loading, lastFetch, cacheMatches]);
+  }, [lastFetch, cacheMatches]);
 
   /**
    * Enhance color matches with like information
@@ -335,9 +348,11 @@ export const useEnhancedColorMatches = () => {
     ]);
   }, [fetchColorMatches, fetchLikedMatches, fetchPopularMatches]);
 
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }

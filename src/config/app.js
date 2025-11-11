@@ -174,14 +174,31 @@ export const initializeAppConfig = () => {
 
       // Optimized log suppression for production
       if (IS_PROD) {
-        LogBox.ignoreAllLogs(true);
-        
-        // Override console methods in production for performance
-        const noop = () => {};
-        console.log = noop;
-        console.info = noop;
-        console.warn = noop;
-        // Keep console.error for critical issues
+        // Ignore only specific noisy warnings; keep error reporting intact
+        LogBox.ignoreLogs([
+          'Setting a timer', // example, add other known non-critical warnings
+          'Require cycle:',
+          'componentWillReceiveProps',
+        ]);
+
+        // Wrap console functions to forward only errors to your monitoring system,
+        // while keeping them operational during runtime
+        const originalError = console.error;
+        console.log = (...args) => {
+          // optional: send low-priority logs to a lightweight logger or drop them
+        };
+        console.info = (...args) => {};
+        console.warn = (...args) => {
+          // optionally sample or forward certain warnings
+        };
+        // Keep console.error unchanged but forward to monitoring
+        console.error = function (...args) {
+          try {
+            // Example: send to Sentry, Datadog etc
+            // Sentry.captureException(args[0]);
+          } catch (e) {/* ignore */}
+          originalError.apply(console, args);
+        };
       }
       
       // Development-specific optimizations

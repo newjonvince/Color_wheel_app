@@ -2,10 +2,9 @@
 // Canva-style multi-handle color wheel with Skia + Reanimated
 // Crash-safe: no non-serializable captures inside worklets (no Set/refs); hex conversion on JS thread
 
-// Build verification tag for crash debugging
-if (!__DEV__) {
+// Build verification tag for crash debugging (dev only)
+if (__DEV__) {
   console.log('FullColorWheel build tag: 2025-08-16 worklet-patched');
-  console.log('No bundle URL present - using production build');
 }
 
 import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';

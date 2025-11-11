@@ -1,6 +1,6 @@
 // components/AppNavigation.js - Main navigation component
-import React from 'react';
-import { StyleSheet } from 'react-native';
+import React, { useMemo, useCallback } from 'react';
+import { StyleSheet, Text } from 'react-native';
 import { APP_CONFIG } from '../config/app';
 import TabIcon from './TabIcon';
 
@@ -19,6 +19,27 @@ export const AppNavigation = ({
   handleAccountDeleted,
   retryLoadColorWheel,
 }) => {
+  // Memoize screen options to prevent re-renders
+  const screenOptions = useCallback(({ route }) => ({
+    tabBarIcon: ({ focused }) => <TabIcon focused={focused} name={route.name} />,
+    ...APP_CONFIG.tabNavigation.screenOptions,
+    tabBarStyle: styles.tabBar,
+    tabBarLabelStyle: styles.tabLabel,
+  }), []);
+
+  // Memoize ColorWheel screen component
+  const ColorWheelComponent = useCallback((props) => (
+    <ColorWheelScreen
+      key={wheelReloadNonce}
+      {...props}
+      currentUser={user || null}
+      onSaveColorMatch={saveColorMatch}
+      onLogout={handleLogout}
+      onRetry={retryLoadColorWheel}
+      navigation={props?.navigation}
+    />
+  ), [wheelReloadNonce, user, saveColorMatch, handleLogout, retryLoadColorWheel]);
+
   return (
     <ErrorBoundary>
       <NavigationContainer linking={APP_CONFIG.linking} fallback={<Text>Loading…</Text>}>
@@ -26,25 +47,10 @@ export const AppNavigation = ({
         <Tab.Navigator
           {...APP_CONFIG.tabNavigation.options}
           initialRouteName={APP_CONFIG.tabNavigation.initialRouteName}
-          screenOptions={({ route }) => ({
-            tabBarIcon: ({ focused }) => <TabIcon focused={focused} name={route.name} />,
-            ...APP_CONFIG.tabNavigation.screenOptions,
-            tabBarStyle: styles.tabBar,
-            tabBarLabelStyle: styles.tabLabel,
-          })}
+          screenOptions={screenOptions}
         >
           <Tab.Screen name="ColorWheel" options={{ title: 'Wheel' }}>
-            {(props) => (
-              <ColorWheelScreen
-                key={wheelReloadNonce}
-                {...props}
-                currentUser={user || null}
-                onSaveColorMatch={saveColorMatch}
-                onLogout={handleLogout}
-                onRetry={retryLoadColorWheel}
-                navigation={props?.navigation}
-              />
-            )}
+            {ColorWheelComponent}
           </Tab.Screen>
 
           <Tab.Screen name="Community" options={{ title: 'Community' }}>

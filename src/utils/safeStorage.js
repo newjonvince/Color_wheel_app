@@ -1,72 +1,85 @@
-// utils/safeStorage.js - Ultra-optimized storage with advanced features
+// utils/safeStorage.js - Secure storage with expo-secure-store and proper initialization
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// React Native compatible encryption (simplified for now)
-const simpleEncrypt = (text, key) => {
-  try {
-    // Simple XOR encryption for React Native compatibility
-    let result = '';
-    for (let i = 0; i < text.length; i++) {
-      result += String.fromCharCode(text.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+// Error monitoring for critical failures
+const reportError = (error, context) => {
+  if (__DEV__) {
+    console.error(`[SafeStorage] ${context}:`, error);
+  } else {
+    // In production, send to error monitoring service (Sentry, Bugsnag, etc.)
+    try {
+      // Example: Sentry.captureException(error, { tags: { context } });
+      console.error(`[SafeStorage] ${context}:`, error.message);
+    } catch (reportingError) {
+      console.error('Failed to report error:', reportingError);
     }
-    return btoa(result); // Base64 encode
-  } catch (error) {
-    return text; // Fallback to plaintext
   }
 };
 
-const simpleDecrypt = (encryptedText, key) => {
-  try {
-    const decoded = atob(encryptedText); // Base64 decode
-    let result = '';
-    for (let i = 0; i < decoded.length; i++) {
-      result += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
-    }
-    return result;
-  } catch (error) {
-    return encryptedText; // Assume plaintext if decryption fails
-  }
-};
+// Secure storage for sensitive data
+let SecureStore = null;
+try {
+  SecureStore = require('expo-secure-store');
+} catch (error) {
+  console.warn('expo-secure-store not available, using AsyncStorage only');
+  reportError(error, 'SecureStore module loading failed');
+}
 
 // Configuration constants
 const CONFIG = {
   CACHE_TTL: 5 * 60 * 1000, // 5 minutes
   MAX_CACHE_SIZE: 50,
-  ENCRYPTION_KEY: 'fashion_color_wheel_2024', // In production, use device-specific key
   SENSITIVE_KEY_PATTERNS: [
     /token/i, /auth/i, /password/i, /secret/i, /key/i, /credential/i
   ],
   MAX_VALUE_SIZE: 1024 * 1024, // 1MB limit
   BATCH_DELAY: 100, // ms
+  SECURE_STORE_OPTIONS: {
+    keychainService: 'fashion-color-wheel',
+    requireAuthentication: false, // Set to true for biometric protection
+  },
 };
 
 // Advanced SafeStorage class
 class OptimizedSafeStorage {
   constructor() {
-    this.secureStore = null;
+    this.secureStore = SecureStore;
     this.isSecureStoreAvailable = false;
+    this.isInitialized = false;
     this.cache = new Map();
     this.pendingOperations = new Map();
     this.batchQueue = [];
     this.batchTimer = null;
     
-    this.initialize();
+    // Don't call async initialize() in constructor - race condition
   }
 
   /**
    * Initialize SecureStore with availability check
+   * Must be called explicitly during app startup
    */
-  async initialize() {
+  async init() {
+    if (this.isInitialized) {
+      return;
+    }
+
     try {
-      this.secureStore = require('expo-secure-store');
-      this.isSecureStoreAvailable = await this.secureStore.isAvailableAsync();
+      if (this.secureStore) {
+        this.isSecureStoreAvailable = await this.secureStore.isAvailableAsync();
+      } else {
+        this.isSecureStoreAvailable = false;
+      }
+      
+      this.isInitialized = true;
       
       if (__DEV__) {
-        console.log('🔐 SecureStore availability:', this.isSecureStoreAvailable);
+        console.log('🔐 SafeStorage initialized - SecureStore available:', this.isSecureStoreAvailable);
       }
     } catch (error) {
-      console.warn('SecureStore initialization failed:', error.message);
+      console.warn('SafeStorage initialization failed:', error.message);
+      reportError(error, 'SafeStorage initialization failed');
       this.isSecureStoreAvailable = false;
+      this.isInitialized = true; // Mark as initialized even if SecureStore failed
     }
   }
 
@@ -78,26 +91,11 @@ class OptimizedSafeStorage {
   }
 
   /**
-   * Encrypt data for AsyncStorage fallback
+   * Ensure initialization before operations
    */
-  encrypt(data) {
-    try {
-      return simpleEncrypt(data, CONFIG.ENCRYPTION_KEY);
-    } catch (error) {
-      console.warn('Encryption failed, storing as plaintext:', error.message);
-      return data;
-    }
-  }
-
-  /**
-   * Decrypt data from AsyncStorage
-   */
-  decrypt(encryptedData) {
-    try {
-      return simpleDecrypt(encryptedData, CONFIG.ENCRYPTION_KEY);
-    } catch (error) {
-      // Assume it's plaintext if decryption fails
-      return encryptedData;
+  ensureInitialized() {
+    if (!this.isInitialized) {
+      console.warn('SafeStorage not initialized. Call safeStorage.init() during app startup.');
     }
   }
 
@@ -150,6 +148,9 @@ class OptimizedSafeStorage {
    * Advanced getItem with caching and fallbacks
    */
   async getItem(key) {
+    // Ensure initialization
+    if (!this.isInitialized) await this.init();
+    
     // Check cache first
     const cacheKey = this.getCacheKey(key);
     const cached = this.cache.get(cacheKey);
@@ -188,21 +189,40 @@ class OptimizedSafeStorage {
    * Internal get operation
    */
   async _getItemOperation(key) {
+    this.ensureInitialized();
     const isSensitive = this.isSensitiveKey(key);
 
     try {
       // Try SecureStore first for sensitive data
       if (isSensitive && this.isSecureStoreAvailable && this.secureStore) {
-        const value = await this.secureStore.getItemAsync(key);
-        if (value !== null) return value;
+        const value = await this.secureStore.getItemAsync(key, CONFIG.SECURE_STORE_OPTIONS);
+        if (value !== null) {
+          // Handle TTL wrapped values
+          try {
+            const parsed = JSON.parse(value);
+            if (parsed.expires && Date.now() > parsed.expires) {
+              // Expired, remove it
+              await this.secureStore.deleteItemAsync(key, CONFIG.SECURE_STORE_OPTIONS);
+              return null;
+            }
+            return parsed.value || value;
+          } catch {
+            // Not wrapped, return as-is
+            return value;
+          }
+        }
       }
 
-      // Fallback to AsyncStorage
+      // Fallback to AsyncStorage (for non-sensitive data or when SecureStore unavailable)
       const asyncValue = await AsyncStorage.getItem(key);
       if (asyncValue === null) return null;
 
-      // Decrypt if it was encrypted
-      return isSensitive ? this.decrypt(asyncValue) : asyncValue;
+      // For sensitive data in AsyncStorage, warn about insecure storage
+      if (isSensitive) {
+        console.warn(`Sensitive key '${key}' stored in AsyncStorage (insecure). Consider using SecureStore.`);
+      }
+
+      return asyncValue;
 
     } catch (error) {
       console.warn(`Failed to get item ${key}:`, error.message);
@@ -211,9 +231,11 @@ class OptimizedSafeStorage {
   }
 
   /**
-   * Advanced setItem with encryption and batching
+   * Advanced setItem with secure storage and batching
    */
   async setItem(key, value, options = {}) {
+    // Ensure initialization
+    if (!this.isInitialized) await this.init();
     this.validateDataSize(value);
 
     const isSensitive = this.isSensitiveKey(key);
@@ -229,16 +251,15 @@ class OptimizedSafeStorage {
       // Try SecureStore first for sensitive data
       if (isSensitive && this.isSecureStoreAvailable && this.secureStore) {
         try {
-          const secureOptions = {};
           if (ttl) {
             // SecureStore doesn't support TTL, but we can add metadata
             const wrappedValue = JSON.stringify({
               value,
               expires: Date.now() + ttl
             });
-            await this.secureStore.setItemAsync(key, wrappedValue, secureOptions);
+            await this.secureStore.setItemAsync(key, wrappedValue, CONFIG.SECURE_STORE_OPTIONS);
           } else {
-            await this.secureStore.setItemAsync(key, value, secureOptions);
+            await this.secureStore.setItemAsync(key, value, CONFIG.SECURE_STORE_OPTIONS);
           }
           success = true;
         } catch (secureError) {
@@ -246,10 +267,13 @@ class OptimizedSafeStorage {
         }
       }
 
-      // Use AsyncStorage (with encryption for sensitive data)
+      // Use AsyncStorage as fallback
       if (!success) {
-        const finalValue = isSensitive ? this.encrypt(value) : value;
-        await AsyncStorage.setItem(key, finalValue);
+        // For sensitive data in AsyncStorage, warn about insecure storage
+        if (isSensitive) {
+          console.warn(`Storing sensitive key '${key}' in AsyncStorage (insecure). Consider using SecureStore.`);
+        }
+        await AsyncStorage.setItem(key, value);
       }
 
       // Update cache

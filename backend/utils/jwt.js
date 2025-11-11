@@ -1,6 +1,7 @@
 // JWT utility functions for enhanced security
 const jwt = require('jsonwebtoken');
 const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 
 /**
  * Generate a secure JWT token with JTI
@@ -129,10 +130,78 @@ const verifyRefreshToken = (refreshToken) => {
   });
 };
 
+/**
+ * Hash refresh token for secure storage
+ * @param {string} refreshToken - Raw refresh token
+ * @returns {string} - Hashed token for database storage
+ */
+const hashRefreshToken = (refreshToken) => {
+  const secret = process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET;
+  return crypto.createHmac('sha256', secret).update(refreshToken).digest('hex');
+};
+
+/**
+ * Verify refresh token hash
+ * @param {string} refreshToken - Raw refresh token
+ * @param {string} storedHash - Stored hash from database
+ * @returns {boolean} - Whether token matches stored hash
+ */
+const verifyRefreshTokenHash = (refreshToken, storedHash) => {
+  const tokenHash = hashRefreshToken(refreshToken);
+  return crypto.timingSafeEqual(Buffer.from(tokenHash), Buffer.from(storedHash));
+};
+
+/**
+ * Generate secure refresh token with rotation support
+ * @param {Object} payload - Token payload
+ * @param {string} originalJti - Original token JTI for tracking
+ * @param {string} previousRefreshJti - Previous refresh token JTI (for rotation)
+ * @returns {Object} - { refreshToken, jti, expiresAt, tokenHash, previousJti }
+ */
+const generateSecureRefreshToken = (payload, originalJti, previousRefreshJti = null) => {
+  const jti = uuidv4();
+  const expiresIn = '30d'; // Refresh tokens last 30 days
+  
+  const tokenPayload = {
+    ...payload,
+    jti,
+    originalJti,
+    type: 'refresh',
+    iat: Math.floor(Date.now() / 1000),
+    // Add rotation chain tracking
+    previousJti: previousRefreshJti
+  };
+
+  const refreshToken = jwt.sign(tokenPayload, process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET, {
+    expiresIn,
+    algorithm: 'HS256',
+    issuer: 'fashion-color-wheel',
+    audience: 'fashion-color-wheel-refresh'
+  });
+
+  // Calculate expiration timestamp
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + 30);
+
+  // Hash the token for secure storage
+  const tokenHash = hashRefreshToken(refreshToken);
+
+  return { 
+    refreshToken, 
+    jti, 
+    expiresAt, 
+    tokenHash,
+    previousJti: previousRefreshJti
+  };
+};
+
 module.exports = {
   generateSecureToken,
   verifySecureToken,
   createSessionData,
   generateRefreshToken,
-  verifyRefreshToken
+  verifyRefreshToken,
+  hashRefreshToken,
+  verifyRefreshTokenHash,
+  generateSecureRefreshToken
 };

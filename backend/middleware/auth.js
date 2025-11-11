@@ -25,6 +25,12 @@ const authenticateToken = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET, verifyOpts);
 
+    // Defensive token payload validation
+    if (!decoded || !decoded.userId || !decoded.jti) {
+      res.set('WWW-Authenticate', 'Bearer realm="API"');
+      return res.status(401).json({ error: 'unauthorized', message: 'Invalid token payload' });
+    }
+
     const result = await query(
       `SELECT us.*, u.email, u.username
          FROM user_sessions us

@@ -2,6 +2,9 @@
 import axios from 'axios';
 import { safeStorage } from '../utils/safeStorage';
 
+// Request cancellation support
+const CancelToken = axios.CancelToken;
+
 // Safe API configuration
 const getApiBaseUrl = () => {
   try {
@@ -25,6 +28,11 @@ class SafeApiService {
     this.authToken = null;
     this.isReady = false;
     this.readyPromise = this.initialize();
+  }
+
+  // Expose ready promise for app bootstrap
+  get ready() {
+    return this.readyPromise;
   }
 
   async initialize() {
@@ -66,11 +74,35 @@ class SafeApiService {
     }
   }
 
-  // Safe request method with error handling
+  // Safe request method with error handling and cancellation support
   async request(endpoint, options = {}) {
     try {
       await this.ready;
 
+      // Support both AbortSignal and axios CancelToken
+      let cancelToken = options.cancelToken;
+      
+      // If AbortSignal is provided, convert to axios CancelToken
+      if (options.signal && !cancelToken) {
+        const source = CancelToken.source();
+        cancelToken = source.token;
+        
+        // Listen for abort signal
+        if (options.signal.aborted) {
+          source.cancel('Request aborted');
+        } else {
+          options.signal.addEventListener('abort', () => {
+            source.cancel('Request aborted');
+          });
+        }
+      }
+      
+      // Create default cancel token if none provided
+      if (!cancelToken) {
+        const source = CancelToken.source();
+        cancelToken = source.token;
+      }
+      
       const config = {
         method: 'GET',
         ...options,
@@ -81,6 +113,7 @@ class SafeApiService {
           ...options.headers,
         },
         timeout: 10000,
+        cancelToken,
       };
 
       // Add auth header if token exists
@@ -95,8 +128,10 @@ class SafeApiService {
       
       // Handle different types of errors
       if (error.response?.status === 401) {
-        // Clear invalid token
-        await this.setToken(null);
+        // Only clear token if this isn't a refresh endpoint to avoid clearing during token rotation
+        if (!endpoint.includes('/auth/refresh')) {
+          await this.setToken(null);
+        }
         throw new Error('Authentication required');
       }
       
@@ -118,16 +153,18 @@ class SafeApiService {
   }
 
   // Authentication methods
-  async login(email, password) {
+  async login(email, password, options = {}) {
     return this.request('/auth/login', {
       method: 'POST',
       data: { email, password },
+      ...options, // Pass through signal and other options
     });
   }
 
-  async demoLogin() {
+  async demoLogin(options = {}) {
     return this.request('/auth/demo-login', {
       method: 'POST',
+      ...options, // Pass through signal and other options
     });
   }
 

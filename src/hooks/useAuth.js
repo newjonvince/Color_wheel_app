@@ -18,117 +18,71 @@ export const useAuth = () => {
     }
   }, []);
 
-  const initializeAuth = useCallback(async () => {
+  const initializeAuth = useCallback(async ({ signal } = {}) => {
     let initTimeout;
     let profileTimeout;
-    let isCancelled = false;
-    
     try {
-      // Set up timeout with cleanup
       initTimeout = setTimeout(() => {
-        if (!isCancelled) {
-          setLoading(false);
-          setIsInitialized(true);
-        }
+        setLoading(false);
+        setIsInitialized(true);
       }, 10000);
 
-      if (isCancelled) return;
-
+      // load token safely
       let token = null;
       try {
         token = await safeStorage.getItem('fashion_color_wheel_auth_token');
         if (!token) token = await safeStorage.getItem('authToken');
-      } catch (error) {
-        if (__DEV__) console.warn('Token retrieval error:', error);
+      } catch (err) {
+        if (__DEV__) console.warn('Token retrieval error:', err);
       }
 
-      if (isCancelled) return;
+      if (signal?.aborted) return;
 
       if (token) {
         try {
           await ApiService?.setToken?.(token);
           await ApiService.ready;
-          
-          if (isCancelled) return;
-          
+          if (signal?.aborted) return;
+
           let profile = null;
           if (ApiService?.getUserProfile) {
-            // Create cancellable profile timeout
-            const profilePromise = ApiService.getUserProfile();
-            const timeoutPromise = new Promise((_, reject) => {
-              profileTimeout = setTimeout(() => {
-                if (!isCancelled) reject(new Error('Profile timeout'));
-              }, 5000);
-            });
-            
-            try {
-              profile = await Promise.race([profilePromise, timeoutPromise]);
-              if (profileTimeout) clearTimeout(profileTimeout);
-            } catch (timeoutError) {
-              if (profileTimeout) clearTimeout(profileTimeout);
-              throw timeoutError;
-            }
+            // race profile with timeout, respecting signal
+            profileTimeout = setTimeout(() => {
+              // will reject below if still pending
+            }, 5000);
+            profile = await Promise.race([ApiService.getUserProfile(), new Promise((_, rej) => {
+              setTimeout(() => rej(new Error('Profile timeout')), 5000);
+            })]);
+            if (profileTimeout) clearTimeout(profileTimeout);
           } else {
             const storedUserData = await AsyncStorage.getItem('userData');
             if (storedUserData) profile = JSON.parse(storedUserData);
           }
-          
-          if (isCancelled) return;
-          
+
+          if (signal?.aborted) return;
+
           const normalized = pickUser(profile);
-          if (normalized?.id) {
-            setUser(normalized);
-          } else {
-            await clearStoredToken();
-          }
+          if (normalized?.id) setUser(normalized);
+          else await clearStoredToken();
         } catch (apiError) {
           if (__DEV__) console.warn('API initialization error:', apiError);
-          
-          if (isCancelled) return;
+          if (signal?.aborted) return;
           
           const storedUserData = await AsyncStorage.getItem('userData');
-          if (storedUserData) {
-            const userData = JSON.parse(storedUserData);
-            setUser(userData);
-          } else {
-            await clearStoredToken();
-          }
+          if (storedUserData) setUser(JSON.parse(storedUserData));
+          else await clearStoredToken();
         }
       }
 
-      if (!isCancelled) {
-        if (initTimeout) clearTimeout(initTimeout);
-        setIsInitialized(true);
-      }
+      setIsInitialized(true);
     } catch (e) {
-      if (!isCancelled) {
-        if (initTimeout) clearTimeout(initTimeout);
-        if (profileTimeout) clearTimeout(profileTimeout);
-        console.error('Auth initialization failed:', e);
-        
-        // Log more details for debugging
-        if (__DEV__) {
-          console.error('Auth initialization error details:', {
-            message: e.message,
-            stack: e.stack,
-            name: e.name
-          });
-        }
-        
-        setIsInitialized(true);
-      }
+      console.error('Auth initialization failed:', e);
+      setIsInitialized(true);
     } finally {
-      if (!isCancelled) {
-        setLoading(false);
-      }
-    }
-    
-    // Cleanup function
-    return () => {
-      isCancelled = true;
       if (initTimeout) clearTimeout(initTimeout);
       if (profileTimeout) clearTimeout(profileTimeout);
-    };
+      setLoading(false);
+    }
   }, [clearStoredToken]);
 
   const handleLoginSuccess = useCallback(async (u) => {

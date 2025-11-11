@@ -12,7 +12,7 @@ export const HSLInputs = React.memo(({
 }) => {
   const handleChangeText = (component, value) => {
     onUpdateInput(component, value);
-    onLiveUpdate(wheelRef, component, value);
+    onLiveUpdate(component, value, wheelRef);
   };
 
   return (

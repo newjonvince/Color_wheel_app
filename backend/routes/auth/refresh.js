@@ -1,7 +1,7 @@
 // routes/auth/refresh.js - Token refresh endpoint
 const express = require('express');
 const { query } = require('../../config/database');
-const { generateSecureToken, verifyRefreshToken } = require('../../utils/jwt');
+const { generateSecureToken, verifyRefreshToken, verifyRefreshTokenHash, generateSecureRefreshToken } = require('../../utils/jwt');
 const { 
   success, 
   badRequest, 
@@ -43,8 +43,8 @@ router.post('/refresh',
         `SELECT us.*, u.email, u.username
          FROM user_sessions us
          JOIN users u ON u.id = us.user_id
-         WHERE us.refresh_jti = ? AND us.user_id = ? AND us.refresh_expires_at > NOW() AND us.revoked_at IS NULL`,
-        [decoded.jti, decoded.userId]
+         WHERE us.user_id = ? AND us.refresh_expires_at > NOW() AND us.revoked_at IS NULL`,
+        [decoded.userId]
       );
 
       const sessions = rows(sessionResult);
@@ -52,35 +52,62 @@ router.post('/refresh',
         return unauthorized(res, 'Invalid or expired refresh token');
       }
 
-      const session = sessions[0];
+      // Find session with matching refresh token hash
+      let validSession = null;
+      for (const session of sessions) {
+        if (verifyRefreshTokenHash(refreshToken, session.refresh_token_hash)) {
+          validSession = session;
+          break;
+        }
+      }
 
-      // Generate new access token
+      if (!validSession) {
+        return unauthorized(res, 'Invalid refresh token');
+      }
+
+      // Generate new access token (short-lived)
       const newTokenData = generateSecureToken(
         { userId: decoded.userId, email: decoded.email },
-        { expiresIn: '1h' } // Shorter expiration for refreshed tokens
+        { expiresIn: '15m' } // Very short expiration for refreshed tokens
       );
 
-      // Update session with new access token JTI
+      // Generate new refresh token (rotation)
+      const newRefreshData = generateSecureRefreshToken(
+        { userId: decoded.userId, email: decoded.email },
+        newTokenData.jti,
+        decoded.jti // Track previous refresh token
+      );
+
+      // Update session with new tokens and revoke old refresh token
       await query(
         `UPDATE user_sessions 
-         SET jti = ?, expires_at = ?, updated_at = CURRENT_TIMESTAMP, refresh_count = COALESCE(refresh_count, 0) + 1
+         SET jti = ?, expires_at = ?, refresh_token_hash = ?, refresh_expires_at = ?, 
+             updated_at = CURRENT_TIMESTAMP, refresh_count = COALESCE(refresh_count, 0) + 1
          WHERE id = ?`,
-        [newTokenData.jti, newTokenData.expiresAt, session.id]
+        [
+          newTokenData.jti, 
+          newTokenData.expiresAt, 
+          newRefreshData.tokenHash,
+          newRefreshData.expiresAt,
+          validSession.id
+        ]
       );
 
       // Log refresh for security monitoring
-      console.log(`🔄 Manual token refresh for user ${decoded.userId} (session: ${session.id})`);
+      console.log(`🔄 Secure token refresh with rotation for user ${decoded.userId} (session: ${validSession.id})`);
 
       return success(res, {
         accessToken: newTokenData.token,
+        refreshToken: newRefreshData.refreshToken, // Include new refresh token
         expiresAt: newTokenData.expiresAt.toISOString(),
+        refreshExpiresAt: newRefreshData.expiresAt.toISOString(),
         tokenType: 'Bearer',
         user: {
-          id: session.user_id,
-          email: session.email,
-          username: session.username
+          id: validSession.user_id,
+          email: validSession.email,
+          username: validSession.username
         }
-      }, 'Token refreshed successfully');
+      }, 'Tokens refreshed successfully with rotation');
 
     } catch (error) {
       if (error.name === 'TokenExpiredError') {

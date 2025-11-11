@@ -1,8 +1,10 @@
 // screens/ColorWheelScreen/useOptimizedColorWheelState.js - Enhanced state management for FullColorWheel
 
-import { useState, useCallback, useRef, useEffect } from 'react';
-import { getColorScheme } from '../../utils/optimizedColor';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { getColorScheme, hexToHsl, hslToHex } from '../../utils/optimizedColor';
 import { useThrottledCallbacks } from '../../utils/throttledCallbacks';
+import { useOptimizedColorProcessing } from '../../hooks/useOptimizedColorProcessing';
+import { DEFAULT_SCHEME, DEFAULT_COLOR, generateRandomColor, validateHSL } from './constants';
 
 export const useOptimizedColorWheelState = (options = {}) => {
   const {
@@ -31,23 +33,18 @@ export const useOptimizedColorWheelState = (options = {}) => {
     l: String(Math.round(hsl.l)),
   });
 
-  // Set up optimized color processing with caching
+  // Set up optimized color processing with caching (with safe fallbacks)
+  const colorProcessing = useOptimizedColorProcessing ? useOptimizedColorProcessing() : {};
   const {
-    analyzeColor,
-    analyzePalette,
-    analyzePaletteContrast,
-    validateColorScheme,
-    getCacheStats
-  } = useOptimizedColorProcessing();
+    analyzeColor = null,
+    analyzePalette = null,
+    analyzePaletteContrast = null,
+    validateColorScheme = null,
+    getCacheStats = null
+  } = colorProcessing || {};
 
-  // Set up throttled callbacks for performance
-  const {
-    onGestureStart,
-    onGestureChange,
-    onGestureEnd,
-    handleColorUpdate,
-    forceUpdate
-  } = useThrottledCallbacks({
+  // Set up throttled callbacks for performance (with safe fallbacks)
+  const throttledCallbacks = useThrottledCallbacks ? useThrottledCallbacks({
     onColorsChange: useCallback((colors) => {
       setPalette(colors);
       if (externalOnColorsChange) {
@@ -66,7 +63,15 @@ export const useOptimizedColorWheelState = (options = {}) => {
     selectedFollowsActive,
     throttleFps,
     immediateFps,
-  });
+  }) : {};
+  
+  const {
+    onGestureStart: throttledGestureStart = () => {},
+    onGestureChange: throttledGestureChange = () => {},
+    onGestureEnd: throttledGestureEnd = () => {},
+    handleColorUpdate: throttledColorUpdate = () => {},
+    forceUpdate: throttledForceUpdate = () => {}
+  } = throttledCallbacks || {};
 
   // Enhanced active handle change with throttling awareness
   const handleActiveHandleChange = useCallback((index) => {
@@ -88,17 +93,30 @@ export const useOptimizedColorWheelState = (options = {}) => {
 
   // Enhanced color wheel callbacks with performance optimization
   const handleColorsChange = useCallback((colors) => {
+    // Ensure colors is always an array of hex strings
+    const hexColors = Array.isArray(colors) ? colors.filter(color => 
+      typeof color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(color)
+    ) : [];
+    
+    if (__DEV__ && hexColors.length !== colors?.length) {
+      console.warn('⚠️ Filtered non-hex colors from palette:', {
+        original: colors?.length || 0,
+        filtered: hexColors.length,
+        invalid: colors?.filter(c => typeof c !== 'string' || !/^#[0-9A-Fa-f]{6}$/.test(c))
+      });
+    }
+    
     try {
       // Optimized palette analysis with caching (with error handling)
-      const paletteAnalysis = analyzePalette ? analyzePalette(colors) : null;
-      const contrastAnalysis = analyzePaletteContrast ? analyzePaletteContrast(colors) : null;
-      const schemeValidation = validateColorScheme ? validateColorScheme(colors, selectedScheme) : null;
+      const paletteAnalysis = analyzePalette ? analyzePalette(hexColors) : null;
+      const contrastAnalysis = analyzePaletteContrast ? analyzePaletteContrast(hexColors) : null;
+      const schemeValidation = validateColorScheme ? validateColorScheme(hexColors, selectedScheme) : null;
       
       // Log performance insights (development only)
       if (__DEV__) {
         const cacheStats = getCacheStats ? getCacheStats() : null;
         console.log('🎨 Palette Analysis:', {
-          colors: colors.length,
+          colors: hexColors.length,
           cacheStats,
           contrastIssues: contrastAnalysis?.issues?.length || 0,
           schemeValid: schemeValidation?.isValid || false
@@ -110,14 +128,22 @@ export const useOptimizedColorWheelState = (options = {}) => {
       }
     }
     
-    // Ensure palette state is updated for API calls
-    setPalette(colors);
+    // Ensure palette state is updated with validated hex strings
+    setPalette(hexColors);
     
     // Call the throttled gesture handler
-    onGestureChange(colors, activeIdx);
-  }, [onGestureChange, activeIdx, analyzePalette, analyzePaletteContrast, validateColorScheme, selectedScheme, getCacheStats]);
+    throttledGestureChange(hexColors, activeIdx);
+  }, [throttledGestureChange, activeIdx, analyzePalette, analyzePaletteContrast, validateColorScheme, selectedScheme, getCacheStats]);
 
   const handleHexChange = useCallback((hex) => {
+    // Validate hex string format
+    if (typeof hex !== 'string' || !/^#[0-9A-Fa-f]{6}$/.test(hex)) {
+      if (__DEV__) {
+        console.warn('⚠️ Invalid hex color provided to handleHexChange:', hex);
+      }
+      return;
+    }
+    
     try {
       // Optimized single color analysis with caching (with error handling)
       const colorAnalysis = analyzeColor ? analyzeColor(hex) : null;
@@ -145,14 +171,18 @@ export const useOptimizedColorWheelState = (options = {}) => {
 
   const handleActiveHandleChangeInternal = useCallback((index) => {
     setActiveIdx(index);
-    handleActiveHandleChange(index);
+    
+    // Call external callback if provided
+    if (externalOnActiveHandleChange) {
+      externalOnActiveHandleChange(index);
+    }
     
     // Update selected color immediately when active handle changes
     if (selectedFollowsActive && palette[index]) {
       setSelectedColor(palette[index]);
       setBaseHex(palette[index]);
     }
-  }, [handleActiveHandleChange, selectedFollowsActive, palette]);
+  }, [externalOnActiveHandleChange, selectedFollowsActive, palette]);
 
   // HSL input handlers (enhanced with immediate updates)
   const updateHslInput = useCallback((component, value) => {
@@ -167,12 +197,12 @@ export const useOptimizedColorWheelState = (options = {}) => {
     const newPalette = [...palette];
     newPalette[activeIdx] = newHex;
     
-    forceUpdate(newPalette, activeIdx);
+    throttledForceUpdate(newPalette, activeIdx);
     
-    if (wheelRef?.current?.updateColor) {
-      wheelRef.current.updateColor(activeIdx, h, s / 100, l / 100);
+    if (wheelRef?.current?.setHandleHSL) {
+      wheelRef.current.setHandleHSL(activeIdx, h, s, l);
     }
-  }, [hslInputs, palette, activeIdx, forceUpdate]);
+  }, [hslInputs, palette, activeIdx, throttledForceUpdate]);
 
   const updateColorWheelLive = useCallback((component, value, wheelRef) => {
     const newInputs = { ...hslInputs, [component]: value };
@@ -183,8 +213,8 @@ export const useOptimizedColorWheelState = (options = {}) => {
     setSelectedColor(newHex);
     setBaseHex(newHex);
     
-    if (wheelRef?.current?.updateColor) {
-      wheelRef.current.updateColor(activeIdx, h, s / 100, l / 100);
+    if (wheelRef?.current?.setHandleHSL) {
+      wheelRef.current.setHandleHSL(activeIdx, h, s, l);
     }
   }, [hslInputs, activeIdx]);
 
@@ -192,19 +222,20 @@ export const useOptimizedColorWheelState = (options = {}) => {
   const resetScheme = useCallback(() => {
     const newPalette = [baseHex];
     setPalette(newPalette);
-    forceUpdate(newPalette, 0);
-  }, [baseHex, forceUpdate]);
+    throttledForceUpdate(newPalette, 0);
+  }, [baseHex, throttledForceUpdate]);
 
   const randomize = useCallback(() => {
-    const newColor = generateRandomColor();
+    const randomHsl = generateRandomColor();
+    const newColor = hslToHex(randomHsl.h, randomHsl.s, randomHsl.l);
     const newPalette = [newColor];
     
     setSelectedColor(newColor);
     setBaseHex(newColor);
     setPalette(newPalette);
     
-    forceUpdate(newPalette, 0);
-  }, [forceUpdate]);
+    throttledForceUpdate(newPalette, 0);
+  }, [throttledForceUpdate]);
 
   // Toggle handlers (same as original)
   const toggleLinked = useCallback(() => {
@@ -226,15 +257,23 @@ export const useOptimizedColorWheelState = (options = {}) => {
 
   const handleExtractorComplete = useCallback((extractedColors) => {
     if (extractedColors && extractedColors.length > 0) {
-      const newPalette = extractedColors.slice(0, 5);
-      setPalette(newPalette);
-      setSelectedColor(newPalette[0]);
-      setBaseHex(newPalette[0]);
+      // Validate and filter extracted colors to ensure they are hex strings
+      const validColors = extractedColors
+        .slice(0, 5)
+        .filter(color => typeof color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(color));
       
-      forceUpdate(newPalette, 0);
+      if (validColors.length > 0) {
+        setPalette(validColors);
+        setSelectedColor(validColors[0]);
+        setBaseHex(validColors[0]);
+        
+        throttledForceUpdate(validColors, 0);
+      } else if (__DEV__) {
+        console.warn('⚠️ No valid hex colors extracted from:', extractedColors);
+      }
     }
     setShowExtractor(false);
-  }, [forceUpdate]);
+  }, [throttledForceUpdate]);
 
   // Return enhanced state and handlers
   return {
@@ -269,17 +308,17 @@ export const useOptimizedColorWheelState = (options = {}) => {
 
     // Gesture lifecycle callbacks for enhanced performance
     onGestureStart: useCallback((colors, index) => {
-      onGestureStart(colors, index);
+      throttledGestureStart(colors, index);
       setActiveIdx(index);
-    }, [onGestureStart]),
+    }, [throttledGestureStart]),
 
     onGestureEnd: useCallback((colors, index) => {
-      onGestureEnd(colors, index);
-    }, [onGestureEnd]),
+      throttledGestureEnd(colors, index);
+    }, [throttledGestureEnd]),
 
     // Utility functions
     forceUpdate: useCallback((colors, index) => {
-      forceUpdate(colors, index);
-    }, [forceUpdate])
+      throttledForceUpdate(colors, index);
+    }, [throttledForceUpdate])
   };
 };

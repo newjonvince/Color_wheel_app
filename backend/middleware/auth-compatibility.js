@@ -47,6 +47,12 @@ const authenticateTokenCompat = async (req, res, next) => {
       }
     }
 
+    // Defensive token payload validation
+    if (!decoded || !decoded.userId || !decoded.jti) {
+      res.set('WWW-Authenticate', 'Bearer realm="API"');
+      return res.status(401).json({ error: 'unauthorized', message: 'Invalid token payload' });
+    }
+
     // Try new JTI-based session lookup first
     let sessionResult;
     if (decoded.jti) {

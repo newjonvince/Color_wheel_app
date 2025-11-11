@@ -1,9 +1,10 @@
 // services/authService.js - Authentication business logic
 
+const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcryptjs');
 const { query } = require('../config/database');
 const { ERROR_MESSAGES, SUCCESS_MESSAGES } = require('../constants');
-const { generateSecureToken, generateRefreshToken, createSessionData, verifySecureToken } = require('../utils/jwt');
+const { generateSecureToken, generateSecureRefreshToken, createSessionData, verifySecureToken, verifyRefreshTokenHash } = require('../utils/jwt');
 
 class AuthService {
   /**
@@ -218,7 +219,7 @@ class AuthService {
       { expiresIn: '7d' }
     );
     
-    const refreshData = generateRefreshToken(
+    const refreshData = generateSecureRefreshToken(
       { userId: user.id, email: user.email },
       tokenData.jti
     );
@@ -232,11 +233,11 @@ class AuthService {
       userAgent
     });
     
-    // Insert session into database
+    // Insert session into database with hashed refresh token
     const sessionResult = await query(
       `INSERT INTO user_sessions (
         user_id, jti, expires_at, ip_address, user_agent, 
-        created_at, revoked_at, refresh_count, refresh_jti, refresh_expires_at
+        created_at, revoked_at, refresh_count, refresh_token_hash, refresh_expires_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         sessionData.user_id,
@@ -247,16 +248,19 @@ class AuthService {
         sessionData.created_at,
         sessionData.revoked_at,
         sessionData.refresh_count,
-        refreshData.jti,
+        refreshData.tokenHash, // Store hash instead of raw JTI
         refreshData.expiresAt
       ]
     );
+    
+    // DB-driver-agnostic insertId handling (MySQL vs PostgreSQL compatibility)
+    const insertId = sessionResult.insertId ?? sessionResult.insert_id ?? sessionResult.rows?.[0]?.id ?? null;
     
     return {
       accessToken: tokenData.token,
       refreshToken: refreshData.refreshToken,
       expiresAt: tokenData.expiresAt,
-      sessionId: sessionResult.insertId
+      sessionId: insertId
     };
   }
 

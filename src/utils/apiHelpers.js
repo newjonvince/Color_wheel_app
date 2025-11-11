@@ -1,5 +1,4 @@
 // utils/apiHelpers.js - Shared API utility functions
-import { Alert } from 'react-native';
 import ApiService from '../services/safeApiService';
 
 /**
@@ -10,7 +9,6 @@ import ApiService from '../services/safeApiService';
 export const safeApiCall = async (apiCall, options = {}) => {
   const { 
     errorMessage = 'An error occurred',
-    showAlert = true,
     retryCount = 0 
   } = options;
 
@@ -22,14 +20,28 @@ export const safeApiCall = async (apiCall, options = {}) => {
   } catch (error) {
     console.error('API call failed:', error);
     
-    // Handle specific error types
-    if (error.message?.includes('Authentication required') && showAlert) {
-      Alert.alert('Authentication Error', 'Please log in again');
-    } else if (showAlert) {
-      Alert.alert('Error', errorMessage);
+    // Return structured error information for caller to handle UI
+    const errorInfo = {
+      success: false,
+      error,
+      errorType: 'unknown',
+      userMessage: errorMessage,
+      shouldShowAlert: true
+    };
+
+    // Classify error types for better handling
+    if (error.message?.includes('Authentication required')) {
+      errorInfo.errorType = 'authentication';
+      errorInfo.userMessage = 'Please log in again';
+    } else if (error.message?.includes('Network Error') || error.message?.includes('fetch')) {
+      errorInfo.errorType = 'network';
+      errorInfo.userMessage = 'Network connection failed. Please check your internet connection.';
+    } else if (error.message?.includes('timeout')) {
+      errorInfo.errorType = 'timeout';
+      errorInfo.userMessage = 'Request timed out. Please try again.';
     }
     
-    return { success: false, error };
+    return errorInfo;
   }
 };
 
@@ -131,20 +143,25 @@ export const apiPatterns = {
     return safeApiCall(
       () => ApiService.register(registrationData),
       { 
-        errorMessage: 'Registration failed. Please try again.',
-        showAlert: true 
+        errorMessage: 'Registration failed. Please try again.'
       }
     );
   },
 
   // Username availability check pattern
   checkUsernameAvailability: async (username) => {
-    return safeApiCall(
+    const result = await safeApiCall(
       () => ApiService.checkUsername(username),
       { 
-        errorMessage: 'Failed to check username availability',
-        showAlert: false 
+        errorMessage: 'Failed to check username availability'
       }
     );
+    
+    // For username checks, don't show alerts by default
+    if (!result.success) {
+      result.shouldShowAlert = false;
+    }
+    
+    return result;
   }
 };
