@@ -36,7 +36,6 @@ export const AppNavigation = ({
       onSaveColorMatch={saveColorMatch}
       onLogout={handleLogout}
       onRetry={retryLoadColorWheel}
-      navigation={props?.navigation}
     />
   ), [wheelReloadNonce, user, saveColorMatch, handleLogout, retryLoadColorWheel]);
 

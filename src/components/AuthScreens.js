@@ -14,7 +14,7 @@ export const AuthScreens = ({
   handleSignUpComplete,
 }) => (
   <SafeAreaProvider>
-    <SafeAreaView style={{ flex: 1 }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#f8f9fa' }}>
       <StatusBar style={getStatusBarStyle()} />
       {showSignUp ? (
         screens.SignUpScreen ? (

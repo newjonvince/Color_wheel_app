@@ -27,7 +27,7 @@ const COUNTRIES = [
   'India', 'China', 'Other'
 ];
 
-export default function SignUpScreen({ onSignUpComplete, onBack }) {
+export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
   const [currentStep, setCurrentStep] = useState(SIGNUP_STEPS.EMAIL);
   const [formData, setFormData] = useState({
     email: '',
@@ -240,7 +240,7 @@ export default function SignUpScreen({ onSignUpComplete, onBack }) {
   const handleBack = () => {
     switch (currentStep) {
       case SIGNUP_STEPS.EMAIL:
-        onBack();
+        onBackToLogin();
         break;
       case SIGNUP_STEPS.PASSWORD:
         setCurrentStep(SIGNUP_STEPS.EMAIL);
