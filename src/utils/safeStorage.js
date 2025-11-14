@@ -47,6 +47,7 @@ class OptimizedSafeStorage {
     this.isSecureStoreAvailable = false;
     this.isInitialized = false;
     this.asyncStorageUnavailable = false; // Track AsyncStorage availability
+    this.secureStoreUnavailable = false; // Track SecureStore availability
     this.cache = new Map();
     this.pendingOperations = new Map();
     this.batchQueue = [];
@@ -113,10 +114,31 @@ class OptimizedSafeStorage {
         this.asyncStorageUnavailable = true;
       }
 
-      // Test SecureStore availability (optional dependency)
+      // Test SecureStore availability (optional dependency) with timeout protection
       if (this.secureStore) {
         try {
-          this.isSecureStoreAvailable = await this.secureStore.isAvailableAsync();
+          // Manual timeout management for SecureStore (safer than Promise.race)
+          const secureTest = this.secureStore.isAvailableAsync();
+
+          const secureOperation = new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(
+              () => reject(new Error('SecureStore availability test timeout')),
+              3000 // 3 second timeout for keychain access
+            );
+
+            secureTest.then(
+              (result) => {
+                clearTimeout(timeoutId);
+                resolve(result);
+              },
+              (error) => {
+                clearTimeout(timeoutId);
+                reject(error);
+              }
+            );
+          });
+
+          this.isSecureStoreAvailable = await secureOperation;
           if (__DEV__) {
             console.log('🔐 SecureStore test:', this.isSecureStoreAvailable ? '✅ Available' : '❌ Not available');
           }
@@ -124,9 +146,13 @@ class OptimizedSafeStorage {
           console.warn('SecureStore availability check failed:', secureError.message);
           reportError(secureError, 'SecureStore availability check failed');
           this.isSecureStoreAvailable = false;
+          
+          // Mark SecureStore as unavailable to prevent future crashes
+          this.secureStoreUnavailable = true;
         }
       } else {
         this.isSecureStoreAvailable = false;
+        this.secureStoreUnavailable = true;
       }
       
       this.isInitialized = true;
@@ -275,22 +301,31 @@ class OptimizedSafeStorage {
 
     try {
       // Try SecureStore first for sensitive data
-      if (isSensitive && this.isSecureStoreAvailable && this.secureStore) {
-        const value = await this.secureStore.getItemAsync(key, CONFIG.SECURE_STORE_OPTIONS);
-        if (value !== null) {
-          // Handle TTL wrapped values
-          try {
-            const parsed = JSON.parse(value);
-            if (parsed.expires && Date.now() > parsed.expires) {
-              // Expired, remove it
-              await this.secureStore.deleteItemAsync(key, CONFIG.SECURE_STORE_OPTIONS);
-              return null;
+      if (isSensitive && this.isSecureStoreAvailable && this.secureStore && !this.secureStoreUnavailable) {
+        try {
+          const value = await this.secureStore.getItemAsync(key, CONFIG.SECURE_STORE_OPTIONS);
+          if (value !== null) {
+            // Handle TTL wrapped values
+            try {
+              const parsed = JSON.parse(value);
+              if (parsed.expires && Date.now() > parsed.expires) {
+                // Expired, remove it
+                await this.secureStore.deleteItemAsync(key, CONFIG.SECURE_STORE_OPTIONS);
+                return null;
+              }
+              return parsed.value || value;
+            } catch {
+              // Not wrapped, return as-is
+              return value;
             }
-            return parsed.value || value;
-          } catch {
-            // Not wrapped, return as-is
-            return value;
           }
+        } catch (secureError) {
+          console.warn(`SecureStore.getItem failed for key '${key}':`, secureError.message);
+          reportError(secureError, `SecureStore.getItem failed for key: ${key}`);
+          
+          // Mark SecureStore as unavailable to prevent future crashes
+          this.secureStoreUnavailable = true;
+          // Continue to AsyncStorage fallback
         }
       }
 
@@ -349,7 +384,7 @@ class OptimizedSafeStorage {
       let success = false;
 
       // Try SecureStore first for sensitive data
-      if (isSensitive && this.isSecureStoreAvailable && this.secureStore) {
+      if (isSensitive && this.isSecureStoreAvailable && this.secureStore && !this.secureStoreUnavailable) {
         try {
           if (ttl) {
             // SecureStore doesn't support TTL, but we can add metadata
@@ -364,6 +399,10 @@ class OptimizedSafeStorage {
           success = true;
         } catch (secureError) {
           console.warn(`SecureStore failed for ${key}, falling back to AsyncStorage:`, secureError.message);
+          reportError(secureError, `SecureStore.setItem failed for key: ${key}`);
+          
+          // Mark SecureStore as unavailable to prevent future crashes
+          this.secureStoreUnavailable = true;
         }
       }
 
@@ -428,10 +467,14 @@ class OptimizedSafeStorage {
         })
       );
 
-      if (this.isSecureStoreAvailable && this.secureStore) {
+      if (this.isSecureStoreAvailable && this.secureStore && !this.secureStoreUnavailable) {
         promises.push(
-          this.secureStore.deleteItemAsync(key).catch(() => {
-            // Ignore errors if key doesn't exist in SecureStore
+          this.secureStore.deleteItemAsync(key).catch((secureError) => {
+            console.warn(`SecureStore.deleteItem failed for key '${key}':`, secureError.message);
+            reportError(secureError, `SecureStore.deleteItem failed for key: ${key}`);
+            
+            // Mark SecureStore as unavailable to prevent future crashes
+            this.secureStoreUnavailable = true;
           })
         );
       }
