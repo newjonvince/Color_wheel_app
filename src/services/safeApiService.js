@@ -9,11 +9,20 @@ const CancelToken = axios.CancelToken;
 const getApiBaseUrl = () => {
   try {
     const Constants = require('expo-constants').default;
-    if (Constants?.expoConfig?.extra?.EXPO_PUBLIC_API_BASE_URL) {
-      return Constants.expoConfig.extra.EXPO_PUBLIC_API_BASE_URL;
+    
+    // Safe access to expo config with type validation
+    const expoConfig = Constants?.expoConfig;
+    const extra = expoConfig && typeof expoConfig === 'object' ? expoConfig.extra : null;
+    const apiUrl = extra && typeof extra === 'object' ? extra.EXPO_PUBLIC_API_BASE_URL : null;
+    
+    if (apiUrl && typeof apiUrl === 'string') {
+      return apiUrl;
     }
   } catch (error) {
     console.warn('Failed to load Expo Constants:', error.message);
+    if (__DEV__) {
+      console.error('Expo Constants error details:', error);
+    }
   }
   
   return process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || 'https://colorwheelapp-production.up.railway.app';

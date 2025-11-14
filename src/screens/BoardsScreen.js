@@ -112,14 +112,23 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
       return;
     }
 
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+    // Safe ImagePicker options with type validation
+    const pickerOptions = {
+      mediaTypes: ImagePicker.MediaTypeOptions?.Images || 'Images',
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.9,
-    });
+    };
+    
+    const result = await ImagePicker.launchImageLibraryAsync(pickerOptions);
 
     if (result.canceled) return;
+
+    // Safe array access with validation
+    if (!Array.isArray(result.assets) || result.assets.length === 0 || !result.assets[0]?.uri) {
+      Alert.alert('Error', 'Failed to process selected image');
+      return;
+    }
 
     // NEW IDEAL FLOW: Open CoolorsColorExtractor for real color extraction
     setSelectedImageUri(result.assets[0].uri);

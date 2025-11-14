@@ -256,12 +256,17 @@ export default function CoolorsColorExtractor({
 
   const pickImage = useCallback(async () => {
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      // Safe ImagePicker options with type validation
+      const pickerOptions = {
+        mediaTypes: ImagePicker.MediaTypeOptions?.Images || 'Images',
         allowsEditing: false,
         quality: 0.9,
-      });
-      if (!result.canceled && result.assets?.[0]) {
+      };
+      
+      const result = await ImagePicker.launchImageLibraryAsync(pickerOptions);
+      
+      // Safe array access with validation
+      if (!result.canceled && Array.isArray(result.assets) && result.assets.length > 0 && result.assets[0]) {
         await processImage(result.assets[0]);
       } else {
         onClose?.();
@@ -293,10 +298,21 @@ export default function CoolorsColorExtractor({
         onClose?.();
         return;
       }
+      // Safe ImagePicker calls with type validation
+      const cameraOptions = { quality: 0.9 };
+      const libraryOptions = { 
+        mediaTypes: ImagePicker.MediaTypeOptions?.Images || 'Images', 
+        quality: 0.9 
+      };
+      
       const result = await (mode === 'camera'
-        ? ImagePicker.launchCameraAsync({ quality: 0.9 })
-        : ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.9 }));
-      if (!result?.canceled && result.assets?.[0]) await processImage(result.assets[0]);
+        ? ImagePicker.launchCameraAsync(cameraOptions)
+        : ImagePicker.launchImageLibraryAsync(libraryOptions));
+        
+      // Safe array access with validation
+      if (!result?.canceled && Array.isArray(result.assets) && result.assets.length > 0 && result.assets[0]) {
+        await processImage(result.assets[0]);
+      }
       else onClose?.();
     })();
   }, [initialImageUri, mode, onClose, processImage]);
