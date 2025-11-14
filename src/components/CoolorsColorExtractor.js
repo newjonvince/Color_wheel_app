@@ -256,26 +256,67 @@ export default function CoolorsColorExtractor({
 
   const pickImage = useCallback(async () => {
     try {
-      // Safe ImagePicker options with type validation
+      // Enhanced type safety for ImagePicker to prevent Swift runtime crashes
+      if (!ImagePicker || typeof ImagePicker.launchImageLibraryAsync !== 'function') {
+        throw new Error('ImagePicker module not available');
+      }
+
+      // Validate MediaTypeOptions exists and has Images property
+      const mediaTypeImages = ImagePicker.MediaTypeOptions?.Images || 
+                             ImagePicker.MediaTypeOptions?.['Images'] || 
+                             'Images';
+
+      // Safe ImagePicker options with comprehensive type validation
       const pickerOptions = {
-        mediaTypes: ImagePicker.MediaTypeOptions?.Images || 'Images',
+        mediaTypes: mediaTypeImages,
         allowsEditing: false,
         quality: 0.9,
+        // Add explicit type constraints to prevent Swift casting errors
+        allowsMultipleSelection: false,
+        base64: false,
+        exif: false,
       };
       
       const result = await ImagePicker.launchImageLibraryAsync(pickerOptions);
       
-      // Safe array access with validation
-      if (!result.canceled && Array.isArray(result.assets) && result.assets.length > 0 && result.assets[0]) {
-        await processImage(result.assets[0]);
+      // Enhanced result validation to prevent Swift collection iterator failures
+      if (result && 
+          typeof result === 'object' && 
+          !result.canceled && 
+          result.assets && 
+          Array.isArray(result.assets) && 
+          result.assets.length > 0) {
+        
+        const asset = result.assets[0];
+        // Validate asset object structure before processing
+        if (asset && 
+            typeof asset === 'object' && 
+            asset.uri && 
+            typeof asset.uri === 'string' && 
+            asset.uri.length > 0) {
+          await processImage(asset);
+        } else {
+          console.warn('Invalid asset structure from ImagePicker');
+          onClose?.();
+        }
       } else {
         onClose?.();
       }
     } catch (error) {
       if (__DEV__) {
         console.error('🚨 CoolorsColorExtractor Error in pickImage:', error);
-        console.error('Stack trace:', error.stack);
+        console.error('Error type:', typeof error);
+        console.error('Error name:', error?.name);
+        console.error('Error message:', error?.message);
+        console.error('Stack trace:', error?.stack);
       }
+      
+      // Enhanced error reporting for native module failures
+      const errorMessage = error?.message || 'Unknown error';
+      if (errorMessage.includes('Swift') || errorMessage.includes('native')) {
+        console.error('🚨 Native module error detected - potential Swift runtime issue');
+      }
+      
       Alert.alert('Error', 'Failed to select image');
       onClose?.();
     }

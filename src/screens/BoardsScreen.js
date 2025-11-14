@@ -106,26 +106,60 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
       return;
     }
 
+    // Enhanced type safety for ImagePicker to prevent Swift runtime crashes
+    if (!ImagePicker || typeof ImagePicker.requestMediaLibraryPermissionsAsync !== 'function') {
+      Alert.alert('Error', 'Image picker not available');
+      return;
+    }
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
+    if (!permission || !permission.granted) {
       Alert.alert('Permission Required', 'Permission to access your photos is required.');
       return;
     }
 
-    // Safe ImagePicker options with type validation
+    // Enhanced type safety for ImagePicker options
+    if (!ImagePicker.launchImageLibraryAsync || typeof ImagePicker.launchImageLibraryAsync !== 'function') {
+      Alert.alert('Error', 'Image picker functionality not available');
+      return;
+    }
+
+    // Validate MediaTypeOptions exists and has Images property
+    const mediaTypeImages = ImagePicker.MediaTypeOptions?.Images || 
+                           ImagePicker.MediaTypeOptions?.['Images'] || 
+                           'Images';
+
+    // Safe ImagePicker options with comprehensive type validation
     const pickerOptions = {
-      mediaTypes: ImagePicker.MediaTypeOptions?.Images || 'Images',
+      mediaTypes: mediaTypeImages,
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.9,
+      // Add explicit type constraints to prevent Swift casting errors
+      allowsMultipleSelection: false,
+      base64: false,
+      exif: false,
     };
     
     const result = await ImagePicker.launchImageLibraryAsync(pickerOptions);
 
-    if (result.canceled) return;
+    // Enhanced result validation to prevent Swift collection iterator failures
+    if (!result || typeof result !== 'object' || result.canceled) return;
 
-    // Safe array access with validation
-    if (!Array.isArray(result.assets) || result.assets.length === 0 || !result.assets[0]?.uri) {
+    // Comprehensive array and asset validation
+    if (!result.assets || 
+        !Array.isArray(result.assets) || 
+        result.assets.length === 0) {
+      Alert.alert('Error', 'No image selected');
+      return;
+    }
+
+    const asset = result.assets[0];
+    if (!asset || 
+        typeof asset !== 'object' || 
+        !asset.uri || 
+        typeof asset.uri !== 'string' || 
+        asset.uri.length === 0) {
       Alert.alert('Error', 'Failed to process selected image');
       return;
     }

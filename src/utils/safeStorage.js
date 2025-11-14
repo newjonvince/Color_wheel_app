@@ -321,6 +321,16 @@ class OptimizedSafeStorage {
           }
         } catch (secureError) {
           console.warn(`SecureStore.getItem failed for key '${key}':`, secureError.message);
+          
+          // Enhanced error detection for Swift runtime issues
+          const errorMessage = secureError?.message || '';
+          if (errorMessage.includes('Swift') || 
+              errorMessage.includes('native') || 
+              errorMessage.includes('metadata') ||
+              errorMessage.includes('collection')) {
+            console.error('🚨 Swift runtime error detected in SecureStore operation');
+          }
+          
           reportError(secureError, `SecureStore.getItem failed for key: ${key}`);
           
           // Mark SecureStore as unavailable to prevent future crashes
