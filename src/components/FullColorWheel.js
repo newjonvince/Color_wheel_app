@@ -22,7 +22,9 @@ const REANIMATED_READY = (() => {
   try {
     return typeof global?.__reanimatedWorkletInit === 'function';
   } catch (e) {
-    if (!__DEV__) console.log('Reanimated worklet init check failed:', e.message);
+    if (__DEV__) {
+      console.log('Reanimated worklet init check failed:', e.message);
+    }
     return false;
   }
 })();
@@ -50,7 +52,9 @@ try {
     vec = Skia.vec;
   }
 } catch (e) {
-  if (!__DEV__) console.log('Skia module load failed on', Platform.OS + ':', e.message);
+  if (__DEV__) {
+    console.log('Skia module load failed on', Platform.OS + ':', e.message);
+  }
   Canvas = View;
   SkiaCircle = () => null;
   SweepGradient = () => null;
@@ -61,6 +65,11 @@ try {
 
 // Import constants from shared location
 export { SCHEME_OFFSETS, SCHEME_COUNTS } from '../constants/colorWheelConstants';
+
+// JS helper functions for worklet callbacks (defined at top-level for performance)
+const addFreedIndex = (freedRef, index) => {
+  freedRef.current.add(index);
+};
 
 // Helper: run callback on JS when invoked from a worklet
 const callJS = (fn, ...args) => {
@@ -340,7 +349,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
           arr.push(idx);
           freedIdxSV.value = arr;
         }
-        callJS((k) => { freed.current.add(k); }, idx);
+        callJS(addFreedIndex, freed, idx);
       }
       
       emitPalette();

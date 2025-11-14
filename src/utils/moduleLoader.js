@@ -1,6 +1,6 @@
 // utils/moduleLoader.js - Safe module loading with fallbacks
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, Platform } from 'react-native';
 
 // Safe module loader with fallbacks
 export const loadModules = () => {
@@ -30,7 +30,9 @@ export const loadModules = () => {
     
     modules.ApiService = require('../services/safeApiService').default;
     
-    if (!__DEV__) console.log('App modules loaded successfully');
+    if (__DEV__) {
+      console.log('App modules loaded successfully');
+    }
   } catch (e) {
     console.error('FATAL: Module import failed at launch:', e?.message);
     console.error('Stack:', e?.stack);
@@ -63,7 +65,9 @@ export const loadScreens = () => {
     screens.SignUpScreen = require('../screens/SignUpScreen').default;
     screens.UserSettingsScreen = require('../screens/UserSettingsScreen').default;
     
-    if (!__DEV__) console.log('All screen modules loaded successfully');
+    if (__DEV__) {
+      console.log('All screen modules loaded successfully');
+    }
   } catch (e) {
     console.error('Screen module load error:', e?.message);
     console.error('Stack:', e?.stack);
@@ -96,9 +100,13 @@ export const loadColorWheelScreen = () => {
 
   try { 
     ColorWheelScreen = require('../screens/ColorWheelScreen/index').default; 
-    if (!__DEV__) console.log('ColorWheelScreen loaded successfully');
+    if (__DEV__) {
+      console.log('ColorWheelScreen loaded successfully');
+    }
   } catch (e) {
-    if (!__DEV__) console.log('ColorWheelScreen load failed:', e?.message);
+    if (__DEV__) {
+      console.log('ColorWheelScreen load failed on', Platform.OS + ':', e?.message);
+    }
     console.error('Critical module load error:', e);
     error = e;
     

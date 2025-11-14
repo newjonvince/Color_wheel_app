@@ -13,6 +13,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
     onColorsChange: externalOnColorsChange,
     onHexChange: externalOnHexChange,
     onActiveHandleChange: externalOnActiveHandleChange,
+    wheelRef,
   } = options;
 
   // Core state (same as original)
@@ -33,45 +34,38 @@ export const useOptimizedColorWheelState = (options = {}) => {
     l: String(Math.round(hsl.l)),
   });
 
-  // Set up optimized color processing with caching (with safe fallbacks)
-  const colorProcessing = useOptimizedColorProcessing ? useOptimizedColorProcessing() : {};
+  // Set up optimized color processing with caching
   const {
     analyzeColor = null,
     analyzePalette = null,
     analyzePaletteContrast = null,
     validateColorScheme = null,
     getCacheStats = null
-  } = colorProcessing || {};
+  } = useOptimizedColorProcessing();
 
-  // Set up throttled callbacks for performance (with safe fallbacks)
-  const throttledCallbacks = useThrottledCallbacks ? useThrottledCallbacks({
+  // Set up throttled callbacks for performance
+  const {
+    onGestureStart,
+    onGestureChange,
+    onGestureEnd,
+    handleColorUpdate,
+    forceUpdate,
+  } = useThrottledCallbacks({
     onColorsChange: useCallback((colors) => {
       setPalette(colors);
-      if (externalOnColorsChange) {
-        externalOnColorsChange(colors);
-      }
+      externalOnColorsChange?.(colors);
     }, [externalOnColorsChange]),
     
     onHexChange: useCallback((hex) => {
       setSelectedColor(hex);
       setBaseHex(hex);
-      if (externalOnHexChange) {
-        externalOnHexChange(hex);
-      }
+      externalOnHexChange?.(hex);
     }, [externalOnHexChange]),
     
     selectedFollowsActive,
     throttleFps,
     immediateFps,
-  }) : {};
-  
-  const {
-    onGestureStart: throttledGestureStart = () => {},
-    onGestureChange: throttledGestureChange = () => {},
-    onGestureEnd: throttledGestureEnd = () => {},
-    handleColorUpdate: throttledColorUpdate = () => {},
-    forceUpdate: throttledForceUpdate = () => {}
-  } = throttledCallbacks || {};
+  });
 
   // Enhanced active handle change with throttling awareness
   const handleActiveHandleChange = useCallback((index) => {
@@ -92,48 +86,46 @@ export const useOptimizedColorWheelState = (options = {}) => {
   }, [selectedColor]);
 
   // Enhanced color wheel callbacks with performance optimization
-  const handleColorsChange = useCallback((colors) => {
-    // Ensure colors is always an array of hex strings
-    const hexColors = Array.isArray(colors) ? colors.filter(color => 
+  const handleColorsChange = useCallback((colors, phase = 'change') => {
+    // Ensure colors is an array and filter to valid hex strings
+    const list = Array.isArray(colors) ? colors : [];
+    const hexColors = list.filter(color => 
       typeof color === 'string' && /^#[0-9A-Fa-f]{6}$/.test(color)
-    ) : [];
+    );
+
+    // Ensure palette state is updated with validated hex strings
+    setPalette(hexColors);
     
-    if (__DEV__ && hexColors.length !== colors?.length) {
-      console.warn('⚠️ Filtered non-hex colors from palette:', {
-        original: colors?.length || 0,
-        filtered: hexColors.length,
-        invalid: colors?.filter(c => typeof c !== 'string' || !/^#[0-9A-Fa-f]{6}$/.test(c))
-      });
+    // Call the throttled gesture handler
+    onGestureChange(hexColors, activeIdx);
+
+    if (phase !== 'end') {
+      // During drag: skip heavy analysis for performance
+      return;
     }
-    
+
+    // Enhanced optimization with caching and analysis - only at gesture end
     try {
-      // Optimized palette analysis with caching (with error handling)
-      const paletteAnalysis = analyzePalette ? analyzePalette(hexColors) : null;
-      const contrastAnalysis = analyzePaletteContrast ? analyzePaletteContrast(hexColors) : null;
-      const schemeValidation = validateColorScheme ? validateColorScheme(hexColors, selectedScheme) : null;
-      
-      // Log performance insights (development only)
-      if (__DEV__) {
-        const cacheStats = getCacheStats ? getCacheStats() : null;
-        console.log('🎨 Palette Analysis:', {
-          colors: hexColors.length,
-          cacheStats,
-          contrastIssues: contrastAnalysis?.issues?.length || 0,
-          schemeValid: schemeValidation?.isValid || false
-        });
+      if (analyzeColor && analyzePalette && analyzePaletteContrast && validateColorScheme) {
+        const paletteAnalysis = analyzePalette(hexColors);
+        const contrastAnalysis = analyzePaletteContrast(hexColors);
+        const schemeValidation = validateColorScheme(hexColors, selectedScheme);
+        
+        if (__DEV__ && getCacheStats) {
+          const cacheStats = getCacheStats();
+          console.log('🎨 Color Processing Stats:', {
+            paletteSize: hexColors.length,
+            cacheStats,
+            analysis: { paletteAnalysis, contrastAnalysis, schemeValidation }
+          });
+        }
       }
     } catch (error) {
       if (__DEV__) {
         console.warn('⚠️ Optimization error (fallback to basic mode):', error);
       }
     }
-    
-    // Ensure palette state is updated with validated hex strings
-    setPalette(hexColors);
-    
-    // Call the throttled gesture handler
-    throttledGestureChange(hexColors, activeIdx);
-  }, [throttledGestureChange, activeIdx, analyzePalette, analyzePaletteContrast, validateColorScheme, selectedScheme, getCacheStats]);
+  }, [onGestureChange, activeIdx, analyzePalette, analyzePaletteContrast, validateColorScheme, selectedScheme, getCacheStats]);
 
   const handleHexChange = useCallback((hex) => {
     // Validate hex string format
@@ -189,7 +181,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
     setHslInputs(prev => ({ ...prev, [component]: value }));
   }, []);
 
-  const applyHslInputs = useCallback((wheelRef) => {
+  const applyHslInputs = useCallback(() => {
     const { h, s, l } = validateHSL(hslInputs.h, hslInputs.s, hslInputs.l);
     const newHex = hslToHex(h, s, l);
     
@@ -197,14 +189,15 @@ export const useOptimizedColorWheelState = (options = {}) => {
     const newPalette = [...palette];
     newPalette[activeIdx] = newHex;
     
-    throttledForceUpdate(newPalette, activeIdx);
+    forceUpdate(newPalette, activeIdx);
     
-    if (wheelRef?.current?.setHandleHSL) {
-      wheelRef.current.setHandleHSL(activeIdx, h, s, l);
+    const wheel = wheelRef?.current;
+    if (wheel?.setHandleHSL) {
+      wheel.setHandleHSL(activeIdx, h, s, l);
     }
-  }, [hslInputs, palette, activeIdx, throttledForceUpdate]);
+  }, [hslInputs, palette, activeIdx, forceUpdate, wheelRef]);
 
-  const updateColorWheelLive = useCallback((component, value, wheelRef) => {
+  const updateColorWheelLive = useCallback((component, value) => {
     const newInputs = { ...hslInputs, [component]: value };
     const { h, s, l } = validateHSL(newInputs.h, newInputs.s, newInputs.l);
     const newHex = hslToHex(h, s, l);
@@ -213,17 +206,18 @@ export const useOptimizedColorWheelState = (options = {}) => {
     setSelectedColor(newHex);
     setBaseHex(newHex);
     
-    if (wheelRef?.current?.setHandleHSL) {
-      wheelRef.current.setHandleHSL(activeIdx, h, s, l);
+    const wheel = wheelRef?.current;
+    if (wheel?.setHandleHSL) {
+      wheel.setHandleHSL(activeIdx, h, s, l);
     }
-  }, [hslInputs, activeIdx]);
+  }, [hslInputs, activeIdx, wheelRef]);
 
   // Scheme and control handlers (enhanced with performance awareness)
   const resetScheme = useCallback(() => {
     const newPalette = [baseHex];
     setPalette(newPalette);
-    throttledForceUpdate(newPalette, 0);
-  }, [baseHex, throttledForceUpdate]);
+    forceUpdate(newPalette, 0);
+  }, [baseHex, forceUpdate]);
 
   const randomize = useCallback(() => {
     const randomHsl = generateRandomColor();
@@ -234,8 +228,8 @@ export const useOptimizedColorWheelState = (options = {}) => {
     setBaseHex(newColor);
     setPalette(newPalette);
     
-    throttledForceUpdate(newPalette, 0);
-  }, [throttledForceUpdate]);
+    forceUpdate(newPalette, 0);
+  }, [forceUpdate]);
 
   // Toggle handlers (same as original)
   const toggleLinked = useCallback(() => {
@@ -267,13 +261,13 @@ export const useOptimizedColorWheelState = (options = {}) => {
         setSelectedColor(validColors[0]);
         setBaseHex(validColors[0]);
         
-        throttledForceUpdate(validColors, 0);
+        forceUpdate(validColors, 0);
       } else if (__DEV__) {
         console.warn('⚠️ No valid hex colors extracted from:', extractedColors);
       }
     }
     setShowExtractor(false);
-  }, [throttledForceUpdate]);
+  }, [forceUpdate]);
 
   // Return enhanced state and handlers
   return {
@@ -308,17 +302,12 @@ export const useOptimizedColorWheelState = (options = {}) => {
 
     // Gesture lifecycle callbacks for enhanced performance
     onGestureStart: useCallback((colors, index) => {
-      throttledGestureStart(colors, index);
       setActiveIdx(index);
-    }, [throttledGestureStart]),
+    }, []),
 
-    onGestureEnd: useCallback((colors, index) => {
-      throttledGestureEnd(colors, index);
-    }, [throttledGestureEnd]),
+    onGestureEnd,
 
     // Utility functions
-    forceUpdate: useCallback((colors, index) => {
-      throttledForceUpdate(colors, index);
-    }, [throttledForceUpdate])
+    forceUpdate
   };
 };

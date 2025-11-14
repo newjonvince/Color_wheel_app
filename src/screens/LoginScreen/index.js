@@ -1,82 +1,100 @@
-// index.js (LoginScreen)
 import React from 'react';
-import { SafeAreaView, KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import PropTypes from 'prop-types';
+
 import LoginHeader from './components/LoginHeader';
+import ErrorBanner from './components/ErrorBanner';
 import LoginForm from './components/LoginForm';
 import LoginButtons from './components/LoginButtons';
-import ErrorBanner from './components/ErrorBanner';
-import { optimizedStyles as styles, optimizedColors } from './styles';
+
 import { useOptimizedLoginState } from './useLoginState';
+import { optimizedStyles, optimizedColors } from './styles';
 
-export default function LoginScreen(props) {
-  // Call hook directly at top level - let Error Boundary handle any errors
+const LoginScreen = ({ onLoginSuccess }) => {
+  const state = useOptimizedLoginState(onLoginSuccess);
+
   const {
-    email = '',
-    password = '',
-    showPassword = false,
-    loading = false,
-    errors = {},
-    globalError = '',
-    focusedField = null,
-    emailRef = null,
-    passwordRef = null,
-    updateEmail = () => {},
-    updatePassword = () => {},
-    togglePasswordVisibility = () => {},
-    handleEmailFocus = () => {},
-    handlePasswordFocus = () => {},
-    handleBlur = () => {},
-    focusNextField = () => {},
-    handleLogin = () => {},
-    handleDemoLogin = () => {},
-  } = useOptimizedLoginState(props.onLoginSuccess) || {};
-
-  // Create props for components
-  const formProps = {
     email,
     password,
     showPassword,
+    loading,
     errors,
+    globalError,
     focusedField,
     emailRef,
     passwordRef,
-    onEmailChange: updateEmail,
-    onPasswordChange: updatePassword,
-    onTogglePassword: togglePasswordVisibility,
-    onEmailFocus: handleEmailFocus,
-    onPasswordFocus: handlePasswordFocus,
-    onBlur: handleBlur,
-    onFocusNext: focusNextField,
-    onSubmit: handleLogin,
-  };
+    updateEmail,
+    updatePassword,
+    togglePasswordVisibility,
+    handleEmailFocus,
+    handlePasswordFocus,
+    handleBlur,
+    focusNextField,
+    handleLogin,
+    handleDemoLogin,
+  } = state;
 
-  const buttonProps = {
-    loading,
-    onLogin: handleLogin,
-    onDemo: handleDemoLogin,
-    onSignUp: () => {}, // Placeholder for sign up functionality
-  };
+  const keyboardBehavior = Platform.OS === 'ios' ? 'padding' : 'height';
 
   return (
-    <SafeAreaView style={{ flex: 1 }}>
-      <KeyboardAvoidingView style={styles.keyboardAvoidingView} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <LinearGradient
-          colors={[optimizedColors.gradientStart, optimizedColors.gradientMid, optimizedColors.gradientEnd]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={{ flex: 1 }}
+    <LinearGradient
+      colors={[
+        optimizedColors.gradientStart,
+        optimizedColors.gradientMid,
+        optimizedColors.gradientEnd,
+      ]}
+      style={{ flex: 1 }}
+    >
+      <KeyboardAvoidingView
+        style={optimizedStyles.keyboardAvoidingView}
+        behavior={keyboardBehavior}
+      >
+        <ScrollView
+          contentContainerStyle={optimizedStyles.scrollContainer}
         >
-          <ScrollView contentContainerStyle={styles.scrollContainer} keyboardShouldPersistTaps="handled">
-            <LoginHeader />
-            <ErrorBanner message={globalError} />
-            <View style={styles.form}>
-              <LoginForm {...formProps} />
-              <LoginButtons {...buttonProps} />
-            </View>
-          </ScrollView>
-        </LinearGradient>
+          <LoginHeader />
+
+          <ErrorBanner message={globalError} />
+
+          <View style={optimizedStyles.form}>
+            <LoginForm
+              email={email}
+              password={password}
+              showPassword={showPassword}
+              errors={errors}
+              focusedField={focusedField}
+              emailRef={emailRef}
+              passwordRef={passwordRef}
+              onEmailChange={updateEmail}
+              onPasswordChange={updatePassword}
+              onTogglePassword={togglePasswordVisibility}
+              onEmailFocus={handleEmailFocus}
+              onPasswordFocus={handlePasswordFocus}
+              onBlur={handleBlur}
+              onFocusNext={focusNextField}
+              onSubmit={handleLogin}
+            />
+
+            <LoginButtons
+              loading={loading}
+              onLogin={handleLogin}
+              onDemo={handleDemoLogin}
+              onSignUp={() => {}}
+            />
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </LinearGradient>
   );
-}
+};
+
+LoginScreen.propTypes = {
+  onLoginSuccess: PropTypes.func,
+};
+
+LoginScreen.defaultProps = {
+  onLoginSuccess: () => {},
+};
+
+export default LoginScreen;

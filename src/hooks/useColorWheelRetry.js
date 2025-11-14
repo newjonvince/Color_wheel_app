@@ -1,29 +1,22 @@
 // hooks/useColorWheelRetry.js - ColorWheel retry logic
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 export const useColorWheelRetry = (Updates) => {
   const [wheelReloadNonce, setWheelReloadNonce] = useState(0);
-  
-  // Cancellation controller for retry operations
-  let retryController = null;
+  const retryControllerRef = useRef(null);
 
   const cancelRetry = useCallback(() => {
-    if (retryController) {
-      retryController.cancel();
-      retryController = null;
+    const controller = retryControllerRef.current;
+    if (controller) {
+      controller.isCancelled = true;
+      retryControllerRef.current = null;
     }
   }, []);
 
   const retryLoadColorWheel = useCallback(async () => {
     // Create new controller for this retry
-    retryController = {
-      isCancelled: false,
-      cancel() {
-        this.isCancelled = true;
-      }
-    };
-
-    const controller = retryController;
+    const controller = { isCancelled: false };
+    retryControllerRef.current = controller;
     
     try {
       const mod = await import('../screens/ColorWheelScreen/index');

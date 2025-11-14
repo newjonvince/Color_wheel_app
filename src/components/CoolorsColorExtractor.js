@@ -170,7 +170,7 @@ export default function CoolorsColorExtractor({
       const approx = nearestFromPalette(liveColor, serverPalette.length ? serverPalette : fallbackPalette);
       return { hex: approx };
     }
-  }, [fallbackPalette, liveColor, serverPalette]);
+  }, [fallbackPalette, liveColor, serverPalette, onClose]);
 
   const hexToRgb = (hex) => {
     const h = hex.replace('#','');

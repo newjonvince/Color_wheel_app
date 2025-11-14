@@ -9,6 +9,19 @@ const colorCache = new Map();
 const MAX_CACHE_SIZE = 1000;
 
 /**
+ * Normalize and validate hex color input
+ */
+function normalizeHex(hex) {
+  if (typeof hex !== 'string') return null;
+  const clean = hex.trim().toLowerCase().replace(/^#/, '');
+  if (!/^[0-9a-f]{3}$|^[0-9a-f]{6}$/.test(clean)) return null;
+  const full = clean.length === 3
+    ? clean.split('').map(c => c + c).join('')
+    : clean;
+  return `#${full}`;
+}
+
+/**
  * Clear cache when it gets too large
  */
 function clearCacheIfNeeded() {
@@ -23,28 +36,37 @@ function clearCacheIfNeeded() {
 }
 
 /**
- * Get or compute cached color data
+ * Get or compute cached color data with proper validation
  */
 function getCachedColorData(hex) {
-  // Normalize hex format
-  const normalizedHex = hex.toLowerCase().replace(/^#/, '');
-  const fullHex = normalizedHex.length === 3 
-    ? normalizedHex.split('').map(c => c + c).join('')
-    : normalizedHex;
-  const hexKey = `#${fullHex}`;
+  // Validate and normalize hex input
+  const normalizedHex = normalizeHex(hex);
+  if (!normalizedHex) {
+    // Return safe fallback for invalid hex
+    return {
+      hex: '#000000',
+      rgb: { r: 0, g: 0, b: 0 },
+      hsl: { h: 0, s: 0, l: 0 },
+      luminance: 0,
+      brightness: 0,
+      analysis: { isLight: false, isDark: true, isVibrant: false },
+      lastUsed: Date.now(),
+      isInvalid: true // Flag to indicate this was a fallback
+    };
+  }
 
-  if (colorCache.has(hexKey)) {
-    const existing = colorCache.get(hexKey);
+  if (colorCache.has(normalizedHex)) {
+    const existing = colorCache.get(normalizedHex);
     existing.lastUsed = Date.now();
-    colorCache.set(hexKey, existing); // update insertion order
+    colorCache.set(normalizedHex, existing); // update insertion order
     return existing;
   }
 
   // Compute all color data at once
-  const colorData = computeColorData(hexKey);
+  const colorData = computeColorData(normalizedHex);
   
   clearCacheIfNeeded();
-  colorCache.set(hexKey, colorData);
+  colorCache.set(normalizedHex, colorData);
   
   return colorData;
 }
@@ -81,18 +103,15 @@ function computeColorData(hex) {
 }
 
 /**
- * Optimized hex to RGB conversion
+ * Optimized hex to RGB conversion with validation
  */
 function hexToRgbOptimized(hex) {
-  const cleanHex = hex.replace('#', '');
-  
-  if (cleanHex.length === 3) {
-    return {
-      r: parseInt(cleanHex[0] + cleanHex[0], 16),
-      g: parseInt(cleanHex[1] + cleanHex[1], 16),
-      b: parseInt(cleanHex[2] + cleanHex[2], 16)
-    };
+  const normalized = normalizeHex(hex);
+  if (!normalized) {
+    return { r: 0, g: 0, b: 0 }; // Safe fallback
   }
+  
+  const cleanHex = normalized.slice(1); // Remove #
   
   return {
     r: parseInt(cleanHex.substr(0, 2), 16),
@@ -716,4 +735,31 @@ export function nearestAccessible(background, target, minRatio = 4.5) {
   // Simple fallback - return high contrast color
   const bgLum = contrastRatio(background, '#000000');
   return bgLum > 3 ? '#000000' : '#FFFFFF';
+}
+
+/**
+ * Export hex validation function for use by other modules
+ */
+export { normalizeHex };
+
+// Development-only validation tests
+if (__DEV__) {
+  // Test hex validation with various inputs
+  const testCases = [
+    'not-a-color',    // Invalid string
+    '#1234',          // Invalid length
+    '#gggggg',        // Invalid characters
+    null,             // Non-string
+    undefined,        // Non-string
+    '#fff',           // Valid 3-char
+    '#ffffff',        // Valid 6-char
+    'fff',            // Valid without #
+    'FFFFFF',         // Valid uppercase
+  ];
+  
+  console.log('🎨 Hex validation test results:');
+  testCases.forEach(test => {
+    const result = normalizeHex(test);
+    console.log(`  ${JSON.stringify(test)} → ${result}`);
+  });
 }

@@ -48,33 +48,47 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     handleColorsChange,
     handleHexChange,
     handleActiveHandleChange,
-  } = useOptimizedColorWheelState();
+  } = useOptimizedColorWheelState({ wheelRef });
 
   // Load user data with proper error handling using apiHelpers
   const loadUserData = useCallback(async () => {
     if (!currentUser) return;
-    
-    const result = await apiPatterns.loadUserData(currentUser.id);
-    
-    if (result.success) {
-      if (__DEV__) {
-        console.log('✅ API Integration Status:', {
-          authenticated: !!ApiService.getToken(),
-          userDataLoaded: !!result.data,
-          apiReady: true
-        });
+
+    try {
+      const result = await apiPatterns.loadUserData();
+
+      if (result.success) {
+        if (__DEV__) {
+          console.log('✅ API Integration Status:', {
+            authenticated: !!ApiService.getToken(),
+            userDataLoaded: !!result.data,
+            apiReady: true,
+          });
+        }
+        return;
       }
-    } else {
+
       console.warn('Failed to load user data:', result.error);
+
       if (__DEV__) {
         console.error('❌ API Integration Issue:', {
-          error: result.error?.message,
+          error: result.error?.message ?? String(result.error),
           isAuthError: result.error?.isAuthError,
-          hasToken: !!ApiService.getToken()
+          hasToken: !!ApiService.getToken(),
         });
       }
+
       if (result.error?.isAuthError && typeof onLogout === 'function') {
         onLogout();
+      }
+    } catch (error) {
+      console.error('❌ loadUserData threw:', error);
+      if (__DEV__) {
+        console.error('❌ API Integration Crash Path:', {
+          message: error.message,
+          stack: error.stack,
+          hasToken: !!ApiService.getToken(),
+        });
       }
     }
   }, [currentUser, onLogout]);
@@ -99,7 +113,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
   }, [setSelectedScheme, resetScheme]);
 
   const handleApplyInputs = useCallback(() => {
-    applyHslInputs(wheelRef);
+    applyHslInputs();
   }, [applyHslInputs]);
 
   const handleReset = useCallback(() => {
@@ -195,7 +209,6 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
         onUpdateInput={updateHslInput}
         onLiveUpdate={updateColorWheelLive}
         onApplyInputs={handleApplyInputs}
-        wheelRef={wheelRef}
       />
 
       <ColorSwatches

@@ -51,10 +51,6 @@ class SafeApiService {
     }
   }
 
-  get ready() {
-    return this.readyPromise;
-  }
-
   getToken() {
     return this.authToken;
   }
@@ -103,17 +99,20 @@ class SafeApiService {
         cancelToken = source.token;
       }
       
+      // Extract timeout to enforce cap, allow other options to override
+      const { timeout: requestedTimeout, ...restOptions } = options;
+
       const config = {
         method: 'GET',
-        ...options,
         url: `${API_ROOT}${endpoint}`,
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
           ...options.headers,
         },
-        timeout: 10000,
         cancelToken,
+        ...restOptions, // Allow other options to override
+        timeout: Math.min(10000, requestedTimeout ?? 10000), // Real cap - applied after options
       };
 
       // Add auth header if token exists
@@ -314,7 +313,8 @@ class SafeApiService {
       return { 
         available: false, 
         error: error.message,
-        isNetworkError: error.message?.includes('Network Error') || 
+        isNetworkError: error.message?.includes('Unable to connect to server') || 
+                       error.message?.includes('Network Error') ||
                        error.message?.includes('fetch') ||
                        error.code === 'ECONNREFUSED'
       };

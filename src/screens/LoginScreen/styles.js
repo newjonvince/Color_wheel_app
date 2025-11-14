@@ -220,10 +220,11 @@ export const optimizedStyles = StyleSheet.create({
     fontSize: 14,
   },
   signUpButton: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12, // Increased for 44px minimum touch target
     marginLeft: 6,
-    borderRadius: 6,
+    borderRadius: 8,
+    minHeight: 44, // Ensure minimum touch target
   },
   signUpText: {
     color: optimizedColors.primary,

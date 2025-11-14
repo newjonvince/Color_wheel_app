@@ -1,29 +1,24 @@
 // LoginForm.js
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import { BlurView } from 'expo-blur';
 import { optimizedStyles as styles, optimizedColors } from '../styles';
 
-// Performance-aware blur intensity based on device capabilities
-const getBlurIntensity = () => {
-  // Use lower intensity on older iOS devices for better performance
-  if (Platform.OS === 'ios') {
-    // iOS 14+ can handle higher intensity better
-    const iosVersion = parseInt(Platform.Version, 10);
-    return iosVersion >= 14 ? 60 : 20;
-  }
-  // Android or other platforms use moderate intensity
-  return 40;
-};
+// Better blur intensity for text readability against bright gradient
+const BLUR_INTENSITY = Platform.OS === 'ios' ? 80 : 60; // Higher intensity for better text readability
 
-const BLUR_INTENSITY = getBlurIntensity();
-
-// Low-end blur fallback helper
-const BlurContainer = ({ intensity, style, children, lowEndFallback = false }) => {
-  if (lowEndFallback) {
-    return <View style={[{ backgroundColor: 'rgba(255,255,255,0.06)' }, style]}>{children}</View>;
-  }
-  return <BlurView intensity={intensity} tint="light" style={style}>{children}</BlurView>;
+// Blur container with better text readability
+const BlurContainer = ({ intensity, style, children }) => {
+  return (
+    <BlurView intensity={intensity} tint="light" style={style}>
+      {/* Add semi-transparent overlay for better text readability */}
+      <View style={{ 
+        ...StyleSheet.absoluteFillObject, 
+        backgroundColor: 'rgba(255,255,255,0.1)' 
+      }} />
+      {children}
+    </BlurView>
+  );
 };
 
 const LoginForm = React.memo(({ 

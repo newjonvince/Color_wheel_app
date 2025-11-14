@@ -12,37 +12,61 @@ export const safeApiCall = async (apiCall, options = {}) => {
     retryCount = 0 
   } = options;
 
-  try {
-    // Execute the API call (safeApiService already handles ready state)
-    const result = await apiCall();
-    return { success: true, data: result };
-    
-  } catch (error) {
-    console.error('API call failed:', error);
-    
-    // Return structured error information for caller to handle UI
-    const errorInfo = {
-      success: false,
-      error,
-      errorType: 'unknown',
-      userMessage: errorMessage,
-      shouldShowAlert: true
-    };
-
-    // Classify error types for better handling
-    if (error.message?.includes('Authentication required')) {
-      errorInfo.errorType = 'authentication';
-      errorInfo.userMessage = 'Please log in again';
-    } else if (error.message?.includes('Network Error') || error.message?.includes('fetch')) {
-      errorInfo.errorType = 'network';
-      errorInfo.userMessage = 'Network connection failed. Please check your internet connection.';
-    } else if (error.message?.includes('timeout')) {
-      errorInfo.errorType = 'timeout';
-      errorInfo.userMessage = 'Request timed out. Please try again.';
+  let lastError;
+  
+  // Try the API call with retries
+  for (let attempt = 0; attempt <= retryCount; attempt++) {
+    try {
+      // Execute the API call (safeApiService already handles ready state)
+      const result = await apiCall();
+      return { success: true, data: result };
+      
+    } catch (error) {
+      lastError = error;
+      
+      // Don't retry authentication errors - they won't succeed on retry
+      if (error.message?.includes('Authentication required')) {
+        break;
+      }
+      
+      // If this isn't the last attempt, wait briefly before retrying
+      if (attempt < retryCount) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 3000); // Exponential backoff, max 3s
+        await new Promise(resolve => setTimeout(resolve, delay));
+        
+        if (__DEV__) {
+          console.log(`Retrying API call (attempt ${attempt + 2}/${retryCount + 1}) after ${delay}ms`);
+        }
+      }
     }
-    
-    return errorInfo;
   }
+  
+  // All attempts failed
+  console.error(`API call failed after ${retryCount + 1} attempts:`, lastError);
+  
+  // Return structured error information for caller to handle UI
+  const errorInfo = {
+    success: false,
+    error: lastError,
+    errorType: 'unknown',
+    userMessage: errorMessage,
+    shouldShowAlert: true,
+    attemptCount: retryCount + 1
+  };
+
+  // Classify error types for better handling (match safeApiService error messages)
+  if (lastError.message?.includes('Authentication required')) {
+    errorInfo.errorType = 'authentication';
+    errorInfo.userMessage = 'Please log in again';
+  } else if (lastError.message?.includes('Unable to connect to server')) {
+    errorInfo.errorType = 'network';
+    errorInfo.userMessage = 'Network connection failed. Please check your internet connection.';
+  } else if (lastError.message?.includes('timed out')) {
+    errorInfo.errorType = 'timeout';
+    errorInfo.userMessage = 'Request timed out. Please try again.';
+  }
+  
+  return errorInfo;
 };
 
 /**
@@ -90,9 +114,9 @@ export const batchApiCalls = async (apiCalls, options = {}) => {
  */
 export const apiPatterns = {
   // Load user data pattern
-  loadUserData: async (userId) => {
+  loadUserData: async () => {
     return safeApiCall(
-      () => ApiService.getUserProfile(userId),
+      () => ApiService.getUserProfile(),
       { errorMessage: 'Failed to load user data' }
     );
   },

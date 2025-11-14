@@ -136,11 +136,24 @@ class OptimizedSafeStorage {
   }
 
   /**
-   * Validate data size
+   * Normalize value for storage (ensure string)
    */
-  validateDataSize(value) {
-    if (typeof value === 'string' && value.length > CONFIG.MAX_VALUE_SIZE) {
-      throw new Error(`Data too large: ${value.length} bytes (max: ${CONFIG.MAX_VALUE_SIZE})`);
+  normalizeValueForStorage(value) {
+    if (value == null) return null;
+    if (typeof value === 'string') return value;
+    try {
+      return JSON.stringify(value);
+    } catch (e) {
+      throw new Error('Value must be serializable to JSON');
+    }
+  }
+
+  /**
+   * Validate data size on serialized value
+   */
+  validateDataSize(serializedValue) {
+    if (typeof serializedValue === 'string' && serializedValue.length > CONFIG.MAX_VALUE_SIZE) {
+      throw new Error(`Data too large: ${serializedValue.length} bytes (max: ${CONFIG.MAX_VALUE_SIZE})`);
     }
   }
 
@@ -236,13 +249,16 @@ class OptimizedSafeStorage {
   async setItem(key, value, options = {}) {
     // Ensure initialization
     if (!this.isInitialized) await this.init();
-    this.validateDataSize(value);
+    
+    // Normalize and validate the value
+    const serialized = this.normalizeValueForStorage(value);
+    this.validateDataSize(serialized);
 
     const isSensitive = this.isSensitiveKey(key);
     const { batch = false, ttl } = options;
 
     if (batch) {
-      return this._addToBatch('set', key, value, options);
+      return this._addToBatch('set', key, serialized, options);
     }
 
     try {
@@ -254,12 +270,12 @@ class OptimizedSafeStorage {
           if (ttl) {
             // SecureStore doesn't support TTL, but we can add metadata
             const wrappedValue = JSON.stringify({
-              value,
+              value: serialized,
               expires: Date.now() + ttl
             });
             await this.secureStore.setItemAsync(key, wrappedValue, CONFIG.SECURE_STORE_OPTIONS);
           } else {
-            await this.secureStore.setItemAsync(key, value, CONFIG.SECURE_STORE_OPTIONS);
+            await this.secureStore.setItemAsync(key, serialized, CONFIG.SECURE_STORE_OPTIONS);
           }
           success = true;
         } catch (secureError) {
@@ -273,7 +289,7 @@ class OptimizedSafeStorage {
         if (isSensitive) {
           console.warn(`Storing sensitive key '${key}' in AsyncStorage (insecure). Consider using SecureStore.`);
         }
-        await AsyncStorage.setItem(key, value);
+        await AsyncStorage.setItem(key, serialized);
       }
 
       // Update cache
