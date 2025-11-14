@@ -1,6 +1,6 @@
 // components/AppNavigation.js - Main navigation component
 import React, { useMemo, useCallback } from 'react';
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { APP_CONFIG } from '../config/app';
 import TabIcon from './TabIcon';
 
@@ -55,35 +55,62 @@ export const AppNavigation = ({
 
           <Tab.Screen name="Community" options={{ title: 'Community' }}>
             {(props) => (
-              <screens.CommunityFeedScreen 
-                {...props} 
-                currentUser={user} 
-                onSaveColorMatch={saveColorMatch} 
-                onLogout={handleLogout} 
-              />
+              screens.CommunityFeedScreen ? (
+                <screens.CommunityFeedScreen 
+                  {...props} 
+                  currentUser={user} 
+                  onSaveColorMatch={saveColorMatch} 
+                  onLogout={handleLogout} 
+                />
+              ) : (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                  <Text style={{ fontSize: 18, color: '#ff6b6b', marginBottom: 8 }}>Community Unavailable</Text>
+                  <Text style={{ fontSize: 14, color: '#666', textAlign: 'center' }}>
+                    Community feed is temporarily unavailable. Please try again later.
+                  </Text>
+                </View>
+              )
             )}
           </Tab.Screen>
 
           <Tab.Screen name="Profile" options={{ title: 'Profile' }}>
             {(props) => (
-              <screens.BoardsScreen 
-                {...props} 
-                currentUser={user} 
-                savedColorMatches={savedColorMatches} 
-                onSaveColorMatch={saveColorMatch} 
-                onLogout={handleLogout} 
-              />
+              screens.BoardsScreen ? (
+                <screens.BoardsScreen 
+                  {...props} 
+                  currentUser={user} 
+                  savedColorMatches={savedColorMatches} 
+                  onSaveColorMatch={saveColorMatch} 
+                  onLogout={handleLogout} 
+                />
+              ) : (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                  <Text style={{ fontSize: 18, color: '#ff6b6b', marginBottom: 8 }}>Profile Unavailable</Text>
+                  <Text style={{ fontSize: 14, color: '#666', textAlign: 'center' }}>
+                    Profile screen is temporarily unavailable. Please try again later.
+                  </Text>
+                </View>
+              )
             )}
           </Tab.Screen>
 
           <Tab.Screen name="Settings" options={{ title: 'Settings' }}>
             {(props) => (
-              <screens.UserSettingsScreen 
-                {...props} 
-                currentUser={user} 
-                onLogout={handleLogout} 
-                onAccountDeleted={handleAccountDeleted} 
-              />
+              screens.UserSettingsScreen ? (
+                <screens.UserSettingsScreen 
+                  {...props} 
+                  currentUser={user} 
+                  onLogout={handleLogout} 
+                  onAccountDeleted={handleAccountDeleted} 
+                />
+              ) : (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                  <Text style={{ fontSize: 18, color: '#ff6b6b', marginBottom: 8 }}>Settings Unavailable</Text>
+                  <Text style={{ fontSize: 14, color: '#666', textAlign: 'center' }}>
+                    Settings screen is temporarily unavailable. Please try again later.
+                  </Text>
+                </View>
+              )
             )}
           </Tab.Screen>
         </Tab.Navigator>
