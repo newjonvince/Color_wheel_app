@@ -275,11 +275,11 @@ export default function CommunityModal({ visible, onClose, currentUser }) {
   );
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => onClose?.()}>
       <SafeAreaView style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.closeIcon} accessibilityLabel="Close">
+          <TouchableOpacity onPress={() => onClose?.()} style={styles.closeIcon} accessibilityLabel="Close">
             <Ionicons name="close" size={24} color="#1F2937" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My community</Text>
