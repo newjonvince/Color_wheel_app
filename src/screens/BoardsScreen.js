@@ -327,15 +327,18 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
                   {/* Preview colors if available */}
                   {matchCount > 0 && (
                     <View style={styles.boardPreview}>
-                      {getBoardColorMatches(item.id, selectedMainFolder.id).slice(0, 3).map((match, index) => (
-                        <View 
-                          key={index}
-                          style={[
-                            styles.previewSwatch, 
-                            { backgroundColor: match.baseColor, marginLeft: index * -5 }
-                          ]} 
-                        />
-                      ))}
+                      {(() => {
+                        const matches = getBoardColorMatches(item.id, selectedMainFolder.id);
+                        return matches.length > 0 ? matches.slice(0, 3).map((match, index) => (
+                          <View 
+                            key={index}
+                            style={[
+                              styles.previewSwatch, 
+                              { backgroundColor: match.baseColor, marginLeft: index * -5 }
+                            ]} 
+                          />
+                        )) : null;
+                      })()}
                     </View>
                   )}
                 </TouchableOpacity>
@@ -376,15 +379,18 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
                 {/* Preview colors if available */}
                 {matchCount > 0 && (
                   <View style={styles.boardPreview}>
-                    {getMainFolderColorMatches(item.id).slice(0, 3).map((match, index) => (
-                      <View 
-                        key={index}
-                        style={[
-                          styles.previewSwatch, 
-                          { backgroundColor: match.baseColor, marginLeft: index * -5 }
-                        ]} 
-                      />
-                    ))}
+                    {(() => {
+                      const matches = getMainFolderColorMatches(item.id);
+                      return matches.length > 0 ? matches.slice(0, 3).map((match, index) => (
+                        <View 
+                          key={index}
+                          style={[
+                            styles.previewSwatch, 
+                            { backgroundColor: match.baseColor, marginLeft: index * -5 }
+                          ]} 
+                        />
+                      )) : null;
+                    })()}
                   </View>
                 )}
               </TouchableOpacity>
