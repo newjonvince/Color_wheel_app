@@ -223,7 +223,7 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
         
         // Auto-complete after showing success
         setTimeout(() => {
-          onSignUpComplete(result.data.user);
+          if (onSignUpComplete) onSignUpComplete(result.data.user);
         }, 2000);
         
       } catch (storageError) {
@@ -240,7 +240,7 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
   const handleBack = () => {
     switch (currentStep) {
       case SIGNUP_STEPS.EMAIL:
-        onBackToLogin();
+        if (onBackToLogin) onBackToLogin();
         break;
       case SIGNUP_STEPS.PASSWORD:
         setCurrentStep(SIGNUP_STEPS.EMAIL);
