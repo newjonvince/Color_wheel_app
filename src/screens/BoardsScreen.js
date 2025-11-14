@@ -35,6 +35,10 @@ const SCHEME_FOLDERS = getAllSchemes().map(scheme => ({
   description: scheme.description
 }));
 
+// Create lookup objects for consistent type handling
+const MAIN_FOLDERS_BY_ID = Object.fromEntries(MAIN_FOLDERS.map(f => [f.id, f]));
+const SCHEME_FOLDERS_BY_ID = Object.fromEntries(SCHEME_FOLDERS.map(s => [s.id, s]));
+
 function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser }) {
   const [selectedMainFolder, setSelectedMainFolder] = useState(null);
   const [selectedSchemeFolder, setSelectedSchemeFolder] = useState(null);
@@ -228,13 +232,9 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
         privacy: uploadPrivacy,
       }, uploadScheme);
 
-      // Navigate to the specific board/folder after saving
-      if (uploadPrivacy === 'public') {
-        setSelectedMainFolder('public');
-      } else {
-        setSelectedMainFolder('private');
-      }
-      setSelectedSchemeFolder(uploadScheme);
+      // Navigate to the specific board/folder after saving - use proper objects, not strings
+      setSelectedMainFolder(MAIN_FOLDERS_BY_ID[uploadPrivacy] || null);
+      setSelectedSchemeFolder(SCHEME_FOLDERS_BY_ID[uploadScheme] || null);
 
       setShowUploadModal(false);
       setUploadTitle('');
