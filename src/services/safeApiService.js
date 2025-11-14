@@ -5,7 +5,7 @@ import { safeStorage } from '../utils/safeStorage';
 // Request cancellation support
 const CancelToken = axios.CancelToken;
 
-// Safe API configuration
+// Safe API configuration with URL validation
 const getApiBaseUrl = () => {
   try {
     const Constants = require('expo-constants').default;
@@ -19,8 +19,36 @@ const getApiBaseUrl = () => {
   return process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || 'https://colorwheelapp-production.up.railway.app';
 };
 
-const HOST = getApiBaseUrl().replace(/\/+$/, '');
-const API_ROOT = /\/api$/.test(HOST) ? HOST : `${HOST}/api`;
+// Safe URL construction with validation
+const buildApiRoot = () => {
+  try {
+    const baseUrl = getApiBaseUrl();
+    
+    // Validate URL format
+    if (!baseUrl || typeof baseUrl !== 'string') {
+      throw new Error('Invalid base URL: must be a non-empty string');
+    }
+    
+    // Basic URL validation
+    if (!baseUrl.match(/^https?:\/\/.+/)) {
+      throw new Error(`Invalid URL format: ${baseUrl}`);
+    }
+    
+    const HOST = baseUrl.replace(/\/+$/, '');
+    const API_ROOT = /\/api$/.test(HOST) ? HOST : `${HOST}/api`;
+    
+    // Validate final API root
+    new URL(API_ROOT); // This will throw if URL is invalid
+    
+    return API_ROOT;
+  } catch (error) {
+    console.error('Failed to build API root URL:', error.message);
+    // Fallback to known good URL
+    return 'https://colorwheelapp-production.up.railway.app/api';
+  }
+};
+
+const API_ROOT = buildApiRoot();
 
 // Safe API service class
 class SafeApiService {
@@ -37,16 +65,67 @@ class SafeApiService {
 
   async initialize() {
     try {
-      // Try to load stored token
-      const token = await safeStorage.getItem('fashion_color_wheel_auth_token');
-      if (token) {
-        this.authToken = token;
+      // Test axios configuration safety first
+      try {
+        // Test basic axios config creation without making a request
+        const testConfig = {
+          method: 'GET',
+          url: `${API_ROOT}/health`,
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          timeout: 1000, // Very short timeout for config test
+          validateStatus: () => true, // Accept any status for config test
+        };
+        
+        // This will validate the config without making a request
+        const axiosInstance = axios.create(testConfig);
+        if (!axiosInstance) {
+          throw new Error('Failed to create axios instance');
+        }
+        
+        if (__DEV__) {
+          console.log('✅ Axios configuration validated successfully');
+          console.log('📡 API Root URL:', API_ROOT);
+        }
+      } catch (axiosError) {
+        console.error('❌ Axios configuration failed:', axiosError.message);
+        throw new Error(`Axios setup failed: ${axiosError.message}`);
       }
+
+      // Try to load stored token (depends on safeStorage being initialized)
+      let token = null;
+      try {
+        token = await safeStorage.getItem('fashion_color_wheel_auth_token');
+        if (token && typeof token === 'string' && token.trim().length > 0) {
+          this.authToken = token;
+          if (__DEV__) {
+            console.log('✅ Auth token loaded from storage');
+          }
+        }
+      } catch (storageError) {
+        console.warn('Failed to load auth token from storage:', storageError.message);
+        // Continue without token - not critical for initialization
+      }
+
       this.isReady = true;
+      
+      if (__DEV__) {
+        console.log('✅ SafeApiService initialized successfully');
+      }
+      
       return true;
     } catch (error) {
-      console.warn('API service initialization failed:', error.message);
-      this.isReady = true; // Still mark as ready to prevent hanging
+      console.error('API service initialization failed:', error.message);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
+      // Still mark as ready to prevent hanging, but log the failure
+      this.isReady = true;
       return false;
     }
   }
@@ -75,52 +154,89 @@ class SafeApiService {
     try {
       await this.ready;
 
-      // Support both AbortSignal and axios CancelToken
+      // Support both AbortSignal and axios CancelToken with safe creation
       let cancelToken = options.cancelToken;
       
       // If AbortSignal is provided, convert to axios CancelToken
       if (options.signal && !cancelToken) {
-        const source = CancelToken.source();
-        cancelToken = source.token;
-        
-        // Listen for abort signal
-        if (options.signal.aborted) {
-          source.cancel('Request aborted');
-        } else {
-          options.signal.addEventListener('abort', () => {
+        try {
+          const source = CancelToken.source();
+          cancelToken = source.token;
+          
+          // Listen for abort signal
+          if (options.signal.aborted) {
             source.cancel('Request aborted');
-          });
+          } else {
+            options.signal.addEventListener('abort', () => {
+              source.cancel('Request aborted');
+            });
+          }
+        } catch (cancelError) {
+          console.warn('Failed to create cancel token from AbortSignal:', cancelError.message);
+          // Continue without cancellation - not critical
         }
       }
       
       // Create default cancel token if none provided
       if (!cancelToken) {
-        const source = CancelToken.source();
-        cancelToken = source.token;
+        try {
+          const source = CancelToken.source();
+          cancelToken = source.token;
+        } catch (cancelError) {
+          console.warn('Failed to create default cancel token:', cancelError.message);
+          // Continue without cancellation - not critical for basic requests
+        }
       }
       
       // Extract timeout to enforce cap, allow other options to override
       const { timeout: requestedTimeout, ...restOptions } = options;
 
-      const config = {
-        method: 'GET',
-        url: `${API_ROOT}${endpoint}`,
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
-        cancelToken,
-        ...restOptions, // Allow other options to override
-        timeout: Math.min(10000, requestedTimeout ?? 10000), // Real cap - applied after options
-      };
+      // Safe config construction with validation
+      let config;
+      try {
+        config = {
+          method: 'GET',
+          url: `${API_ROOT}${endpoint}`,
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            ...options.headers,
+          },
+          cancelToken,
+          ...restOptions, // Allow other options to override
+          timeout: Math.min(10000, requestedTimeout ?? 10000), // Real cap - applied after options
+        };
 
-      // Add auth header if token exists
-      if (this.authToken) {
-        config.headers.Authorization = `Bearer ${this.authToken}`;
+        // Add auth header if token exists
+        if (this.authToken) {
+          config.headers.Authorization = `Bearer ${this.authToken}`;
+        }
+
+        // Validate final URL
+        new URL(config.url); // This will throw if URL is malformed
+        
+      } catch (configError) {
+        console.error('Failed to create request config:', configError.message);
+        throw new Error(`Invalid request configuration: ${configError.message}`);
       }
 
-      const response = await axios(config);
+      // Safe axios request execution
+      let response;
+      try {
+        response = await axios(config);
+      } catch (axiosError) {
+        // Re-throw with context about the axios failure
+        if (axiosError.message?.includes('Network Error') || 
+            axiosError.code === 'ECONNREFUSED' ||
+            axiosError.code === 'NETWORK_ERROR') {
+          throw axiosError; // Let the existing error handling below deal with it
+        }
+        
+        // For other axios errors, add context
+        console.error('Axios request execution failed:', axiosError.message);
+        throw new Error(`Request execution failed: ${axiosError.message}`);
+      }
+      
       return response.data;
     } catch (error) {
       console.warn(`API request failed for ${endpoint}:`, error.message);

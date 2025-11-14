@@ -23,6 +23,7 @@ import safeApiService from './src/services/safeApiService';
 
 // Screen imports - let error boundary catch failures instead of faking screens
 import LoginScreen from './src/screens/LoginScreen';
+import SignUpScreen from './src/screens/SignUpScreen';
 import ColorWheelScreen from './src/screens/ColorWheelScreen';
 import CommunityFeedScreen from './src/screens/CommunityFeedScreen';
 import BoardsScreen from './src/screens/BoardsScreen';
@@ -48,21 +49,36 @@ function FashionColorWheelApp() {
     handleLogout = () => {},
   } = useAuth();
 
-  // Initialize app - optimized with parallel execution
+  // Initialize app - sequential for dependency safety, parallel where safe
   useEffect(() => {
     const initialize = async () => {
       try {
-        // Initialize app config first (required for other steps)
+        console.log('🔄 Starting app initialization...');
+        
+        // Step 1: Initialize app config first (required for other steps)
         await initializeAppConfig();
+        console.log('✅ initializeAppConfig() completed');
 
-        // Run independent initialization steps in parallel for better UX
+        // Step 2: Initialize storage layer (required by API service and auth)
+        await safeStorage.init();
+        console.log('✅ safeStorage.init() completed');
+
+        // Step 3: Run API service and auth initialization in parallel (both depend on storage)
+        console.log('🔄 Starting parallel API and auth initialization...');
         await Promise.all([
-          safeStorage.init(),
-          safeApiService.ready,
-          initializeAuth(),
+          safeApiService.ready.then(() => console.log('✅ safeApiService.ready completed')).catch(e => { console.error('❌ safeApiService.ready failed:', e); throw e; }),
+          initializeAuth().then(() => console.log('✅ initializeAuth() completed')).catch(e => { console.error('❌ initializeAuth() failed:', e); throw e; }),
         ]);
+        
+        console.log('✅ All initialization steps completed');
       } catch (error) {
-        console.error('App initialization failed:', error);
+        console.error('🚨 App initialization failed:', error);
+        console.error('Error stack:', error.stack);
+        console.error('Error details:', {
+          message: error.message,
+          name: error.name,
+          cause: error.cause
+        });
       } finally {
         setIsLoading(false);
       }

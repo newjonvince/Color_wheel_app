@@ -64,8 +64,38 @@ class OptimizedSafeStorage {
     }
 
     try {
+      // Test AsyncStorage first (critical dependency)
+      let asyncStorageAvailable = false;
+      try {
+        // Test AsyncStorage with a safe operation
+        const testKey = '__safeStorage_test__';
+        await AsyncStorage.setItem(testKey, 'test');
+        const testValue = await AsyncStorage.getItem(testKey);
+        await AsyncStorage.removeItem(testKey);
+        asyncStorageAvailable = testValue === 'test';
+        
+        if (__DEV__) {
+          console.log('📱 AsyncStorage test:', asyncStorageAvailable ? '✅ Working' : '❌ Failed');
+        }
+      } catch (asyncError) {
+        console.error('❌ AsyncStorage is not available or corrupted:', asyncError.message);
+        reportError(asyncError, 'AsyncStorage test failed during initialization');
+        // Don't throw here - let the app continue but log the critical issue
+        asyncStorageAvailable = false;
+      }
+
+      // Test SecureStore availability (optional dependency)
       if (this.secureStore) {
-        this.isSecureStoreAvailable = await this.secureStore.isAvailableAsync();
+        try {
+          this.isSecureStoreAvailable = await this.secureStore.isAvailableAsync();
+          if (__DEV__) {
+            console.log('🔐 SecureStore test:', this.isSecureStoreAvailable ? '✅ Available' : '❌ Not available');
+          }
+        } catch (secureError) {
+          console.warn('SecureStore availability check failed:', secureError.message);
+          reportError(secureError, 'SecureStore availability check failed');
+          this.isSecureStoreAvailable = false;
+        }
       } else {
         this.isSecureStoreAvailable = false;
       }
@@ -73,13 +103,22 @@ class OptimizedSafeStorage {
       this.isInitialized = true;
       
       if (__DEV__) {
-        console.log('🔐 SafeStorage initialized - SecureStore available:', this.isSecureStoreAvailable);
+        console.log('🔐 SafeStorage initialized:', {
+          asyncStorage: asyncStorageAvailable,
+          secureStore: this.isSecureStoreAvailable
+        });
       }
+
+      // Warn if AsyncStorage failed but continue
+      if (!asyncStorageAvailable) {
+        console.warn('⚠️ SafeStorage initialized with AsyncStorage issues - storage operations may fail');
+      }
+      
     } catch (error) {
-      console.warn('SafeStorage initialization failed:', error.message);
+      console.error('SafeStorage initialization failed:', error.message);
       reportError(error, 'SafeStorage initialization failed');
       this.isSecureStoreAvailable = false;
-      this.isInitialized = true; // Mark as initialized even if SecureStore failed
+      this.isInitialized = true; // Mark as initialized even if tests failed
     }
   }
 
@@ -227,18 +266,25 @@ class OptimizedSafeStorage {
       }
 
       // Fallback to AsyncStorage (for non-sensitive data or when SecureStore unavailable)
-      const asyncValue = await AsyncStorage.getItem(key);
-      if (asyncValue === null) return null;
+      try {
+        const asyncValue = await AsyncStorage.getItem(key);
+        if (asyncValue === null) return null;
 
-      // For sensitive data in AsyncStorage, warn about insecure storage
-      if (isSensitive) {
-        console.warn(`Sensitive key '${key}' stored in AsyncStorage (insecure). Consider using SecureStore.`);
+        // For sensitive data in AsyncStorage, warn about insecure storage
+        if (isSensitive) {
+          console.warn(`Sensitive key '${key}' stored in AsyncStorage (insecure). Consider using SecureStore.`);
+        }
+
+        return asyncValue;
+      } catch (asyncError) {
+        console.error(`AsyncStorage.getItem failed for key '${key}':`, asyncError.message);
+        reportError(asyncError, `AsyncStorage.getItem failed for key: ${key}`);
+        return null;
       }
-
-      return asyncValue;
 
     } catch (error) {
       console.warn(`Failed to get item ${key}:`, error.message);
+      reportError(error, `Storage operation failed for key: ${key}`);
       return null;
     }
   }
@@ -285,11 +331,17 @@ class OptimizedSafeStorage {
 
       // Use AsyncStorage as fallback
       if (!success) {
-        // For sensitive data in AsyncStorage, warn about insecure storage
-        if (isSensitive) {
-          console.warn(`Storing sensitive key '${key}' in AsyncStorage (insecure). Consider using SecureStore.`);
+        try {
+          // For sensitive data in AsyncStorage, warn about insecure storage
+          if (isSensitive) {
+            console.warn(`Storing sensitive key '${key}' in AsyncStorage (insecure). Consider using SecureStore.`);
+          }
+          await AsyncStorage.setItem(key, serialized);
+        } catch (asyncError) {
+          console.error(`AsyncStorage.setItem failed for key '${key}':`, asyncError.message);
+          reportError(asyncError, `AsyncStorage.setItem failed for key: ${key}`);
+          throw new Error(`Storage operation failed: ${asyncError.message}`);
         }
-        await AsyncStorage.setItem(key, serialized);
       }
 
       // Update cache
@@ -318,7 +370,16 @@ class OptimizedSafeStorage {
 
     try {
       // Remove from both storage methods
-      const promises = [AsyncStorage.removeItem(key)];
+      const promises = [];
+      
+      // AsyncStorage removal with error handling
+      promises.push(
+        AsyncStorage.removeItem(key).catch((asyncError) => {
+          console.error(`AsyncStorage.removeItem failed for key '${key}':`, asyncError.message);
+          reportError(asyncError, `AsyncStorage.removeItem failed for key: ${key}`);
+          // Don't throw - continue with other operations
+        })
+      );
 
       if (this.isSecureStoreAvailable && this.secureStore) {
         promises.push(
@@ -401,8 +462,16 @@ class OptimizedSafeStorage {
     ];
 
     try {
-      // Get all AsyncStorage keys
-      const allKeys = await AsyncStorage.getAllKeys();
+      // Get all AsyncStorage keys with error handling
+      let allKeys = [];
+      try {
+        allKeys = await AsyncStorage.getAllKeys();
+      } catch (asyncError) {
+        console.error('AsyncStorage.getAllKeys failed during clearAuth:', asyncError.message);
+        reportError(asyncError, 'AsyncStorage.getAllKeys failed during clearAuth');
+        return; // Can't proceed without keys
+      }
+      
       const authKeys = allKeys.filter(key => 
         authPatterns.some(pattern => pattern.test(key))
       );
@@ -434,7 +503,15 @@ class OptimizedSafeStorage {
    */
   async getStats() {
     try {
-      const allKeys = await AsyncStorage.getAllKeys();
+      let allKeys = [];
+      try {
+        allKeys = await AsyncStorage.getAllKeys();
+      } catch (asyncError) {
+        console.error('AsyncStorage.getAllKeys failed during getStats:', asyncError.message);
+        reportError(asyncError, 'AsyncStorage.getAllKeys failed during getStats');
+        // Continue with empty keys array
+      }
+      
       const cacheSize = this.cache.size;
       const secureStoreAvailable = this.isSecureStoreAvailable;
 

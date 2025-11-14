@@ -40,38 +40,121 @@ export const useAuth = () => {
 
       if (token) {
         try {
-          await ApiService?.setToken?.(token);
-          await ApiService.ready;
+          // Safe API service initialization with validation
+          if (ApiService?.setToken && typeof ApiService.setToken === 'function') {
+            await ApiService.setToken(token);
+          } else {
+            if (__DEV__) console.warn('ApiService.setToken not available during auth initialization');
+          }
+          
+          // Wait for API service to be ready with timeout protection
+          if (ApiService?.ready) {
+            try {
+              await Promise.race([
+                ApiService.ready,
+                new Promise((_, reject) => 
+                  setTimeout(() => reject(new Error('ApiService.ready timeout')), 3000)
+                )
+              ]);
+            } catch (readyError) {
+              if (__DEV__) console.warn('ApiService.ready failed or timed out:', readyError.message);
+              // Continue with fallback - don't block auth initialization
+            }
+          }
+          
           if (signal?.aborted) return;
 
           let profile = null;
-          if (ApiService?.getUserProfile) {
-            // Race profile loading with timeout
-            const timeoutPromise = new Promise((_, reject) => {
-              setTimeout(() => reject(new Error('Profile timeout')), 5000);
-            });
-            
-            profile = await Promise.race([
-              ApiService.getUserProfile(),
-              timeoutPromise
-            ]);
-          } else {
-            const storedUserData = await AsyncStorage.getItem('userData');
-            if (storedUserData) profile = JSON.parse(storedUserData);
+          
+          // Safe API profile loading with comprehensive error handling
+          if (ApiService?.getUserProfile && typeof ApiService.getUserProfile === 'function') {
+            try {
+              // Race profile loading with timeout
+              const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Profile timeout')), 5000);
+              });
+              
+              profile = await Promise.race([
+                ApiService.getUserProfile(),
+                timeoutPromise
+              ]);
+              
+              if (__DEV__) console.log('✅ Profile loaded from API');
+            } catch (profileError) {
+              if (__DEV__) console.warn('API profile loading failed:', profileError.message);
+              // Fall through to storage fallback
+            }
+          }
+          
+          // Fallback to stored user data with safe AsyncStorage and JSON parsing
+          if (!profile) {
+            try {
+              const storedUserData = await AsyncStorage.getItem('userData');
+              if (storedUserData && typeof storedUserData === 'string' && storedUserData.trim().length > 0) {
+                try {
+                  profile = JSON.parse(storedUserData);
+                  if (__DEV__) console.log('✅ Profile loaded from storage fallback');
+                } catch (parseError) {
+                  console.warn('Failed to parse stored user data:', parseError.message);
+                  // Clear corrupted data
+                  try {
+                    await AsyncStorage.removeItem('userData');
+                  } catch (removeError) {
+                    console.warn('Failed to remove corrupted user data:', removeError.message);
+                  }
+                }
+              }
+            } catch (storageError) {
+              console.error('AsyncStorage.getItem failed during auth initialization:', storageError.message);
+              // Continue without profile - not critical for auth initialization
+            }
           }
 
           if (signal?.aborted) return;
 
-          const normalized = pickUser(profile);
-          if (normalized?.id) setUser(normalized);
-          else await clearStoredToken();
+          // Safe user normalization and state setting
+          try {
+            const normalized = pickUser(profile);
+            if (normalized?.id) {
+              setUser(normalized);
+              if (__DEV__) console.log('✅ User set from profile');
+            } else {
+              if (__DEV__) console.log('No valid user profile found, clearing stored token');
+              await clearStoredToken();
+            }
+          } catch (normalizationError) {
+            console.warn('User profile normalization failed:', normalizationError.message);
+            await clearStoredToken();
+          }
+          
         } catch (apiError) {
           if (__DEV__) console.warn('API initialization error:', apiError);
           if (signal?.aborted) return;
           
-          const storedUserData = await AsyncStorage.getItem('userData');
-          if (storedUserData) setUser(JSON.parse(storedUserData));
-          else await clearStoredToken();
+          // Safe fallback to stored data with comprehensive error handling
+          try {
+            const storedUserData = await AsyncStorage.getItem('userData');
+            if (storedUserData && typeof storedUserData === 'string' && storedUserData.trim().length > 0) {
+              try {
+                const parsedUser = JSON.parse(storedUserData);
+                const normalized = pickUser(parsedUser);
+                if (normalized?.id) {
+                  setUser(normalized);
+                  if (__DEV__) console.log('✅ User set from storage fallback after API error');
+                } else {
+                  await clearStoredToken();
+                }
+              } catch (parseError) {
+                console.warn('Failed to parse stored user data in fallback:', parseError.message);
+                await clearStoredToken();
+              }
+            } else {
+              await clearStoredToken();
+            }
+          } catch (fallbackError) {
+            console.error('Storage fallback failed during auth initialization:', fallbackError.message);
+            await clearStoredToken();
+          }
         }
       }
 
