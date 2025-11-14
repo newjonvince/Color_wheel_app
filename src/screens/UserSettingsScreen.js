@@ -57,10 +57,10 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
 
   // Optimistic UI update for settings with rollback on failure
   async function updateSetting(key, value) {
-    const prev = key === 'notifications' ? notificationsEnabled : shareDataEnabled;
+    const prev = key === 'notifications_enabled' ? notificationsEnabled : shareDataEnabled;
     
     // Optimistically update UI
-    key === 'notifications' ? setNotificationsEnabled(value) : setShareDataEnabled(value);
+    key === 'notifications_enabled' ? setNotificationsEnabled(value) : setShareDataEnabled(value);
     setSavingToggle(key);
     
     try {
@@ -70,7 +70,7 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
     } catch (error) {
       console.error('Failed to save setting:', error);
       // Rollback on failure
-      key === 'notifications' ? setNotificationsEnabled(prev) : setShareDataEnabled(prev);
+      key === 'notifications_enabled' ? setNotificationsEnabled(prev) : setShareDataEnabled(prev);
       Alert.alert('Oops', 'Could not save your setting. Try again.');
     } finally {
       setSavingToggle(null);
@@ -205,14 +205,14 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
           <View style={styles.settingLeft}>
             <Ionicons name="notifications-outline" size={20} color="#666" />
             <Text style={styles.settingText}>Push Notifications</Text>
-            {(savingToggle === 'notifications' || loadingSettings) && (
+            {(savingToggle === 'notifications_enabled' || loadingSettings) && (
               <ActivityIndicator size="small" color="#007AFF" style={{ marginLeft: 8 }} />
             )}
           </View>
           <Switch
             value={notificationsEnabled}
-            onValueChange={(v) => updateSetting('notifications', v)}
-            disabled={savingToggle === 'notifications' || loadingSettings}
+            onValueChange={(v) => updateSetting('notifications_enabled', v)}
+            disabled={savingToggle === 'notifications_enabled' || loadingSettings}
           />
         </View>
 
@@ -224,14 +224,14 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
           <View style={styles.settingLeft}>
             <Ionicons name="analytics-outline" size={20} color="#666" />
             <Text style={styles.settingText}>Share Usage Data</Text>
-            {(savingToggle === 'share_usage' || loadingSettings) && (
+            {(savingToggle === 'share_data_enabled' || loadingSettings) && (
               <ActivityIndicator size="small" color="#007AFF" style={{ marginLeft: 8 }} />
             )}
           </View>
           <Switch
             value={shareDataEnabled}
-            onValueChange={(v) => updateSetting('share_usage', v)}
-            disabled={savingToggle === 'share_usage' || loadingSettings}
+            onValueChange={(v) => updateSetting('share_data_enabled', v)}
+            disabled={savingToggle === 'share_data_enabled' || loadingSettings}
           />
         </View>
       </View>
