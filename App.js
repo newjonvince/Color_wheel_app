@@ -17,7 +17,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 // App configuration - initialize once at startup
-import { initializeAppConfig, APP_CONFIG } from './src/config/app';
+import { initializeAppConfig, APP_CONFIG, getStatusBarStyle } from './src/config/app';
 import { safeStorage } from './src/utils/safeStorage';
 import safeApiService from './src/services/safeApiService';
 
@@ -29,6 +29,7 @@ import CommunityFeedScreen from './src/screens/CommunityFeedScreen';
 import BoardsScreen from './src/screens/BoardsScreen';
 import UserSettingsScreen from './src/screens/UserSettingsScreen';
 import TabIcon from './src/components/TabIcon';
+import StorageErrorBoundary from './src/components/StorageErrorBoundary';
 import { useAuth } from './src/hooks/useAuth';
 
 // Create Tab Navigator
@@ -60,8 +61,14 @@ function FashionColorWheelApp() {
         console.log('✅ initializeAppConfig() completed');
 
         // Step 2: Initialize storage layer (required by API service and auth)
-        await safeStorage.init();
-        console.log('✅ safeStorage.init() completed');
+        try {
+          await safeStorage.init();
+          console.log('✅ safeStorage.init() completed');
+        } catch (storageError) {
+          console.error('❌ safeStorage.init() failed:', storageError);
+          // Continue anyway - safeStorage has internal fallbacks
+          console.warn('⚠️ Continuing with limited storage functionality');
+        }
 
         // Step 3: Run API service and auth initialization in parallel (both depend on storage)
         console.log('🔄 Starting parallel API and auth initialization...');
@@ -170,7 +177,7 @@ function FashionColorWheelApp() {
   return (
     <SafeAreaProvider>
       <GestureHandlerRootView style={styles.fullScreen}>
-        <StatusBar style="auto" />
+        <StatusBar style={getStatusBarStyle()} />
         {renderContent()}
       </GestureHandlerRootView>
     </SafeAreaProvider>
@@ -258,7 +265,9 @@ class AppErrorBoundary extends React.Component {
 export default function App() {
   return (
     <AppErrorBoundary>
-      <FashionColorWheelApp />
+      <StorageErrorBoundary>
+        <FashionColorWheelApp />
+      </StorageErrorBoundary>
     </AppErrorBoundary>
   );
 }

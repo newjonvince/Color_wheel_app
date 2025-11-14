@@ -46,6 +46,7 @@ class OptimizedSafeStorage {
     this.secureStore = SecureStore;
     this.isSecureStoreAvailable = false;
     this.isInitialized = false;
+    this.asyncStorageUnavailable = false; // Track AsyncStorage availability
     this.cache = new Map();
     this.pendingOperations = new Map();
     this.batchQueue = [];
@@ -69,10 +70,34 @@ class OptimizedSafeStorage {
       try {
         // Test AsyncStorage with a safe operation
         const testKey = '__safeStorage_test__';
-        await AsyncStorage.setItem(testKey, 'test');
-        const testValue = await AsyncStorage.getItem(testKey);
-        await AsyncStorage.removeItem(testKey);
-        asyncStorageAvailable = testValue === 'test';
+        
+        // Manual timeout management (safer than Promise.race)
+        const asyncTest = (async () => {
+          await AsyncStorage.setItem(testKey, 'test');
+          const testValue = await AsyncStorage.getItem(testKey);
+          await AsyncStorage.removeItem(testKey);
+          return testValue === 'test';
+        })();
+
+        const testOperation = new Promise((resolve, reject) => {
+          const timeoutId = setTimeout(
+            () => reject(new Error('AsyncStorage test timeout')),
+            5000
+          );
+
+          asyncTest.then(
+            (result) => {
+              clearTimeout(timeoutId);
+              resolve(result);
+            },
+            (error) => {
+              clearTimeout(timeoutId);
+              reject(error);
+            }
+          );
+        });
+        
+        asyncStorageAvailable = await testOperation;
         
         if (__DEV__) {
           console.log('📱 AsyncStorage test:', asyncStorageAvailable ? '✅ Working' : '❌ Failed');
@@ -80,8 +105,12 @@ class OptimizedSafeStorage {
       } catch (asyncError) {
         console.error('❌ AsyncStorage is not available or corrupted:', asyncError.message);
         reportError(asyncError, 'AsyncStorage test failed during initialization');
-        // Don't throw here - let the app continue but log the critical issue
+        
+        // CRITICAL: Mark storage as unavailable but don't crash the app
         asyncStorageAvailable = false;
+        
+        // Set a flag to prevent storage operations
+        this.asyncStorageUnavailable = true;
       }
 
       // Test SecureStore availability (optional dependency)
@@ -267,6 +296,12 @@ class OptimizedSafeStorage {
 
       // Fallback to AsyncStorage (for non-sensitive data or when SecureStore unavailable)
       try {
+        // Check if AsyncStorage is available
+        if (this.asyncStorageUnavailable) {
+          console.warn(`AsyncStorage unavailable, cannot get key '${key}'`);
+          return null;
+        }
+        
         const asyncValue = await AsyncStorage.getItem(key);
         if (asyncValue === null) return null;
 
@@ -279,6 +314,9 @@ class OptimizedSafeStorage {
       } catch (asyncError) {
         console.error(`AsyncStorage.getItem failed for key '${key}':`, asyncError.message);
         reportError(asyncError, `AsyncStorage.getItem failed for key: ${key}`);
+        
+        // Mark AsyncStorage as unavailable to prevent future crashes
+        this.asyncStorageUnavailable = true;
         return null;
       }
 
@@ -332,6 +370,12 @@ class OptimizedSafeStorage {
       // Use AsyncStorage as fallback
       if (!success) {
         try {
+          // Check if AsyncStorage is available
+          if (this.asyncStorageUnavailable) {
+            console.warn(`AsyncStorage unavailable, cannot set key '${key}'`);
+            throw new Error('AsyncStorage unavailable');
+          }
+          
           // For sensitive data in AsyncStorage, warn about insecure storage
           if (isSensitive) {
             console.warn(`Storing sensitive key '${key}' in AsyncStorage (insecure). Consider using SecureStore.`);
@@ -340,6 +384,9 @@ class OptimizedSafeStorage {
         } catch (asyncError) {
           console.error(`AsyncStorage.setItem failed for key '${key}':`, asyncError.message);
           reportError(asyncError, `AsyncStorage.setItem failed for key: ${key}`);
+          
+          // Mark AsyncStorage as unavailable to prevent future crashes
+          this.asyncStorageUnavailable = true;
           throw new Error(`Storage operation failed: ${asyncError.message}`);
         }
       }
@@ -559,6 +606,7 @@ const optimizedSafeStorage = new OptimizedSafeStorage();
 
 // Export optimized interface
 export const safeStorage = {
+  init: () => optimizedSafeStorage.init(), // ✅ CRITICAL FIX: Export init method
   getItem: (key) => optimizedSafeStorage.getItem(key),
   setItem: (key, value, options) => optimizedSafeStorage.setItem(key, value, options),
   removeItem: (key, options) => optimizedSafeStorage.removeItem(key, options),
