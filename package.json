@@ -8,7 +8,9 @@
     "web": "expo start --web",
     "prepare-icons": "node scripts/prepare-icons.js",
     "check-icons": "node scripts/prepare-icons.js",
-    "icon-help": "type REPLACE-ICONS-GUIDE.md"
+    "icon-help": "type REPLACE-ICONS-GUIDE.md",
+    "railway:install": "npm ci --omit=dev",
+    "railway:build": "npm run prepare-icons"
   },
   "dependencies": {
     "@expo/vector-icons": "~14.0.4",
