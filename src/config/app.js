@@ -41,7 +41,7 @@ const createAppConfig = (() => {
     cachedConfig = {
       // Deep linking configuration with validation
       linking: {
-        prefixes: ['colorwheel://'],
+        prefixes: ['colorwheel://', 'https://fashioncolorwheel.app'],
         config: { 
           screens: { 
             Community: 'community', 
@@ -49,6 +49,17 @@ const createAppConfig = (() => {
             Profile: 'profile', 
             Settings: 'settings' 
           } 
+        },
+        // ✅ Add error handling
+        getStateFromPath: (path, options) => {
+          try {
+            // Import getStateFromPath from @react-navigation/native
+            const { getStateFromPath: getStateFromPathDefault } = require('@react-navigation/native');
+            return getStateFromPathDefault(path, options);
+          } catch (error) {
+            logger.error('Deep linking error:', error);
+            return undefined; // Return to initial route
+          }
         },
       },
 
@@ -176,20 +187,16 @@ export const initializeAppConfig = () => {
         });
       }
 
-      // ✅ SAFER: Don't override console in production, use LogBox for noise reduction
       if (IS_PROD) {
-        // Ignore only specific noisy warnings; keep error reporting intact
+        // Production should have minimal LogBox ignores
         LogBox.ignoreLogs([
-          'Setting a timer', // example, add other known non-critical warnings
-          'Require cycle:',
-          'componentWillReceiveProps',
-          'VirtualizedLists should never be nested',
-          'componentWillMount has been renamed',
+          'Setting a timer', // Known RN issue
         ]);
         
-        // Note: Use AppLogger from utils/AppLogger.js for filtered logging
-        // Leave console.* untouched for libraries and React Native internals
-        logger.debug('✅ Production logging configured - using LogBox for noise reduction');
+        // ✅ PRODUCTION: No debug logging at all
+        if (__DEV__) {
+          logger.debug('Production logging configured');
+        }
       }
       
       // Development-specific optimizations

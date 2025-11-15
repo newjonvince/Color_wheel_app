@@ -21,6 +21,7 @@ export default {
       bundleIdentifier: "com.fashioncolorwheel.app",
       buildNumber: "153",
       requireFullScreen: false,
+      associatedDomains: ["applinks:fashioncolorwheel.app"],
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSCameraUsageDescription: "This app uses the camera to capture photos and extract color information for creating fashion color palettes.",

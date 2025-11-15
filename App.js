@@ -1,11 +1,7 @@
 // App.js - Simplified Fashion Color Wheel App
 import 'react-native-gesture-handler';
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import { enableScreens } from 'react-native-screens';
-
-// Performance optimizations
-enableScreens(true);
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 
 // Log suppression handled in initializeAppConfig
 
@@ -31,20 +27,31 @@ import { useAuth } from './src/hooks/useAuth';
 import { validateEnv } from './src/config/env';
 import { logger } from './src/utils/AppLogger';
 
+// Create stable default functions OUTSIDE component
+const DEFAULT_AUTH_HANDLERS = {
+  initializeAuth: async () => {
+    logger.warn('Auth not initialized');
+    return Promise.resolve();
+  },
+  handleLoginSuccess: () => logger.warn('handleLoginSuccess: Auth not initialized'),
+  handleLogout: () => logger.warn('handleLogout: Auth not initialized'),
+};
+
 // Simplified App component with split auth/main flows
 function FashionColorWheelApp() {
   const [isLoading, setIsLoading] = useState(true);
   
-  // ✅ SAFER: Safe destructuring with fallback
-  const authState = useAuth() || {};
+  const authState = useAuth();
+  
+  // Safer destructuring with useMemo for stability
   const {
     user = null,
     loading: authLoading = false,
     isInitialized = false,
-    initializeAuth = async () => { logger.warn('Auth not initialized'); },
-    handleLoginSuccess = () => { logger.warn('Auth not initialized'); },
-    handleLogout = () => { logger.warn('Auth not initialized'); },
-  } = authState;
+    initializeAuth = DEFAULT_AUTH_HANDLERS.initializeAuth,
+    handleLoginSuccess = DEFAULT_AUTH_HANDLERS.handleLoginSuccess,
+    handleLogout = DEFAULT_AUTH_HANDLERS.handleLogout,
+  } = authState || {};
 
   // Validation for debugging
   if (!authState || typeof authState !== 'object') {
@@ -53,13 +60,13 @@ function FashionColorWheelApp() {
 
   // ✅ REACT 18 STRICTMODE: Initialize app with proper AbortController cleanup
   useEffect(() => {
-    // ✅ SAFER: Defensive AbortController creation
-    let controller;
+    let isMounted = true;
+    let controller = null;
+    
     try {
-      controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      controller = new AbortController();
     } catch (error) {
-      logger.warn('AbortController not available, proceeding without cancellation support');
-      controller = null;
+      logger.warn('AbortController not available:', error);
     }
     
     const initialize = async () => {
@@ -83,8 +90,8 @@ function FashionColorWheelApp() {
           logger.warn('⚠️ Continuing with limited storage functionality');
         }
 
-        // ✅ SAFER: Check if aborted before continuing
-        if (controller?.signal?.aborted) {
+        // ✅ SAFER: Check if aborted or unmounted before continuing
+        if (!isMounted || controller?.signal?.aborted) {
           logger.debug('🛑 Initialization aborted before auth step');
           return;
         }
@@ -96,27 +103,40 @@ function FashionColorWheelApp() {
           initializeAuth({ signal: controller?.signal }).then(() => ({ success: true, service: 'Auth' }))
         ]);
 
-        // ✅ SAFER: Check if aborted after async operations
-        if (controller?.signal?.aborted) {
+        // ✅ SAFER: Check if aborted or unmounted after async operations
+        if (!isMounted || controller?.signal?.aborted) {
           logger.debug('🛑 Initialization aborted after async operations');
           return; // Don't update state if aborted
         }
 
-        // Check results and continue with degraded functionality
-        if (apiResult.status === 'rejected') {
-          logger.warn('⚠️ API service failed, running in offline mode:', apiResult.reason);
-          // App can still work without API (local palette generation)
+        // ✅ Track service states and notify user
+        const serviceStates = {
+          api: apiResult.status === 'fulfilled',
+          auth: authResult.status === 'fulfilled',
+        };
+
+        if (!serviceStates.api) {
+          logger.warn('API offline:', apiResult.reason);
+          // ✅ Show user notification
+          Alert.alert('Offline Mode', 'App running without cloud features');
         }
 
-        if (authResult.status === 'rejected') {
-          logger.warn('⚠️ Auth failed, showing login screen:', authResult.reason);
-          // Auth failure is expected if user isn't logged in
+        if (!serviceStates.auth) {
+          logger.warn('Auth failed:', authResult.reason);
+          // Auth failure is OK - user will see login screen
+        }
+
+        // ✅ Store service states for UI decisions
+        try {
+          await safeStorage.setItem('serviceStates', JSON.stringify(serviceStates));
+        } catch (storageError) {
+          logger.warn('Failed to store service states:', storageError);
         }
         
         logger.info('✅ All initialization steps completed');
       } catch (error) {
-        // ✅ SAFER: Don't log errors if aborted
-        if (controller?.signal?.aborted) {
+        // ✅ SAFER: Don't log errors if aborted or unmounted
+        if (!isMounted || controller?.signal?.aborted) {
           logger.debug('🛑 Initialization aborted during error handling');
           return;
         }
@@ -129,8 +149,8 @@ function FashionColorWheelApp() {
           cause: error.cause
         });
       } finally {
-        // ✅ SAFER: Only update state if not aborted
-        if (!controller?.signal?.aborted) {
+        // ✅ SAFER: Only update state if not aborted and still mounted
+        if (isMounted && !controller?.signal?.aborted) {
           setIsLoading(false);
         }
       }
@@ -140,14 +160,8 @@ function FashionColorWheelApp() {
     
     // ✅ REACT 18 STRICTMODE: Cleanup AbortController
     return () => {
-      if (controller?.abort) {
-        logger.debug('🧹 App cleanup: Aborting initialization');
-        try {
-          controller.abort();
-        } catch (error) {
-          logger.warn('Failed to abort controller during cleanup:', error);
-        }
-      }
+      isMounted = false;
+      controller?.abort();
     };
   }, []); // Empty deps = run once
   
@@ -158,6 +172,7 @@ function FashionColorWheelApp() {
     if (isLoading || authLoading) {
       return (
         <SafeAreaView style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#e74c3c" />
           <Text style={styles.loadingText}>🎨 Loading Fashion Color Wheel...</Text>
         </SafeAreaView>
       );
