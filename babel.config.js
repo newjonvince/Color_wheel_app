@@ -3,14 +3,15 @@ module.exports = function (api) {
   api.cache(true);
   
   const isProduction = process.env.NODE_ENV === 'production';
+  const isEASBuild = process.env.EAS_BUILD === 'true';
 
   return {
     presets: ['babel-preset-expo'],
     plugins: [
-      // Production: Remove console logs but preserve fatal logs
-      ...(isProduction ? [
+      // Production: Remove console logs but preserve fatal logs (skip in EAS builds for now)
+      ...(isProduction && !isEASBuild ? [
         [
-          'transform-remove-console',
+          'babel-plugin-transform-remove-console',
           {
             exclude: ['error', 'warn'] // Keep console.error and console.warn for debugging crashes
           }
