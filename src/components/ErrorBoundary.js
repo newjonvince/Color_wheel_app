@@ -68,10 +68,14 @@ class ErrorBoundary extends React.Component {
       }
     }
 
-    // Optional auto-report to backend
-    if (this.props.autoReport && this.props.reportUrl && !__DEV__) {
-      const res = await postJson(this.props.reportUrl, { type: 'client_error', ...errorDetails });
-      this.setState({ sent: !!res?.ok });
+    // Optional auto-report to backend (always enabled in production)
+    if (this.props.autoReport && this.props.reportUrl) {
+      try {
+        const res = await postJson(this.props.reportUrl, { type: 'client_error', ...errorDetails });
+        this.setState({ sent: !!res?.ok });
+      } catch (reportError) {
+        console.error('Failed to send error report:', reportError);
+      }
     }
   }
 
@@ -119,7 +123,8 @@ class ErrorBoundary extends React.Component {
 
   render() {
     if (this.state.hasError) {
-      const showDev = typeof __DEV__ !== 'undefined' ? __DEV__ : false;
+      // Always show debug info in production for better error reporting
+      const showDev = true;
       const { sent } = this.state;
 
       return (

@@ -22,33 +22,34 @@ import { safeStorage } from './src/utils/safeStorage';
 import safeApiService from './src/services/safeApiService';
 
 // Screen imports - let error boundary catch failures instead of faking screens
-import LoginScreen from './src/screens/LoginScreen';
-import SignUpScreen from './src/screens/SignUpScreen';
-import ColorWheelScreen from './src/screens/ColorWheelScreen';
-import CommunityFeedScreen from './src/screens/CommunityFeedScreen';
-import BoardsScreen from './src/screens/BoardsScreen';
-import UserSettingsScreen from './src/screens/UserSettingsScreen';
-import TabIcon from './src/components/TabIcon';
+import AuthenticatedApp from './src/components/AuthenticatedApp';
+import UnauthenticatedApp from './src/components/UnauthenticatedApp';
 import StorageErrorBoundary from './src/components/StorageErrorBoundary';
+import CrashRecoveryBoundary from './src/components/CrashRecoveryBoundary';
+import AppErrorBoundary from './src/components/AppErrorBoundary';
 import { useAuth } from './src/hooks/useAuth';
+import { validateEnv } from './src/config/env';
+import { logger } from './src/utils/AppLogger';
 
-// Create Tab Navigator
-const Tab = createBottomTabNavigator();
-
-// Simplified App component
+// Simplified App component with split auth/main flows
 function FashionColorWheelApp() {
   const [isLoading, setIsLoading] = useState(true);
-  const [showSignUp, setShowSignUp] = useState(false);
   
-  // Auth hook - let error boundary catch render-time errors
+  // ✅ SAFER: Safe destructuring with fallback
+  const authState = useAuth() || {};
   const {
     user = null,
     loading: authLoading = false,
     isInitialized = false,
-    initializeAuth = async () => {},
-    handleLoginSuccess = () => {},
-    handleLogout = () => {},
-  } = useAuth();
+    initializeAuth = async () => { console.warn('Auth not initialized'); },
+    handleLoginSuccess = () => { console.warn('Auth not initialized'); },
+    handleLogout = () => { console.warn('Auth not initialized'); },
+  } = authState;
+
+  // Validation for debugging
+  if (!authState || typeof authState !== 'object') {
+    console.error('🚨 useAuth returned invalid state:', authState);
+  }
 
   // Initialize app - sequential for dependency safety, parallel where safe
   useEffect(() => {
@@ -56,11 +57,14 @@ function FashionColorWheelApp() {
       try {
         console.log('🔄 Starting app initialization...');
         
-        // Step 1: Initialize app config first (required for other steps)
+        // Step 1: Validate environment variables first
+        validateEnv(); // Fail fast if config is broken
+        
+        // Step 2: Initialize app config (required for other steps)
         await initializeAppConfig();
         console.log('✅ initializeAppConfig() completed');
 
-        // Step 2: Initialize storage layer (required by API service and auth)
+        // Step 3: Initialize storage layer (required by API service and auth)
         try {
           await safeStorage.init();
           console.log('✅ safeStorage.init() completed');
@@ -70,12 +74,23 @@ function FashionColorWheelApp() {
           console.warn('⚠️ Continuing with limited storage functionality');
         }
 
-        // Step 3: Run API service and auth initialization in parallel (both depend on storage)
+        // Step 4: ✅ SAFER: Graceful degradation pattern
         console.log('🔄 Starting parallel API and auth initialization...');
-        await Promise.all([
-          safeApiService.ready.then(() => console.log('✅ safeApiService.ready completed')).catch(e => { console.error('❌ safeApiService.ready failed:', e); throw e; }),
-          initializeAuth().then(() => console.log('✅ initializeAuth() completed')).catch(e => { console.error('❌ initializeAuth() failed:', e); throw e; }),
+        const [apiResult, authResult] = await Promise.allSettled([
+          safeApiService.ready.then(() => ({ success: true, service: 'API' })),
+          initializeAuth().then(() => ({ success: true, service: 'Auth' }))
         ]);
+
+        // Check results and continue with degraded functionality
+        if (apiResult.status === 'rejected') {
+          console.error('⚠️ API service failed, running in offline mode:', apiResult.reason);
+          // App can still work without API (local palette generation)
+        }
+
+        if (authResult.status === 'rejected') {
+          console.error('⚠️ Auth failed, showing login screen:', authResult.reason);
+          // Auth failure is expected if user isn't logged in
+        }
         
         console.log('✅ All initialization steps completed');
       } catch (error) {
@@ -92,19 +107,12 @@ function FashionColorWheelApp() {
     };
 
     initialize();
-  }, [initializeAuth]);
+    
+    // ✅ SAFER: Run only once on mount
+  }, []); // Empty deps = run once
   
 
-  // Stable TabIcon component to avoid re-renders
-  const TabIconMemo = useCallback(({ focused, name }) => <TabIcon focused={focused} name={name} />, []);
-
-  // Stable screen options function using APP_CONFIG
-  const getScreenOptions = useCallback(({ route }) => ({
-    tabBarIcon: ({ focused, color, size }) => <TabIconMemo focused={focused} name={route.name} />,
-    ...APP_CONFIG.tabNavigation.screenOptions,
-  }), [TabIconMemo]);
-
-  // Render content based on app state
+  // ✅ Simplified render content with split components
   const renderContent = () => {
     // Loading screen
     if (isLoading || authLoading) {
@@ -115,72 +123,30 @@ function FashionColorWheelApp() {
       );
     }
 
-    // Login/SignUp screen - simple authentication gating
+    // Split auth flow - prevents unnecessary re-renders
     if (!isInitialized || !user) {
-      return (
-        <SafeAreaView style={styles.container}>
-          {showSignUp ? (
-            <View style={styles.authContainer}>
-              <Text style={styles.authTitle}>Sign Up</Text>
-              <Text style={styles.authSubtitle}>Create your account</Text>
-              <Text 
-                style={styles.switchAuth}
-                onPress={() => setShowSignUp(false)}
-              >
-                Already have an account? Login
-              </Text>
-            </View>
-          ) : (
-            <LoginScreen 
-              onLoginSuccess={handleLoginSuccess}
-              onSwitchToSignUp={() => setShowSignUp(true)}
-            />
-          )}
-        </SafeAreaView>
-      );
+      return <UnauthenticatedApp handleLoginSuccess={handleLoginSuccess} />;
     }
 
-    // Main app with tab navigation
-    return (
-      <NavigationContainer linking={APP_CONFIG.linking}>
-        <Tab.Navigator
-          initialRouteName={APP_CONFIG.tabNavigation.initialRouteName}
-          screenOptions={getScreenOptions}
-          {...APP_CONFIG.tabNavigation.options}
-        >
-          <Tab.Screen 
-            name="ColorWheel" 
-            component={ColorWheelScreen}
-            options={{ title: 'Color Wheel' }}
-          />
-          <Tab.Screen 
-            name="Community" 
-            component={CommunityFeedScreen}
-            options={{ title: 'Community' }}
-          />
-          <Tab.Screen 
-            name="Profile" 
-            component={BoardsScreen}
-            options={{ title: 'Profile' }}
-          />
-          <Tab.Screen 
-            name="Settings" 
-            component={UserSettingsScreen}
-            options={{ title: 'Settings' }}
-          />
-        </Tab.Navigator>
-      </NavigationContainer>
-    );
+    // Main authenticated app
+    return <AuthenticatedApp user={user} handleLogout={handleLogout} />;
   };
 
-  // Top-level wrapper with GestureHandlerRootView for gesture library stability
+
+  // Top-level wrapper with comprehensive error boundaries
   return (
-    <SafeAreaProvider>
-      <GestureHandlerRootView style={styles.fullScreen}>
-        <StatusBar style={getStatusBarStyle()} />
-        {renderContent()}
-      </GestureHandlerRootView>
-    </SafeAreaProvider>
+    <AppErrorBoundary>
+      <SafeAreaProvider>
+        <GestureHandlerRootView style={styles.fullScreen}>
+          <StatusBar style={getStatusBarStyle()} />
+          <StorageErrorBoundary>
+            <CrashRecoveryBoundary>
+              {renderContent()}
+            </CrashRecoveryBoundary>
+          </StorageErrorBoundary>
+        </GestureHandlerRootView>
+      </SafeAreaProvider>
+    </AppErrorBoundary>
   );
 }
 
@@ -261,13 +227,15 @@ class AppErrorBoundary extends React.Component {
   }
 }
 
-// Main app export with error boundary
+// Main app export with enhanced error boundaries
 export default function App() {
   return (
-    <AppErrorBoundary>
-      <StorageErrorBoundary>
-        <FashionColorWheelApp />
-      </StorageErrorBoundary>
-    </AppErrorBoundary>
+    <CrashRecoveryBoundary>
+      <AppErrorBoundary>
+        <StorageErrorBoundary>
+          <FashionColorWheelApp />
+        </StorageErrorBoundary>
+      </AppErrorBoundary>
+    </CrashRecoveryBoundary>
   );
 }

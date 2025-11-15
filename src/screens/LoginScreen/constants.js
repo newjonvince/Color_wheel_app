@@ -102,26 +102,104 @@ export const withTimeout = (maybePromise, timeoutMs) => {
   });
 };
 
-// Simple response parser
+// ✅ Enhanced response parser to handle all response shapes
 export const parseLoginResponse = (response) => {
-  const data = response?.data || response;
+  // Handle various response structures
+  let data;
   
-  if (!data) {
+  if (!response) {
     throw new Error('Empty response');
   }
+  
+  // Try different response structures
+  if (response.data) {
+    data = response.data;
+  } else if (response.body) {
+    data = response.body;
+  } else if (response.result) {
+    data = response.result;
+  } else {
+    data = response;
+  }
+  
+  if (!data || typeof data !== 'object') {
+    throw new Error('Invalid response format');
+  }
 
-  const user = data.user || data;
-  const token = data.token || data.authToken || user?.token || user?.authToken;
+  // Extract user from various possible locations
+  let user;
+  if (data.user && typeof data.user === 'object') {
+    user = data.user;
+  } else if (data.profile && typeof data.profile === 'object') {
+    user = data.profile;
+  } else if (data.account && typeof data.account === 'object') {
+    user = data.account;
+  } else if (data.id || data.email) {
+    // User data is at root level
+    user = data;
+  } else {
+    throw new Error('User data not found in response');
+  }
 
+  // Extract token from various possible locations
+  const token = data.token || 
+                data.authToken || 
+                data.accessToken || 
+                data.jwt || 
+                data.access_token ||
+                user?.token || 
+                user?.authToken ||
+                user?.accessToken ||
+                user?.jwt;
+
+  // Validate user object
   if (!user || typeof user !== 'object') {
-    throw new Error('Invalid user data');
+    throw new Error('Invalid user data structure');
   }
 
-  if (!user.id && !user.email) {
-    throw new Error('User missing required fields');
+  // Ensure user has required fields
+  if (!user.id && !user._id && !user.userId && !user.email) {
+    throw new Error('User missing required identifier (id, _id, userId, or email)');
   }
 
-  return { user, token };
+  // Normalize user object
+  const normalizedUser = {
+    id: user.id || user._id || user.userId,
+    email: user.email,
+    username: user.username || user.name || user.displayName,
+    ...user // Include all other user properties
+  };
+
+  return { user: normalizedUser, token };
+};
+
+// ✅ Input sanitization to prevent injection attacks and DOS
+export const sanitizeEmail = (email) => {
+  if (!email) return '';
+  
+  return email
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '') // Remove all whitespace
+    .replace(/[<>'"&]/g, '') // Remove potentially dangerous characters
+    .slice(0, 255); // Prevent extremely long inputs
+};
+
+export const sanitizePassword = (password) => {
+  if (!password) return '';
+  
+  // Don't trim password (spaces might be intentional)
+  // But limit length to prevent DOS attacks
+  return password.slice(0, 128);
+};
+
+export const sanitizeInput = (input, maxLength = 255) => {
+  if (!input) return '';
+  
+  return input
+    .trim()
+    .replace(/[<>'"&]/g, '') // Remove potentially dangerous characters
+    .slice(0, maxLength);
 };
 
 // Simple error message extraction
@@ -152,5 +230,6 @@ export const getErrorMessage = (error) => {
     return 'Server error. Please try again later.';
   }
 
-  return __DEV__ ? errorMessage : 'An error occurred. Please try again.';
+  // Always return detailed error in production for better user experience
+  return errorMessage || 'An error occurred. Please try again.';
 };

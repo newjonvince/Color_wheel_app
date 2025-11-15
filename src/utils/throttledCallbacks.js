@@ -23,15 +23,27 @@ export const useThrottledCallbacks = ({
   const pendingSelectedUpdate = useRef(null);
   const isGestureActive = useRef(false);
 
-  // Cleanup timeouts on unmount
+  // ✅ SAFER: Race condition prevention in cleanup
+  const isMountedRef = useRef(true);
+  
   useEffect(() => {
+    isMountedRef.current = true;
+    
     return () => {
+      isMountedRef.current = false;
+      
+      // Clear pending timeouts safely
       if (pendingPaletteUpdate.current) {
         clearTimeout(pendingPaletteUpdate.current);
+        pendingPaletteUpdate.current = null;
       }
       if (pendingSelectedUpdate.current) {
         clearTimeout(pendingSelectedUpdate.current);
+        pendingSelectedUpdate.current = null;
       }
+      
+      // Reset gesture state
+      isGestureActive.current = false;
     };
   }, []);
 
@@ -62,8 +74,10 @@ export const useThrottledCallbacks = ({
       
       const delay = throttleMs - (now - lastPaletteEmit.current);
       pendingPaletteUpdate.current = setTimeout(() => {
-        if (onColorsChange) onColorsChange(colors);
-        lastPaletteEmit.current = Date.now();
+        if (isMountedRef.current && onColorsChange) {
+          onColorsChange(colors);
+          lastPaletteEmit.current = Date.now();
+        }
         pendingPaletteUpdate.current = null;
       }, Math.max(0, delay));
     }
@@ -224,8 +238,12 @@ export const useRAFThrottle = (callback) => {
     
     if (rafId.current === null) {
       rafId.current = requestAnimationFrame(() => {
-        if (lastArgs.current) {
-          callback(...lastArgs.current);
+        if (lastArgs.current && typeof callback === 'function') {
+          try {
+            callback(...lastArgs.current);
+          } catch (callbackError) {
+            console.error('RAF throttled callback error:', callbackError);
+          }
         }
         rafId.current = null;
       });

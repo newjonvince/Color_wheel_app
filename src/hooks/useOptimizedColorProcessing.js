@@ -10,32 +10,70 @@ import { hexToRgb, hexToHsl, hslToHex } from '../utils/optimizedColor';
  * - Caches across calls with Map-based memoization
  * - Eliminates redundant HEX→RGB conversions
  */
-export const useOptimizedColorProcessing = () => {
-  // Module-level cache for frequently used conversions
-  const colorCache = useRef(new Map());
-  const contrastCache = useRef(new Map());
+// SAFER: LRU (Least Recently Used) cache with proper limits
+class LRUCache {
+  constructor(maxSize = 500) {
+    this.maxSize = maxSize;
+    this.cache = new Map();
+  }
   
-  // Clear cache when it gets too large (prevent memory leaks)
-  const clearCacheIfNeeded = useCallback(() => {
-    if (colorCache.current.size > 500) {
-      // Keep only the most recent 250 entries
-      const entries = Array.from(colorCache.current.entries());
-      colorCache.current.clear();
-      entries.slice(-250).forEach(([key, value]) => {
-        colorCache.current.set(key, value);
-      });
+  get(key) {
+    if (!this.cache.has(key)) {
+      return undefined;
     }
-  }, []);
+    
+    // Move to end (most recently used)
+    const value = this.cache.get(key);
+    this.cache.delete(key);
+    this.cache.set(key, value);
+    
+    return value;
+  }
+  
+  set(key, value) {
+    // If key exists, delete it first to update position
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    }
+    
+    // Evict oldest (first) entry if at capacity
+    if (this.cache.size >= this.maxSize) {
+      const firstKey = this.cache.keys().next().value;
+      this.cache.delete(firstKey);
+    }
+    
+    this.cache.set(key, value);
+  }
+  
+  has(key) {
+    return this.cache.has(key);
+  }
+  
+  clear() {
+    this.cache.clear();
+  }
+  
+  get size() {
+    return this.cache.size;
+  }
+}
 
+export const useOptimizedColorProcessing = () => {
+  // Use LRU caches with reasonable limits
+  const colorCache = useRef(new LRUCache(500));
+  const contrastCache = useRef(new LRUCache(1000)); // More contrast pairs than colors
+  
   /**
    * Optimized analyzeColor - implements your exact strategy
    * Computes brightness once, derives all flags from it
    */
   const analyzeColor = useCallback((hex) => {
-    // Check cache first
     const cacheKey = hex.toLowerCase();
-    if (colorCache.current.has(cacheKey)) {
-      return colorCache.current.get(cacheKey);
+    
+    // LRU cache handles staleness automatically
+    const cached = colorCache.current.get(cacheKey);
+    if (cached) {
+      return cached;
     }
 
     // Single HEX→RGB conversion (not three!)
@@ -71,12 +109,11 @@ export const useOptimizedColorProcessing = () => {
       }
     };
     
-    // Cache the result
-    clearCacheIfNeeded();
+    // Cache with automatic eviction
     colorCache.current.set(cacheKey, result);
     
     return result;
-  }, [clearCacheIfNeeded]);
+  }, []);
 
   /**
    * Optimized palette contrast analysis - implements your caching strategy

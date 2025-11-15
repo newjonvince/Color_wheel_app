@@ -1,18 +1,27 @@
 // utils/safeStorage.js - Secure storage with expo-secure-store and proper initialization
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { safeAsyncStorage } from './safeAsyncStorage';
 
 // Error monitoring for critical failures
 const reportError = (error, context) => {
-  if (__DEV__) {
-    console.error(`[SafeStorage] ${context}:`, error);
-  } else {
-    // In production, send to error monitoring service (Sentry, Bugsnag, etc.)
-    try {
-      // Example: Sentry.captureException(error, { tags: { context } });
-      console.error(`[SafeStorage] ${context}:`, error.message);
-    } catch (reportingError) {
-      console.error('Failed to report error:', reportingError);
-    }
+  // Always log critical storage errors in production
+  console.error(`[SafeStorage] ${context}:`, error);
+  
+  // Enhanced production error reporting
+  try {
+    // Log structured error data for production debugging
+    console.error('SafeStorage Error Details:', {
+      context,
+      message: error?.message || 'Unknown error',
+      name: error?.name || 'UnknownError',
+      stack: error?.stack?.substring(0, 500), // Truncated stack trace
+      timestamp: new Date().toISOString(),
+      platform: 'iOS Production'
+    });
+    
+    // Future: Add crash analytics service here
+    // Example: Sentry.captureException(error, { tags: { context, platform: 'iOS' } });
+  } catch (reportingError) {
+    console.error('Failed to report SafeStorage error:', reportingError);
   }
 };
 
@@ -69,40 +78,12 @@ class OptimizedSafeStorage {
       // Test AsyncStorage first (critical dependency)
       let asyncStorageAvailable = false;
       try {
-        // Test AsyncStorage with a safe operation
-        const testKey = '__safeStorage_test__';
+        // Initialize safe AsyncStorage wrapper
+        await safeAsyncStorage.init();
+        asyncStorageAvailable = safeAsyncStorage.isAsyncStorageAvailable();
         
-        // Manual timeout management (safer than Promise.race)
-        const asyncTest = (async () => {
-          await AsyncStorage.setItem(testKey, 'test');
-          const testValue = await AsyncStorage.getItem(testKey);
-          await AsyncStorage.removeItem(testKey);
-          return testValue === 'test';
-        })();
-
-        const testOperation = new Promise((resolve, reject) => {
-          const timeoutId = setTimeout(
-            () => reject(new Error('AsyncStorage test timeout')),
-            5000
-          );
-
-          asyncTest.then(
-            (result) => {
-              clearTimeout(timeoutId);
-              resolve(result);
-            },
-            (error) => {
-              clearTimeout(timeoutId);
-              reject(error);
-            }
-          );
-        });
-        
-        asyncStorageAvailable = await testOperation;
-        
-        if (__DEV__) {
-          console.log('📱 AsyncStorage test:', asyncStorageAvailable ? '✅ Working' : '❌ Failed');
-        }
+        // Always log critical storage status in production
+        console.log('📱 AsyncStorage status:', asyncStorageAvailable ? '✅ Working' : '❌ Failed');
       } catch (asyncError) {
         console.error('❌ AsyncStorage is not available or corrupted:', asyncError.message);
         reportError(asyncError, 'AsyncStorage test failed during initialization');
@@ -139,9 +120,8 @@ class OptimizedSafeStorage {
           });
 
           this.isSecureStoreAvailable = await secureOperation;
-          if (__DEV__) {
-            console.log('🔐 SecureStore test:', this.isSecureStoreAvailable ? '✅ Available' : '❌ Not available');
-          }
+          // Always log SecureStore status in production for debugging
+          console.log('🔐 SecureStore status:', this.isSecureStoreAvailable ? '✅ Available' : '❌ Not available');
         } catch (secureError) {
           console.warn('SecureStore availability check failed:', secureError.message);
           reportError(secureError, 'SecureStore availability check failed');
@@ -157,12 +137,12 @@ class OptimizedSafeStorage {
       
       this.isInitialized = true;
       
-      if (__DEV__) {
-        console.log('🔐 SafeStorage initialized:', {
-          asyncStorage: asyncStorageAvailable,
-          secureStore: this.isSecureStoreAvailable
-        });
-      }
+      // Always log initialization status in production for debugging
+      console.log('🔐 SafeStorage initialized:', {
+        asyncStorage: asyncStorageAvailable,
+        secureStore: this.isSecureStoreAvailable,
+        platform: 'iOS Production'
+      });
 
       // Warn if AsyncStorage failed but continue
       if (!asyncStorageAvailable) {
@@ -347,7 +327,7 @@ class OptimizedSafeStorage {
           return null;
         }
         
-        const asyncValue = await AsyncStorage.getItem(key);
+        const asyncValue = await safeAsyncStorage.getItem(key);
         if (asyncValue === null) return null;
 
         // For sensitive data in AsyncStorage, warn about insecure storage
@@ -429,7 +409,7 @@ class OptimizedSafeStorage {
           if (isSensitive) {
             console.warn(`Storing sensitive key '${key}' in AsyncStorage (insecure). Consider using SecureStore.`);
           }
-          await AsyncStorage.setItem(key, serialized);
+          await safeAsyncStorage.setItem(key, serialized);
         } catch (asyncError) {
           console.error(`AsyncStorage.setItem failed for key '${key}':`, asyncError.message);
           reportError(asyncError, `AsyncStorage.setItem failed for key: ${key}`);
@@ -470,7 +450,7 @@ class OptimizedSafeStorage {
       
       // AsyncStorage removal with error handling
       promises.push(
-        AsyncStorage.removeItem(key).catch((asyncError) => {
+        safeAsyncStorage.removeItem(key).catch((asyncError) => {
           console.error(`AsyncStorage.removeItem failed for key '${key}':`, asyncError.message);
           reportError(asyncError, `AsyncStorage.removeItem failed for key: ${key}`);
           // Don't throw - continue with other operations
@@ -565,7 +545,7 @@ class OptimizedSafeStorage {
       // Get all AsyncStorage keys with error handling
       let allKeys = [];
       try {
-        allKeys = await AsyncStorage.getAllKeys();
+        allKeys = await safeAsyncStorage.getAllKeys();
       } catch (asyncError) {
         console.error('AsyncStorage.getAllKeys failed during clearAuth:', asyncError.message);
         reportError(asyncError, 'AsyncStorage.getAllKeys failed during clearAuth');
@@ -605,7 +585,7 @@ class OptimizedSafeStorage {
     try {
       let allKeys = [];
       try {
-        allKeys = await AsyncStorage.getAllKeys();
+        allKeys = await safeAsyncStorage.getAllKeys();
       } catch (asyncError) {
         console.error('AsyncStorage.getAllKeys failed during getStats:', asyncError.message);
         reportError(asyncError, 'AsyncStorage.getAllKeys failed during getStats');

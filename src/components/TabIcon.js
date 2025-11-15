@@ -97,14 +97,11 @@ const TabIcon = React.memo(({ name, focused, size = 24, color = '#666' }) => {
   );
 });
 
-// TODO: To use custom PNG icons instead of emojis:
-// 1. Add your PNG files to assets/icons/ folder with names:
-//    - community-focused.png, community-unfocused.png
-//    - colorwheel-focused.png, colorwheel-unfocused.png  
-//    - profile-focused.png, profile-unfocused.png
-//    - settings-focused.png, settings-unfocused.png
-// 2. Replace the emoji TAB_ICONS with require() statements
-// 3. Use Image component instead of Text component
+// Production Note: Currently using emoji icons for cross-platform compatibility
+// Custom PNG icons can be added by:
+// 1. Adding PNG files to assets/icons/ folder
+// 2. Updating iconConfig in APP_CONFIG to use 'image' library
+// 3. The TabIcon component will automatically use PNG files
 
 const styles = StyleSheet.create({
   iconContainer: {

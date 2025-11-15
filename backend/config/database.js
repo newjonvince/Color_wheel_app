@@ -88,16 +88,11 @@ function resolveConfigFromEnv(env) {
     };
   }
 
-  // 4) Last-resort defaults
+  // 4) Production-safe defaults (no localhost fallback)
   if (!cfg) {
-    cfg = {
-      host: '127.0.0.1',
-      port: 3306,
-      user: 'root',
-      password: '',
-      database: 'app',
-      ssl: false,
-    };
+    console.error('❌ CRITICAL: No database configuration found in environment variables!');
+    console.error('Required: DB_HOST/MYSQLHOST or DATABASE_URL');
+    throw new Error('Database configuration missing - cannot start in production without valid DB config');
   }
 
   // Normalize SSL config for mysql2

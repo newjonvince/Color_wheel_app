@@ -172,33 +172,20 @@ export const initializeAppConfig = () => {
         });
       }
 
-      // Optimized log suppression for production
+      // ✅ SAFER: Don't override console in production, use LogBox for noise reduction
       if (IS_PROD) {
         // Ignore only specific noisy warnings; keep error reporting intact
         LogBox.ignoreLogs([
           'Setting a timer', // example, add other known non-critical warnings
           'Require cycle:',
           'componentWillReceiveProps',
+          'VirtualizedLists should never be nested',
+          'componentWillMount has been renamed',
         ]);
-
-        // Wrap console functions to forward only errors to your monitoring system,
-        // while keeping them operational during runtime
-        const originalError = console.error;
-        console.log = (...args) => {
-          // optional: send low-priority logs to a lightweight logger or drop them
-        };
-        console.info = (...args) => {};
-        console.warn = (...args) => {
-          // optionally sample or forward certain warnings
-        };
-        // Keep console.error unchanged but forward to monitoring
-        console.error = function (...args) {
-          try {
-            // Example: send to Sentry, Datadog etc
-            // Sentry.captureException(args[0]);
-          } catch (e) {/* ignore */}
-          originalError.apply(console, args);
-        };
+        
+        // Note: Use AppLogger from utils/AppLogger.js for filtered logging
+        // Leave console.* untouched for libraries and React Native internals
+        console.log('✅ Production logging configured - using LogBox for noise reduction');
       }
       
       // Development-specific optimizations

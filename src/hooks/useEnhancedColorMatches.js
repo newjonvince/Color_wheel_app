@@ -2,7 +2,7 @@
 // Extends the original useColorMatches with social features and better API integration
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { safeAsyncStorage } from '../utils/safeAsyncStorage';
 import ApiService from '../services/safeApiService';
 import { useUserPreferences } from '../utils/userPreferences';
 
@@ -33,7 +33,7 @@ export const useEnhancedColorMatches = () => {
    */
   const loadCachedMatches = useCallback(async () => {
     try {
-      const cached = await AsyncStorage.getItem(STORAGE_KEY);
+      const cached = await safeAsyncStorage.getItem(STORAGE_KEY);
       if (cached) {
         const { matches, timestamp } = JSON.parse(cached);
         
@@ -64,7 +64,7 @@ export const useEnhancedColorMatches = () => {
         matches: matches.slice(0, MAX_LOCAL_MATCHES),
         timestamp: Date.now()
       };
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(cacheData));
+      await safeAsyncStorage.setItem(STORAGE_KEY, JSON.stringify(cacheData));
     } catch (error) {
       console.warn('Failed to cache color matches:', error);
     }
@@ -76,8 +76,14 @@ export const useEnhancedColorMatches = () => {
   const fetchColorMatches = useCallback(async (force = false) => {
     // Skip if already fetching or recently fetched (unless forced)
     if (isFetchingRef.current || (!force && lastFetch && Date.now() - lastFetch < 30000)) {
-      return;
+      // ✅ FIX: Return cached data instead of undefined
+      return colorMatches;
     }
+
+    // ✅ FIX: Set flag BEFORE any async operations to prevent race condition
+    isFetchingRef.current = true;
+    setLoading(true);
+    setError(null);
 
     // Cancel any ongoing request
     if (abortControllerRef.current) {
@@ -85,9 +91,6 @@ export const useEnhancedColorMatches = () => {
     }
 
     abortControllerRef.current = new AbortController();
-    isFetchingRef.current = true;
-    setLoading(true);
-    setError(null);
 
     try {
       // Fetch user's color matches with abort signal
@@ -117,7 +120,7 @@ export const useEnhancedColorMatches = () => {
         setError(error.message || 'Failed to load color matches');
         
         // Fallback to cached data if available
-        const cached = await AsyncStorage.getItem(STORAGE_KEY);
+        const cached = await safeAsyncStorage.getItem(STORAGE_KEY);
         if (cached) {
           const { matches } = JSON.parse(cached);
           setColorMatches(matches);
@@ -128,22 +131,40 @@ export const useEnhancedColorMatches = () => {
       setLoading(false);
       abortControllerRef.current = null;
     }
-  }, [lastFetch, cacheMatches]);
+  }, [lastFetch, cacheMatches, colorMatches]);
 
   /**
    * Enhance color matches with like information
+   * ✅ FIX: Use batch API call instead of N individual calls
    */
   const enhanceMatchesWithLikes = useCallback(async (matches) => {
     if (!matches || matches.length === 0) return [];
 
     try {
-      // Get like information for all matches
+      // ✅ FIX: Batch API call for all likes at once
       const matchIds = matches.map(match => match.id);
-      const likePromises = matchIds.map(id => 
-        ApiService.getColorMatchLikes(id).catch(() => ({ like_count: 0, is_liked: false }))
-      );
       
-      const likeResults = await Promise.all(likePromises);
+      // Check if batch likes API exists, otherwise fall back to individual calls
+      let likeResults;
+      if (ApiService.getBatchColorMatchLikes) {
+        // Use batch API if available
+        likeResults = await ApiService.getBatchColorMatchLikes(matchIds);
+      } else {
+        // ✅ IMPROVED: Limit concurrent requests to prevent overwhelming server
+        const BATCH_SIZE = 5;
+        const batches = [];
+        
+        for (let i = 0; i < matchIds.length; i += BATCH_SIZE) {
+          const batchIds = matchIds.slice(i, i + BATCH_SIZE);
+          const batchPromises = batchIds.map(id => 
+            ApiService.getColorMatchLikes(id).catch(() => ({ like_count: 0, is_liked: false }))
+          );
+          batches.push(Promise.all(batchPromises));
+        }
+        
+        const batchResults = await Promise.all(batches);
+        likeResults = batchResults.flat();
+      }
       
       // Enhance matches with like data
       return matches.map((match, index) => ({

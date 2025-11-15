@@ -82,22 +82,24 @@ export const verifyFullColorWheelCompatibility = () => {
 
 // Runtime dependency verification for FullColorWheel
 export const verifyRuntimeDependencies = () => {
-  if (__DEV__) {
+  try {
     const fullCheck = checkFullColorWheelDependencies();
     
+    // Always log dependency status for production debugging
     console.log('🔍 FullColorWheel Dependency Check:');
     console.log('Status:', fullCheck.compatible ? '✅ Ready' : '❌ Issues found');
     
     if (fullCheck.errors.length > 0) {
-      console.warn('FullColorWheel errors:', fullCheck.errors);
+      console.error('FullColorWheel errors:', fullCheck.errors);
     }
     
     if (fullCheck.warnings.length > 0) {
-      console.log('FullColorWheel warnings:', fullCheck.warnings);
+      console.warn('FullColorWheel warnings:', fullCheck.warnings);
     }
     
     return fullCheck;
+  } catch (error) {
+    console.error('Dependency check failed:', error);
+    return { compatible: false, errors: [error.message], warnings: [] };
   }
-  
-  return null;
 };

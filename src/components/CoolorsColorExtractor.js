@@ -148,11 +148,10 @@ export default function CoolorsColorExtractor({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json(); // { hex }
     } catch (e) {
-      if (__DEV__) {
-        console.error('🚨 CoolorsColorExtractor Error in callServerSample:', e);
-        console.error('Stack trace:', e.stack);
-        console.error('Args:', { imageId, normX, normY, radius });
-      }
+      // Always log critical color sampling errors for production debugging
+      console.error('🚨 CoolorsColorExtractor Error in callServerSample:', e);
+      console.error('Stack trace:', e.stack);
+      console.error('Args:', { imageId, normX, normY, radius });
       
       // Check for session expiration (404 error)
       if (e.message && e.message.includes('404')) {
@@ -200,9 +199,8 @@ export default function CoolorsColorExtractor({
     setIsLoading(true);
     try {
       setSelectedImage(asset);
-      if (__DEV__) {
-        console.log('CoolorsColorExtractor: Processing image with ApiService.extractColorsFromImage');
-      }
+      // Always log image processing for production debugging
+      console.log('CoolorsColorExtractor: Processing image with ApiService.extractColorsFromImage');
       
       // iOS image safety: Re-encode to JPEG to avoid HEIC 415 from server
       const assetSafe = await prepareAssetForUpload(asset);
@@ -214,9 +212,8 @@ export default function CoolorsColorExtractor({
       const response = await Promise.race([
         ApiService.extractColorsFromImage(assetSafe.uri, {
           onProgress: (progress) => {
-            if (__DEV__) {
-              console.log(`Upload progress: ${progress}%`);
-            }
+            // Always log upload progress for production debugging
+            console.log(`Upload progress: ${progress}%`);
           }
         }),
         new Promise((_, reject) => 
@@ -238,15 +235,13 @@ export default function CoolorsColorExtractor({
       });
       setLiveColor(dominant || basePalette[0]);
       
-      if (__DEV__) {
-        console.log('CoolorsColorExtractor: Image processed successfully, dominant:', dominant);
-      }
+      // Always log successful image processing for production debugging
+      console.log('CoolorsColorExtractor: Image processed successfully, dominant:', dominant);
     } catch (e) {
-      if (__DEV__) {
-        console.error('🚨 CoolorsColorExtractor Error in processImage:', e);
-        console.error('Stack trace:', e.stack);
-        console.error('Asset:', asset);
-      }
+      // Always log image processing errors for production debugging
+      console.error('🚨 CoolorsColorExtractor Error in processImage:', e);
+      console.error('Stack trace:', e.stack);
+      console.error('Asset:', asset);
       setServerPalette(fallbackPalette);
       fillSlotsFromPalette(fallbackPalette);
     } finally {
@@ -303,13 +298,15 @@ export default function CoolorsColorExtractor({
         onClose?.();
       }
     } catch (error) {
-      if (__DEV__) {
-        console.error('🚨 CoolorsColorExtractor Error in pickImage:', error);
-        console.error('Error type:', typeof error);
-        console.error('Error name:', error?.name);
-        console.error('Error message:', error?.message);
-        console.error('Stack trace:', error?.stack);
-      }
+      // Always log critical ImagePicker errors in production
+      console.error('🚨 CoolorsColorExtractor Error in pickImage:', error);
+      console.error('ImagePicker Error Details:', {
+        type: typeof error,
+        name: error?.name,
+        message: error?.message,
+        stack: error?.stack?.substring(0, 500),
+        timestamp: new Date().toISOString()
+      });
       
       // Enhanced error reporting for native module failures
       const errorMessage = error?.message || 'Unknown error';

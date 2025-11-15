@@ -86,10 +86,8 @@ const ApiIntegrationStatus = () => {
     return () => clearInterval(interval);
   }, [checkApiStatus]);
 
-  // Only show in development mode
-  if (!__DEV__) {
-    return null;
-  }
+  // Always show API status for production debugging
+  // (You can add a prop to control visibility if needed)
 
   return (
     <View style={styles.container}>

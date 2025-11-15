@@ -26,14 +26,12 @@ class StorageErrorBoundary extends React.Component {
       errorInfo
     });
 
-    // Report to error monitoring service in production
-    if (!__DEV__) {
-      try {
-        // Example: Sentry.captureException(error, { extra: errorInfo });
-        console.error('Storage error in production:', error.message);
-      } catch (reportingError) {
-        console.error('Failed to report storage error:', reportingError);
-      }
+    // Always report to error monitoring service for production debugging
+    try {
+      // Example: Sentry.captureException(error, { extra: errorInfo });
+      console.error('Storage error in production:', error.message);
+    } catch (reportError) {
+      console.error('Failed to report storage error:', reportError);
     }
   }
 
@@ -45,14 +43,39 @@ class StorageErrorBoundary extends React.Component {
     });
   };
 
+  handleContinueWithoutStorage = () => {
+    // Continue with app functionality but warn about no storage
+    console.warn('⚠️ Continuing without storage - data will not be saved');
+    this.setState({ 
+      hasError: false, 
+      error: null, 
+      errorInfo: null 
+    });
+  };
+
   render() {
     if (this.state.hasError) {
-      // Fallback UI for storage errors
+      // Enhanced fallback UI for storage errors
       return (
         <View style={styles.errorContainer}>
-          <Text style={styles.errorTitle}>Storage Error</Text>
+          <Text style={styles.errorEmoji}>💾</Text>
+          <Text style={styles.errorTitle}>Storage Issue</Text>
           <Text style={styles.errorMessage}>
-            There was a problem with app storage. This might be due to device storage issues or permissions.
+            Your saved colors and preferences are temporarily unavailable. This usually resolves itself quickly.
+          </Text>
+          
+          <View style={styles.actionsContainer}>
+            <TouchableOpacity style={styles.primaryButton} onPress={this.handleRetry}>
+              <Text style={styles.primaryButtonText}>Try Again</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity style={styles.secondaryButton} onPress={this.handleContinueWithoutStorage}>
+              <Text style={styles.secondaryButtonText}>Continue Without Saving</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <Text style={styles.helpText}>
+            💡 You can still use the color wheel, but your changes won't be saved until storage is restored.
           </Text>
           
           {__DEV__ && this.state.error && (
@@ -64,10 +87,6 @@ class StorageErrorBoundary extends React.Component {
               )}
             </View>
           )}
-          
-          <TouchableOpacity style={styles.retryButton} onPress={this.handleRetry}>
-            <Text style={styles.retryButtonText}>Try Again</Text>
-          </TouchableOpacity>
           
           <Text style={styles.helpText}>
             If this problem persists, try restarting the app or freeing up device storage.
@@ -88,26 +107,68 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: '#f8f9fa',
   },
+  errorEmoji: {
+    fontSize: 48,
+    marginBottom: 16,
+  },
   errorTitle: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#dc3545',
-    marginBottom: 16,
+    color: '#2c3e50',
+    marginBottom: 12,
     textAlign: 'center',
   },
   errorMessage: {
     fontSize: 16,
-    color: '#6c757d',
+    color: '#5a6c7d',
     textAlign: 'center',
     marginBottom: 24,
     lineHeight: 24,
+  },
+  actionsContainer: {
+    width: '100%',
+    maxWidth: 300,
+    gap: 12,
+    marginBottom: 20,
+  },
+  primaryButton: {
+    backgroundColor: '#007bff',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  primaryButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  secondaryButton: {
+    backgroundColor: '#e9ecef',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    color: '#495057',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  helpText: {
+    fontSize: 14,
+    color: '#6c757d',
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 20,
   },
   debugInfo: {
     backgroundColor: '#f1f3f4',
     padding: 12,
     borderRadius: 8,
-    marginBottom: 24,
+    marginBottom: 16,
     width: '100%',
+    maxWidth: 400,
   },
   debugTitle: {
     fontSize: 14,
@@ -119,24 +180,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6c757d',
     fontFamily: 'monospace',
-  },
-  retryButton: {
-    backgroundColor: '#007bff',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  retryButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  helpText: {
-    fontSize: 14,
-    color: '#6c757d',
-    textAlign: 'center',
-    fontStyle: 'italic',
+    lineHeight: 16,
   },
 });
 

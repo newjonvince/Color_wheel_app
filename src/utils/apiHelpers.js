@@ -34,9 +34,8 @@ export const safeApiCall = async (apiCall, options = {}) => {
         const delay = Math.min(1000 * Math.pow(2, attempt), 3000); // Exponential backoff, max 3s
         await new Promise(resolve => setTimeout(resolve, delay));
         
-        if (__DEV__) {
-          console.log(`Retrying API call (attempt ${attempt + 2}/${retryCount + 1}) after ${delay}ms`);
-        }
+        // Always log retry attempts for production debugging
+        console.log(`🔄 Retrying API call (attempt ${attempt + 2}/${retryCount + 1}) after ${delay}ms`);
       }
     }
   }
@@ -44,26 +43,48 @@ export const safeApiCall = async (apiCall, options = {}) => {
   // All attempts failed
   console.error(`API call failed after ${retryCount + 1} attempts:`, lastError);
   
-  // Return structured error information for caller to handle UI
+  // ✅ More nuanced alert logic - Return structured error information for caller to handle UI
   const errorInfo = {
     success: false,
     error: lastError,
     errorType: 'unknown',
     userMessage: errorMessage,
-    shouldShowAlert: true,
+    shouldShowAlert: true, // Default to true, but will be overridden based on error type
     attemptCount: retryCount + 1
   };
 
-  // Classify error types for better handling (match safeApiService error messages)
+  // ✅ Classify errors with appropriate alert behavior
   if (lastError.message?.includes('Authentication required')) {
     errorInfo.errorType = 'authentication';
     errorInfo.userMessage = 'Please log in again';
+    errorInfo.shouldShowAlert = true; // ✅ Always show for auth - user needs to take action
   } else if (lastError.message?.includes('Unable to connect to server')) {
     errorInfo.errorType = 'network';
     errorInfo.userMessage = 'Network connection failed. Please check your internet connection.';
+    errorInfo.shouldShowAlert = false; // ✅ Don't show alert, show network indicator instead
   } else if (lastError.message?.includes('timed out')) {
     errorInfo.errorType = 'timeout';
     errorInfo.userMessage = 'Request timed out. Please try again.';
+    errorInfo.shouldShowAlert = false; // ✅ Silent retry or show toast instead
+  } else if (lastError.message?.includes('Rate limit exceeded')) {
+    errorInfo.errorType = 'rate_limit';
+    errorInfo.userMessage = 'Too many requests. Please wait a moment and try again.';
+    errorInfo.shouldShowAlert = false; // ✅ Show toast, not blocking alert
+  } else if (lastError.message?.includes('Server error')) {
+    errorInfo.errorType = 'server_error';
+    errorInfo.userMessage = 'Server is temporarily unavailable. Please try again later.';
+    errorInfo.shouldShowAlert = false; // ✅ Show status indicator, not alert
+  } else if (lastError.message?.includes('Validation failed') || lastError.message?.includes('Invalid')) {
+    errorInfo.errorType = 'validation';
+    errorInfo.shouldShowAlert = true; // ✅ Show alert - user needs to fix input
+  } else if (lastError.message?.includes('Not found') || lastError.message?.includes('Resource not found')) {
+    errorInfo.errorType = 'not_found';
+    errorInfo.userMessage = 'The requested resource was not found.';
+    errorInfo.shouldShowAlert = false; // ✅ Handle gracefully in UI
+  } else {
+    // Unknown errors - be conservative and show alert
+    errorInfo.errorType = 'unknown';
+    errorInfo.shouldShowAlert = true; // ✅ Show alert for unknown errors
   }
   
   return errorInfo;
@@ -111,61 +132,62 @@ export const batchApiCalls = async (apiCalls, options = {}) => {
 
 /**
  * Common API patterns for different operations
+ * ✅ All patterns now support request cancellation via AbortSignal
  */
 export const apiPatterns = {
   // Load user data pattern
-  loadUserData: async () => {
+  loadUserData: async (options = {}) => {
     return safeApiCall(
-      () => ApiService.getUserProfile(),
+      () => ApiService.getUserProfile(options),
       { errorMessage: 'Failed to load user data' }
     );
   },
 
   // Load color matches pattern
-  loadColorMatches: async () => {
+  loadColorMatches: async (options = {}) => {
     return safeApiCall(
-      () => ApiService.getColorMatches(),
+      () => ApiService.getColorMatches(options),
       { errorMessage: 'Failed to load color matches' }
     );
   },
 
   // Load community posts pattern
-  loadCommunityPosts: async (cursor = null) => {
+  loadCommunityPosts: async (cursor = null, options = {}) => {
     return safeApiCall(
       () => {
         const params = cursor ? { cursor } : {};
         const qs = new URLSearchParams(params).toString();
         const endpoint = `/community/posts/community${qs ? `?${qs}` : ''}`;
-        return ApiService.get(endpoint);
+        return ApiService.get(endpoint, options);
       },
       { errorMessage: 'Failed to load community posts' }
     );
   },
 
   // Like/unlike post pattern
-  togglePostLike: async (postId, isLiked) => {
+  togglePostLike: async (postId, isLiked, options = {}) => {
     return safeApiCall(
       () => isLiked 
-        ? ApiService.delete(`/community/posts/${postId}/like`)
-        : ApiService.post(`/community/posts/${postId}/like`),
+        ? ApiService.delete(`/community/posts/${postId}/like`, options)
+        : ApiService.post(`/community/posts/${postId}/like`, {}, options),
       { errorMessage: 'Failed to update like status' }
     );
   },
 
   // Follow/unfollow user pattern
-  toggleUserFollow: async (userId, isFollowing) => {
+  toggleUserFollow: async (userId, isFollowing, options = {}) => {
     return safeApiCall(
       () => isFollowing
-        ? ApiService.delete(`/community/users/${userId}/follow`)
-        : ApiService.post(`/community/users/${userId}/follow`),
+        ? ApiService.delete(`/community/users/${userId}/follow`, options)
+        : ApiService.post(`/community/users/${userId}/follow`, {}, options),
       { errorMessage: 'Failed to update follow status' }
     );
   },
 
   // User registration pattern
-  registerUser: async (registrationData) => {
+  registerUser: async (registrationData, options = {}) => {
     return safeApiCall(
-      () => ApiService.register(registrationData),
+      () => ApiService.register(registrationData, options),
       { 
         errorMessage: 'Registration failed. Please try again.'
       }
@@ -173,9 +195,9 @@ export const apiPatterns = {
   },
 
   // Username availability check pattern
-  checkUsernameAvailability: async (username) => {
+  checkUsernameAvailability: async (username, options = {}) => {
     const result = await safeApiCall(
-      () => ApiService.checkUsername(username),
+      () => ApiService.checkUsername(username, options),
       { 
         errorMessage: 'Failed to check username availability'
       }

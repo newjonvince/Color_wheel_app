@@ -1,7 +1,7 @@
 // utils/userPreferences.js - Persistent user preferences system
 // Saves and restores user UI preferences across app sessions
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { safeAsyncStorage } from './safeAsyncStorage';
 
 // Storage keys for different preference types
 const STORAGE_KEYS = {
@@ -45,7 +45,7 @@ class UserPreferences {
    */
   async load() {
     try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.COLOR_WHEEL_PREFS);
+      const stored = await safeAsyncStorage.getItem(STORAGE_KEYS.COLOR_WHEEL_PREFS);
       if (stored) {
         const parsed = JSON.parse(stored);
         this.preferences = { ...DEFAULT_PREFERENCES, ...parsed };
@@ -64,7 +64,7 @@ class UserPreferences {
    */
   async save() {
     try {
-      await AsyncStorage.setItem(
+      await safeAsyncStorage.setItem(
         STORAGE_KEYS.COLOR_WHEEL_PREFS,
         JSON.stringify(this.preferences)
       );
@@ -173,7 +173,7 @@ class UserPreferences {
   async saveSchemeHistory(scheme, colors) {
     try {
       const historyKey = STORAGE_KEYS.SCHEME_HISTORY;
-      const stored = await AsyncStorage.getItem(historyKey);
+      const stored = await safeAsyncStorage.getItem(historyKey);
       let history = stored ? JSON.parse(stored) : [];
       
       // Add new entry
@@ -188,7 +188,7 @@ class UserPreferences {
       // Keep only last 20 entries
       history = history.slice(0, 20);
       
-      await AsyncStorage.setItem(historyKey, JSON.stringify(history));
+      await safeAsyncStorage.setItem(historyKey, JSON.stringify(history));
     } catch (error) {
       console.warn('Failed to save scheme history:', error);
     }
@@ -196,7 +196,7 @@ class UserPreferences {
 
   async getSchemeHistory() {
     try {
-      const stored = await AsyncStorage.getItem(STORAGE_KEYS.SCHEME_HISTORY);
+      const stored = await safeAsyncStorage.getItem(STORAGE_KEYS.SCHEME_HISTORY);
       return stored ? JSON.parse(stored) : [];
     } catch (error) {
       console.warn('Failed to load scheme history:', error);

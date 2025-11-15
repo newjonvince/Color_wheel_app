@@ -30,9 +30,8 @@ export const loadModules = () => {
     
     modules.ApiService = require('../services/safeApiService').default;
     
-    if (__DEV__) {
-      console.log('App modules loaded successfully');
-    }
+    // Always log successful module loading for production debugging
+    console.log('✅ App modules loaded successfully');
   } catch (e) {
     console.error('FATAL: Module import failed at launch:', e?.message);
     console.error('Stack:', e?.stack);
@@ -65,9 +64,8 @@ export const loadScreens = () => {
     screens.SignUpScreen = require('../screens/SignUpScreen').default;
     screens.UserSettingsScreen = require('../screens/UserSettingsScreen').default;
     
-    if (__DEV__) {
-      console.log('All screen modules loaded successfully');
-    }
+    // Always log successful screen loading for production debugging
+    console.log('✅ All screen modules loaded successfully');
   } catch (e) {
     console.error('Screen module load error:', e?.message);
     console.error('Stack:', e?.stack);
@@ -100,13 +98,11 @@ export const loadColorWheelScreen = () => {
 
   try { 
     ColorWheelScreen = require('../screens/ColorWheelScreen/index').default; 
-    if (__DEV__) {
-      console.log('ColorWheelScreen loaded successfully');
-    }
+    // Always log ColorWheel loading for production debugging
+    console.log('✅ ColorWheelScreen loaded successfully');
   } catch (e) {
-    if (__DEV__) {
-      console.log('ColorWheelScreen load failed on', Platform.OS + ':', e?.message);
-    }
+    // Always log ColorWheel failures for production debugging
+    console.log('❌ ColorWheelScreen load failed on', Platform.OS + ':', e?.message);
     console.error('Critical module load error:', e);
     error = e;
     

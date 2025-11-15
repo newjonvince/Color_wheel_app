@@ -17,11 +17,60 @@ export const DEFAULT_SCHEME = 'complementary';
 // HSL validation and utilities
 export const mod = (a, n) => ((a % n) + n) % n;
 
-export const validateHSL = (h, s, l) => ({
-  h: mod(parseFloat(h) || 0, 360),
-  s: Math.max(0, Math.min(100, parseFloat(s) || 0)),
-  l: Math.max(0, Math.min(100, parseFloat(l) || 0)),
-});
+// ✅ SAFER: Enhanced validation with stricter checks
+export const validateHSL = (h, s, l) => {
+  // Parse and validate hue - reject scientific notation and invalid strings
+  let hueValue = 0;
+  if (typeof h === 'string' && h.trim() !== '') {
+    // Reject scientific notation (contains 'e' or 'E')
+    if (!/^-?\d*\.?\d+$/.test(h.trim())) {
+      hueValue = 0;
+    } else {
+      hueValue = parseFloat(h);
+      if (isNaN(hueValue)) {
+        hueValue = 0;
+      }
+    }
+  } else if (typeof h === 'number') {
+    hueValue = isNaN(h) ? 0 : h;
+  }
+  
+  // Parse and validate saturation
+  let satValue = 0;
+  if (typeof s === 'string' && s.trim() !== '') {
+    if (!/^-?\d*\.?\d+$/.test(s.trim())) {
+      satValue = 0;
+    } else {
+      satValue = parseFloat(s);
+      if (isNaN(satValue)) {
+        satValue = 0;
+      }
+    }
+  } else if (typeof s === 'number') {
+    satValue = isNaN(s) ? 0 : s;
+  }
+  
+  // Parse and validate lightness
+  let lightValue = 0;
+  if (typeof l === 'string' && l.trim() !== '') {
+    if (!/^-?\d*\.?\d+$/.test(l.trim())) {
+      lightValue = 0;
+    } else {
+      lightValue = parseFloat(l);
+      if (isNaN(lightValue)) {
+        lightValue = 0;
+      }
+    }
+  } else if (typeof l === 'number') {
+    lightValue = isNaN(l) ? 0 : l;
+  }
+  
+  return {
+    h: mod(hueValue, 360),
+    s: Math.max(0, Math.min(100, satValue)),
+    l: Math.max(0, Math.min(100, lightValue)),
+  };
+};
 
 export const generateRandomColor = () => {
   const h = Math.floor(Math.random() * 360);

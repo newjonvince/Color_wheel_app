@@ -20,9 +20,8 @@ const getApiBaseUrl = () => {
     }
   } catch (error) {
     console.warn('Failed to load Expo Constants:', error.message);
-    if (__DEV__) {
-      console.error('Expo Constants error details:', error);
-    }
+    // Always log Expo Constants errors for production debugging
+    console.error('Expo Constants error details:', error);
   }
   
   return process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || 'https://colorwheelapp-production.up.railway.app';
@@ -72,36 +71,135 @@ class SafeApiService {
     return this.readyPromise;
   }
 
+  // ✅ SAFER: Comprehensive response validation
+  validateAndProcessResponse(response, endpoint) {
+    try {
+      // Validate response object structure
+      if (!response || typeof response !== 'object') {
+        throw new Error('Invalid response: response is not an object');
+      }
+
+      // Validate status code
+      if (typeof response.status !== 'number') {
+        throw new Error('Invalid response: missing or invalid status code');
+      }
+
+      // Check for successful status codes (2xx range)
+      if (response.status < 200 || response.status >= 300) {
+        // Handle specific error status codes
+        const errorMessage = this.getErrorMessageFromResponse(response);
+        
+        if (response.status === 401) {
+          throw new Error(`Authentication failed: ${errorMessage}`);
+        } else if (response.status === 403) {
+          throw new Error(`Access forbidden: ${errorMessage}`);
+        } else if (response.status === 404) {
+          throw new Error(`Resource not found: ${errorMessage}`);
+        } else if (response.status === 429) {
+          throw new Error(`Rate limit exceeded: ${errorMessage}`);
+        } else if (response.status >= 500) {
+          throw new Error(`Server error (${response.status}): ${errorMessage}`);
+        } else {
+          throw new Error(`Request failed (${response.status}): ${errorMessage}`);
+        }
+      }
+
+      // Validate headers
+      if (!response.headers || typeof response.headers !== 'object') {
+        console.warn(`⚠️ Response missing headers for ${endpoint}`);
+      }
+
+      // Validate content type for JSON endpoints
+      const contentType = response.headers?.['content-type'] || response.headers?.['Content-Type'];
+      if (contentType && !contentType.includes('application/json') && !contentType.includes('text/')) {
+        console.warn(`⚠️ Unexpected content type for ${endpoint}: ${contentType}`);
+      }
+
+      // Validate response data
+      if (response.data === undefined) {
+        throw new Error('Invalid response: missing data property');
+      }
+
+      // For JSON responses, ensure data is properly parsed
+      if (typeof response.data === 'string' && contentType?.includes('application/json')) {
+        try {
+          response.data = JSON.parse(response.data);
+        } catch (parseError) {
+          throw new Error(`Invalid JSON response: ${parseError.message}`);
+        }
+      }
+
+      // Validate response data structure for API responses
+      if (response.data && typeof response.data === 'object') {
+        // Check for common API error patterns
+        if (response.data.error && typeof response.data.error === 'string') {
+          throw new Error(`API error: ${response.data.error}`);
+        }
+        
+        if (response.data.message && response.data.success === false) {
+          throw new Error(`API error: ${response.data.message}`);
+        }
+      }
+
+      // Log successful response for debugging (in development)
+      if (__DEV__) {
+        console.log(`✅ Response validated for ${endpoint}:`, {
+          status: response.status,
+          contentType,
+          dataType: typeof response.data,
+          hasData: response.data !== null && response.data !== undefined
+        });
+      }
+
+      return response.data;
+    } catch (validationError) {
+      console.error(`❌ Response validation failed for ${endpoint}:`, validationError.message);
+      throw validationError;
+    }
+  }
+
+  // Helper method to extract error messages from response
+  getErrorMessageFromResponse(response) {
+    try {
+      // Try to extract error message from response data
+      if (response.data) {
+        if (typeof response.data === 'string') {
+          return response.data;
+        }
+        
+        if (typeof response.data === 'object') {
+          // Common error message patterns
+          if (response.data.error) {
+            return typeof response.data.error === 'string' 
+              ? response.data.error 
+              : JSON.stringify(response.data.error);
+          }
+          
+          if (response.data.message) {
+            return response.data.message;
+          }
+          
+          if (response.data.detail) {
+            return response.data.detail;
+          }
+          
+          // If it's an object but no standard error fields, stringify it
+          return JSON.stringify(response.data);
+        }
+      }
+      
+      // Fallback to status text
+      return response.statusText || `HTTP ${response.status}`;
+    } catch (error) {
+      return `Unknown error (status: ${response.status})`;
+    }
+  }
+
   async initialize() {
     try {
-      // Test axios configuration safety first
-      try {
-        // Test basic axios config creation without making a request
-        const testConfig = {
-          method: 'GET',
-          url: `${API_ROOT}/health`,
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-          },
-          timeout: 1000, // Very short timeout for config test
-          validateStatus: () => true, // Accept any status for config test
-        };
-        
-        // This will validate the config without making a request
-        const axiosInstance = axios.create(testConfig);
-        if (!axiosInstance) {
-          throw new Error('Failed to create axios instance');
-        }
-        
-        if (__DEV__) {
-          console.log('✅ Axios configuration validated successfully');
-          console.log('📡 API Root URL:', API_ROOT);
-        }
-      } catch (axiosError) {
-        console.error('❌ Axios configuration failed:', axiosError.message);
-        throw new Error(`Axios setup failed: ${axiosError.message}`);
-      }
+      // ✅ SAFER: Skip fake axios validation - just log API configuration
+      console.log('🔄 Initializing SafeApiService...');
+      console.log('📡 API Root URL:', API_ROOT);
 
       // Try to load stored token (depends on safeStorage being initialized)
       let token = null;
@@ -109,9 +207,8 @@ class SafeApiService {
         token = await safeStorage.getItem('fashion_color_wheel_auth_token');
         if (token && typeof token === 'string' && token.trim().length > 0) {
           this.authToken = token;
-          if (__DEV__) {
-            console.log('✅ Auth token loaded from storage');
-          }
+          // Always log token loading status in production
+          console.log('✅ Auth token loaded from storage');
         }
       } catch (storageError) {
         console.warn('Failed to load auth token from storage:', storageError.message);
@@ -120,9 +217,8 @@ class SafeApiService {
 
       this.isReady = true;
       
-      if (__DEV__) {
-        console.log('✅ SafeApiService initialized successfully');
-      }
+      // Always log service initialization in production
+      console.log('✅ SafeApiService initialized successfully');
       
       return true;
     } catch (error) {
@@ -196,40 +292,34 @@ class SafeApiService {
           // Continue without cancellation - not critical for basic requests
         }
       }
+
+      // ✅ SAFER: Create axios config with comprehensive validation
+      const { method = 'GET', data, headers = {}, timeout = 30000, ...restOptions } = options;
       
-      // Extract timeout to enforce cap, allow other options to override
-      const { timeout: requestedTimeout, ...restOptions } = options;
-
-      // Safe config construction with validation
-      let config;
-      try {
-        config = {
-          method: 'GET',
-          url: `${API_ROOT}${endpoint}`,
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            ...options.headers,
-          },
-          cancelToken,
-          ...restOptions, // Allow other options to override
-          timeout: Math.min(10000, requestedTimeout ?? 10000), // Real cap - applied after options
-        };
-
-        // Add auth header if token exists
-        if (this.authToken) {
-          config.headers.Authorization = `Bearer ${this.authToken}`;
-        }
-
-        // Validate final URL
-        new URL(config.url); // This will throw if URL is malformed
-        
-      } catch (configError) {
-        console.error('Failed to create request config:', configError.message);
-        throw new Error(`Invalid request configuration: ${configError.message}`);
+      // Validate request data if present
+      if (data !== undefined) {
+        this.validateRequestData(data, method);
       }
 
-      // Safe axios request execution
+      const config = {
+        method: method.toUpperCase(),
+        url: `${API_ROOT}${endpoint}`,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          ...(this.authToken ? { 'Authorization': `Bearer ${this.authToken}` } : {}),
+          ...headers,
+        },
+        timeout,
+        cancelToken,
+        ...(data ? { data } : {}),
+        ...restOptions,
+      };
+
+      // Validate final configuration
+      this.validateRequestConfig(config, endpoint);
+
+      // Safe axios request execution with comprehensive response validation
       let response;
       try {
         response = await axios(config);
@@ -246,7 +336,8 @@ class SafeApiService {
         throw new Error(`Request execution failed: ${axiosError.message}`);
       }
       
-      return response.data;
+      // ✅ SAFER: Comprehensive response validation
+      return this.validateAndProcessResponse(response, endpoint);
     } catch (error) {
       console.warn(`API request failed for ${endpoint}:`, error.message);
       
@@ -292,8 +383,8 @@ class SafeApiService {
     });
   }
 
-  async getUserProfile() {
-    return this.request('/auth/profile');
+  async getUserProfile(options = {}) {
+    return this.request('/auth/profile', options);
   }
 
   async getUserColorMatches() {
@@ -393,6 +484,15 @@ class SafeApiService {
     return this.request(`/likes/color-matches/${matchId}`);
   }
 
+  // ✅ NEW: Batch API for getting multiple color match likes at once
+  async getBatchColorMatchLikes(matchIds, options = {}) {
+    return this.request('/likes/color-matches/batch', {
+      method: 'POST',
+      data: { matchIds },
+      ...options
+    });
+  }
+
   // Generic HTTP methods for apiHelpers compatibility
   async get(endpoint, options = {}) {
     return this.request(endpoint, { ...options, method: 'GET' });
@@ -411,17 +511,19 @@ class SafeApiService {
   }
 
   // Registration and username methods for SignUpScreen
-  async register(registrationData) {
+  async register(registrationData, options = {}) {
     return this.request('/auth/register', {
       method: 'POST',
       data: registrationData,
+      ...options, // Pass through signal and other options
     });
   }
 
-  async checkUsername(username) {
+  async checkUsername(username, options = {}) {
     return this.request('/auth/check-username', {
       method: 'POST',
       data: { username },
+      ...options, // Pass through signal and other options
     });
   }
 
@@ -443,6 +545,122 @@ class SafeApiService {
                        error.message?.includes('fetch') ||
                        error.code === 'ECONNREFUSED'
       };
+    }
+  }
+
+  // ✅ SAFER: Validate request data before sending
+  validateRequestData(data, method) {
+    try {
+      // Check for null or undefined (which are valid for some requests)
+      if (data === null || data === undefined) {
+        return; // Valid for GET, DELETE, etc.
+      }
+
+      // Validate data type
+      if (typeof data !== 'object' && typeof data !== 'string') {
+        throw new Error(`Invalid request data type: ${typeof data}. Expected object or string.`);
+      }
+
+      // For objects, check for circular references and validate structure
+      if (typeof data === 'object') {
+        try {
+          JSON.stringify(data); // This will throw if there are circular references
+        } catch (stringifyError) {
+          throw new Error(`Invalid request data: ${stringifyError.message}`);
+        }
+
+        // Check for potentially dangerous properties
+        if (data.constructor && data.constructor !== Object && data.constructor !== Array) {
+          console.warn('⚠️ Request data contains non-plain object with constructor:', data.constructor.name);
+        }
+      }
+
+      // Validate data size (prevent extremely large payloads)
+      const dataString = typeof data === 'string' ? data : JSON.stringify(data);
+      // ✅ SAFER: React Native compatible size calculation (Blob API doesn't exist in RN)
+      let dataSizeBytes;
+      try {
+        // Try TextEncoder first (modern environments)
+        dataSizeBytes = new TextEncoder().encode(dataString).length;
+      } catch (encoderError) {
+        // Fallback to string length approximation (older RN versions)
+        dataSizeBytes = dataString.length * 2; // Rough UTF-16 estimate
+      }
+      const dataSizeKB = dataSizeBytes / 1024;
+      
+      if (dataSizeKB > 10240) { // 10MB limit
+        throw new Error(`Request data too large: ${dataSizeKB.toFixed(2)}KB. Maximum allowed: 10MB`);
+      }
+
+      // Log large payloads for monitoring
+      if (dataSizeKB > 100) { // 100KB
+        console.warn(`⚠️ Large request payload: ${dataSizeKB.toFixed(2)}KB for ${method} request`);
+      }
+
+    } catch (validationError) {
+      throw new Error(`Request data validation failed: ${validationError.message}`);
+    }
+  }
+
+  // ✅ SAFER: Validate request configuration
+  validateRequestConfig(config, endpoint) {
+    try {
+      // Validate required properties
+      if (!config || typeof config !== 'object') {
+        throw new Error('Config must be an object');
+      }
+
+      if (!config.method || typeof config.method !== 'string') {
+        throw new Error('Config must have a valid method');
+      }
+
+      if (!config.url || typeof config.url !== 'string') {
+        throw new Error('Config must have a valid URL');
+      }
+
+      // Validate URL format
+      try {
+        new URL(config.url);
+      } catch (urlError) {
+        throw new Error(`Invalid URL format: ${config.url}`);
+      }
+
+      // Validate method
+      const validMethods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
+      if (!validMethods.includes(config.method.toUpperCase())) {
+        throw new Error(`Invalid HTTP method: ${config.method}`);
+      }
+
+      // Validate headers
+      if (config.headers && typeof config.headers !== 'object') {
+        throw new Error('Headers must be an object');
+      }
+
+      // Validate timeout
+      if (config.timeout && (typeof config.timeout !== 'number' || config.timeout <= 0)) {
+        throw new Error('Timeout must be a positive number');
+      }
+
+      // Validate data for methods that shouldn't have body
+      if (['GET', 'HEAD', 'DELETE'].includes(config.method.toUpperCase()) && config.data) {
+        console.warn(`⚠️ ${config.method} request with body data for ${endpoint}`);
+      }
+
+      // Validate auth token format if present
+      if (config.headers?.Authorization) {
+        const authHeader = config.headers.Authorization;
+        if (typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+          throw new Error('Invalid Authorization header format');
+        }
+        
+        const token = authHeader.substring(7); // Remove "Bearer "
+        if (token.length < 10) {
+          throw new Error('Authorization token appears to be too short');
+        }
+      }
+
+    } catch (validationError) {
+      throw new Error(`Request config validation failed: ${validationError.message}`);
     }
   }
 }

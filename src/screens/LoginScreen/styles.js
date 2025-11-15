@@ -8,8 +8,8 @@ export const optimizedColors = Object.freeze({
   gradientStart: '#ff4fb2', // pink
   gradientMid: '#24d39a',   // teal
   gradientEnd: '#2b4bff',   // blue
-  buttonStart: '#ff4fa3',
-  buttonEnd: '#ff6a83',
+  buttonStart: '#FF2D87', // ✅ Hotter pink to match target
+  buttonEnd: '#FF4757',   // ✅ More coral/red to match target
   surface: 'rgba(255,255,255,0.12)',
   surfaceBorder: 'rgba(255,255,255,0.22)',
   textPrimary: '#ffffff',
@@ -45,16 +45,20 @@ export const optimizedStyles = StyleSheet.create({
   },
 
   logoContainer: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    padding: 12,
-    borderRadius: 18,
-    marginBottom: 12,
-    ...iosShadow,
+    backgroundColor: '#FFD93D', // ✅ Yellow/gold background like target
+    padding: 16, // Slightly more padding
+    borderRadius: 24, // Rounder corners
+    marginBottom: 16,
+    // Add depth like the target
+    shadowColor: 'rgba(0,0,0,0.3)',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 1,
+    shadowRadius: 16,
   },
 
   logoImage: {
-    width: IS_SMALL ? 110 : 140,
-    height: IS_SMALL ? 110 : 140,
+    width: IS_SMALL ? 120 : 150, // ✅ Slightly larger to match target
+    height: IS_SMALL ? 120 : 150,
   },
 
   title: {
@@ -93,9 +97,10 @@ export const optimizedStyles = StyleSheet.create({
     borderRadius: 14,
   },
   inputOverlay: {
+    backgroundColor: 'rgba(100, 220, 210, 0.25)', // ✅ Teal tint to match target
     borderWidth: 1,
-    borderColor: optimizedColors.surfaceBorder,
-    borderRadius: 14,
+    borderColor: 'rgba(255, 255, 255, 0.3)', // ✅ Subtle white border
+    borderRadius: 16, // ✅ Match target's rounder corners
     ...iosShadow,
   },
 

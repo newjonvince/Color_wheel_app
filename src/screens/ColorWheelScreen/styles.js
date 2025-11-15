@@ -85,14 +85,13 @@ export const styles = StyleSheet.create({
 
   // Color Wheel Styles
   wheelContainer: {
-    position: 'relative',
-    alignItems: 'center',
+    alignItems: 'center', // ✅ Removed position: 'relative' - not needed anymore
   },
   cameraButtonsContainer: {
-    position: 'absolute',
-    bottom: -20,
+    marginTop: 16, // ✅ Use margin instead of absolute positioning
     flexDirection: 'row',
     justifyContent: 'center',
+    paddingVertical: 8,
   },
   cameraButton: {
     backgroundColor: 'rgba(255,255,255,0.95)',

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, TextInput, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { safeAsyncStorage } from '../utils/safeAsyncStorage';
 import ApiService from '../services/safeApiService';
 import { saveToken } from '../services/secureStore';
 import useDebounce from '../hooks/useDebounce';
@@ -210,8 +210,8 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
     if (result.success && result.data.success && result.data.user) {
       try {
         // Store user data and token securely
-        await AsyncStorage.setItem('userData', JSON.stringify(result.data.user));
-        await AsyncStorage.setItem('isLoggedIn', 'true');
+        await safeAsyncStorage.setItem('userData', JSON.stringify(result.data.user));
+        await safeAsyncStorage.setItem('isLoggedIn', 'true');
         
         if (result.data.token) {
           await saveToken(result.data.token);
@@ -221,9 +221,15 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
         
         setCurrentStep(SIGNUP_STEPS.COMPLETE);
         
-        // Auto-complete after showing success
+        // Auto-complete after showing success with safer callback handling
         setTimeout(() => {
-          if (onSignUpComplete) onSignUpComplete(result.data.user);
+          if (onSignUpComplete && typeof onSignUpComplete === 'function') {
+            try {
+              onSignUpComplete(result.data.user);
+            } catch (callbackError) {
+              console.error('onSignUpComplete callback error:', callbackError);
+            }
+          }
         }, 2000);
         
       } catch (storageError) {
@@ -240,7 +246,13 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
   const handleBack = () => {
     switch (currentStep) {
       case SIGNUP_STEPS.EMAIL:
-        if (onBackToLogin) onBackToLogin();
+        if (onBackToLogin && typeof onBackToLogin === 'function') {
+          try {
+            onBackToLogin();
+          } catch (callbackError) {
+            console.error('onBackToLogin callback error:', callbackError);
+          }
+        }
         break;
       case SIGNUP_STEPS.PASSWORD:
         setCurrentStep(SIGNUP_STEPS.EMAIL);

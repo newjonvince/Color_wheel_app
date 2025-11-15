@@ -261,7 +261,7 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
               <Text style={styles.backButtonText}>← Back</Text>
             </TouchableOpacity>
             <Text style={styles.boardTitle}>
-              {selectedMainFolder.icon} {selectedSchemeFolder.icon} {selectedSchemeFolder.name}
+              {selectedMainFolder?.icon} {selectedSchemeFolder?.icon} {selectedSchemeFolder?.name}
             </Text>
             <TouchableOpacity 
               style={styles.addButton}
@@ -276,7 +276,7 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
           </View>
           
           <Text style={styles.boardDescription}>
-            {selectedMainFolder.name} • {selectedSchemeFolder.description}
+            {selectedMainFolder?.name} • {selectedSchemeFolder?.description}
           </Text>
           
           <FlatList
@@ -333,7 +333,7 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
             >
               <Text style={styles.backButtonText}>← Back</Text>
             </TouchableOpacity>
-            <Text style={styles.boardTitle}>{selectedMainFolder.icon} {selectedMainFolder.name}</Text>
+            <Text style={styles.boardTitle}>{selectedMainFolder?.icon} {selectedMainFolder?.name}</Text>
             <TouchableOpacity 
               style={styles.addButton}
               onPress={() => {
@@ -345,7 +345,7 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
             </TouchableOpacity>
           </View>
           
-          <Text style={styles.boardDescription}>{selectedMainFolder.description}</Text>
+          <Text style={styles.boardDescription}>{selectedMainFolder?.description}</Text>
           
           <FlatList
             data={SCHEME_FOLDERS}

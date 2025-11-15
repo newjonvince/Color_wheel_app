@@ -48,9 +48,14 @@ const parseOrigins = (raw) =>
     .filter(Boolean);
 
 const allowlist = parseOrigins(process.env.ALLOWED_ORIGINS);
-// Sensible defaults for local + Expo + RN web preview
+// Production-safe: only add development origins in development mode
 if (allowlist.length === 0) {
-  allowlist.push('http://localhost:19006', 'http://localhost:8081'); // Expo dev servers
+  if (process.env.NODE_ENV === 'development') {
+    allowlist.push('http://localhost:19006', 'http://localhost:8081'); // Expo dev servers
+    console.log('🔧 Development mode: Added localhost origins to CORS allowlist');
+  } else {
+    console.warn('⚠️ PRODUCTION: No ALLOWED_ORIGINS configured - mobile apps will work but web origins may be blocked');
+  }
 }
 
 const corsOptions = {

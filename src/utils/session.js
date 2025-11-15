@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { safeAsyncStorage } from './safeAsyncStorage';
 import * as SecureStore from 'expo-secure-store';
 
 /**
@@ -9,7 +9,7 @@ export async function wipeLocalSession() {
   try {
     await Promise.all([
       // Remove AsyncStorage items
-      AsyncStorage.multiRemove(['userData', 'isLoggedIn']),
+      safeAsyncStorage.multiRemove(['userData', 'isLoggedIn']),
       // Remove SecureStore token (catch errors if key doesn't exist)
       SecureStore.deleteItemAsync('authToken').catch(() => {}),
     ]);
@@ -18,8 +18,8 @@ export async function wipeLocalSession() {
     console.error('❌ Error wiping local session:', error);
     // Still try to remove items individually if batch fails
     try {
-      await AsyncStorage.removeItem('userData');
-      await AsyncStorage.removeItem('isLoggedIn');
+      await safeAsyncStorage.removeItem('userData');
+      await safeAsyncStorage.removeItem('isLoggedIn');
       await SecureStore.deleteItemAsync('authToken').catch(() => {});
     } catch (fallbackError) {
       console.error('❌ Fallback session wipe also failed:', fallbackError);

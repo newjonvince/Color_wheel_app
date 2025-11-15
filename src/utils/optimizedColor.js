@@ -4,9 +4,10 @@
 /**
  * Color data cache to avoid redundant conversions
  * Structure: { hex: { rgb, hsl, luminance, brightness, analysis } }
+ * ✅ SAFER: Use LRU cache with size limit to prevent memory leaks
  */
-const colorCache = new Map();
-const MAX_CACHE_SIZE = 1000;
+import LRUCache from './LRUCache';
+const colorCache = new LRUCache(1000); // Max 1000 colors cached
 
 /**
  * Normalize and validate hex color input
@@ -19,20 +20,6 @@ function normalizeHex(hex) {
     ? clean.split('').map(c => c + c).join('')
     : clean;
   return `#${full}`;
-}
-
-/**
- * Clear cache when it gets too large
- */
-function clearCacheIfNeeded() {
-  if (colorCache.size > MAX_CACHE_SIZE) {
-    // Keep only the most recently used 500 entries
-    const entries = Array.from(colorCache.entries());
-    colorCache.clear();
-    entries.slice(-500).forEach(([key, value]) => {
-      colorCache.set(key, value);
-    });
-  }
 }
 
 /**
@@ -55,17 +42,17 @@ function getCachedColorData(hex) {
     };
   }
 
-  if (colorCache.has(normalizedHex)) {
-    const existing = colorCache.get(normalizedHex);
+  // Check LRU cache (automatically handles access order)
+  const existing = colorCache.get(normalizedHex);
+  if (existing) {
     existing.lastUsed = Date.now();
-    colorCache.set(normalizedHex, existing); // update insertion order
     return existing;
   }
 
   // Compute all color data at once
   const colorData = computeColorData(normalizedHex);
   
-  clearCacheIfNeeded();
+  // LRU cache automatically handles size limits and eviction
   colorCache.set(normalizedHex, colorData);
   
   return colorData;
@@ -742,24 +729,25 @@ export function nearestAccessible(background, target, minRatio = 4.5) {
  */
 export { normalizeHex };
 
-// Development-only validation tests
-if (__DEV__) {
-  // Test hex validation with various inputs
-  const testCases = [
-    'not-a-color',    // Invalid string
-    '#1234',          // Invalid length
-    '#gggggg',        // Invalid characters
-    null,             // Non-string
-    undefined,        // Non-string
-    '#fff',           // Valid 3-char
-    '#ffffff',        // Valid 6-char
-    'fff',            // Valid without #
-    'FFFFFF',         // Valid uppercase
+// Production-safe validation tests (always run for robustness)
+try {
+  // Test critical hex validation patterns
+  const criticalTests = [
+    '#123abc',        // Valid 6-char
+    '#ABC',           // Valid 3-char
+    '#ffffff',        // Valid lowercase
+    '#FFFFFF',        // Valid uppercase
   ];
   
-  console.log('🎨 Hex validation test results:');
-  testCases.forEach(test => {
+  // Validate that critical patterns work correctly
+  const allValid = criticalTests.every(test => {
     const result = normalizeHex(test);
-    console.log(`  ${JSON.stringify(test)} → ${result}`);
+    return result && result.length === 7 && result.startsWith('#');
   });
+  
+  if (!allValid) {
+    console.error('❌ Critical hex validation failed - color processing may be unreliable');
+  }
+} catch (validationError) {
+  console.error('❌ Hex validation test failed:', validationError);
 }

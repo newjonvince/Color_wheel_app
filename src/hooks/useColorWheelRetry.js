@@ -1,8 +1,13 @@
 // hooks/useColorWheelRetry.js - ColorWheel retry logic
-import { useState, useCallback, useRef } from 'react';
+// ✅ FIX: Use React.lazy and Suspense instead of global mutation
+import { useState, useCallback, useRef, lazy, Suspense } from 'react';
+
+// ✅ SAFER: Use React.lazy for dynamic imports
+const LazyColorWheelScreen = lazy(() => import('../screens/ColorWheelScreen/index'));
 
 export const useColorWheelRetry = (Updates) => {
   const [wheelReloadNonce, setWheelReloadNonce] = useState(0);
+  const [ColorWheelComponent, setColorWheelComponent] = useState(() => LazyColorWheelScreen);
   const retryControllerRef = useRef(null);
 
   const cancelRetry = useCallback(() => {
@@ -19,15 +24,18 @@ export const useColorWheelRetry = (Updates) => {
     retryControllerRef.current = controller;
     
     try {
-      const mod = await import('../screens/ColorWheelScreen/index');
-      if (!controller.isCancelled && mod?.default) {
-        // Update the global ColorWheelScreen reference
-        global.ColorWheelScreen = mod.default;
+      // ✅ FIX: Create new lazy component instead of global mutation
+      const newLazyComponent = lazy(() => import('../screens/ColorWheelScreen/index'));
+      
+      if (!controller.isCancelled) {
+        // ✅ SAFER: Update component state instead of global
+        setColorWheelComponent(() => newLazyComponent);
         setWheelReloadNonce((n) => n + 1);
         return true; // Success
       }
     } catch (importError) {
-      if (__DEV__) console.warn('ColorWheel import failed:', importError);
+      // Always log ColorWheel import failures for production debugging
+      console.warn('ColorWheel import failed:', importError);
     }
     
     // Fallback to app reload if import fails
@@ -36,7 +44,8 @@ export const useColorWheelRetry = (Updates) => {
         await Updates.reloadAsync(); 
         return true; // App reload initiated successfully
       } catch (reloadError) {
-        if (__DEV__) console.warn('App reload failed:', reloadError);
+        // Always log app reload failures for production debugging
+        console.warn('App reload failed:', reloadError);
       }
     }
     
@@ -47,5 +56,6 @@ export const useColorWheelRetry = (Updates) => {
     wheelReloadNonce,
     retryLoadColorWheel,
     cancelRetry,
+    ColorWheelComponent, // ✅ Return the lazy component instead of using global
   };
 };

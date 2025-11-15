@@ -1,23 +1,30 @@
 // LoginForm.js
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, Platform, StyleSheet } from 'react-native';
-import { BlurView } from 'expo-blur';
 import { optimizedStyles as styles, optimizedColors } from '../styles';
 
-// Better blur intensity for text readability against bright gradient
-const BLUR_INTENSITY = Platform.OS === 'ios' ? 80 : 60; // Higher intensity for better text readability
-
-// Blur container with better text readability
-const BlurContainer = ({ intensity, style, children }) => {
+// ✅ Match the target design - solid translucent backgrounds instead of blur
+const InputContainer = ({ style, children }) => {
   return (
-    <BlurView intensity={intensity} tint="light" style={style}>
-      {/* Add semi-transparent overlay for better text readability */}
-      <View style={{ 
-        ...StyleSheet.absoluteFillObject, 
-        backgroundColor: 'rgba(255,255,255,0.1)' 
-      }} />
+    <View style={[{
+      backgroundColor: 'rgba(100, 220, 210, 0.25)', // Teal/cyan tint
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: 'rgba(255, 255, 255, 0.3)', // Subtle white border
+      ...Platform.select({
+        ios: {
+          shadowColor: 'rgba(0, 0, 0, 0.15)',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 1,
+          shadowRadius: 12,
+        },
+        android: {
+          elevation: 4,
+        }
+      })
+    }, style]}>
       {children}
-    </BlurView>
+    </View>
   );
 };
 
@@ -42,7 +49,7 @@ const LoginForm = React.memo(({
     <>
       {/* Email */}
       <View style={styles.inputWrap}>
-        <BlurContainer intensity={BLUR_INTENSITY} style={styles.inputOverlay}>
+        <InputContainer style={styles.inputOverlay}>
           <TextInput
             ref={emailRef}
             placeholder="Email"
@@ -65,14 +72,17 @@ const LoginForm = React.memo(({
             onSubmitEditing={onFocusNext}
             accessibilityLabel="Email input"
             accessibilityHint="Enter your email address"
+            accessibilityRequired={true} // ✅ Mark as required field
+            accessibilityInvalid={!!errors.email} // ✅ Indicate validation state
             testID="email-input"
             blurOnSubmit={false}
           />
-        </BlurContainer>
+        </InputContainer>
         {errors.email ? (
           <Text 
             style={styles.errorText}
             accessibilityRole="alert"
+            accessibilityLiveRegion="polite" // ✅ Announce field errors to screen readers
           >
             {errors.email}
           </Text>
@@ -81,7 +91,7 @@ const LoginForm = React.memo(({
 
       {/* Password with right-hand "Show" control */}
       <View style={styles.inputWrap}>
-        <BlurContainer intensity={BLUR_INTENSITY} style={styles.inputOverlay}>
+        <InputContainer style={styles.inputOverlay}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <TextInput
               ref={passwordRef}
@@ -105,6 +115,8 @@ const LoginForm = React.memo(({
               onSubmitEditing={onSubmit}
               accessibilityLabel="Password input"
               accessibilityHint="Enter your password"
+              accessibilityRequired={true} // ✅ Mark as required field
+              accessibilityInvalid={!!errors.password} // ✅ Indicate validation state
               testID="password-input"
             />
             <TouchableOpacity 
@@ -119,11 +131,12 @@ const LoginForm = React.memo(({
               </Text>
             </TouchableOpacity>
           </View>
-        </BlurContainer>
+        </InputContainer>
         {errors.password ? (
           <Text 
             style={styles.errorText}
             accessibilityRole="alert"
+            accessibilityLiveRegion="polite" // ✅ Announce field errors to screen readers
           >
             {errors.password}
           </Text>
