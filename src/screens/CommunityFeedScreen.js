@@ -33,6 +33,7 @@ IMPROVEMENTS MADE:
   import ApiService from '../services/safeApiService';
   import CommunityModal from '../components/CommunityModal';
   import { apiPatterns } from '../utils/apiHelpers';
+  import { safePostId } from '../utils/keyExtractors';
 
   // Double-tap like wrapper with heart burst animation
   const DoubleTapLike = ({ children, onDoubleTap, onLongPress }) => {
@@ -251,7 +252,7 @@ ${post.image_url || ''}` : (post.image_url || ''),
       }
     }, []);
 
-    const keyExtractor = useCallback((item) => String(item.id), []);
+    const keyExtractor = useCallback(safePostId, []);
 
     const renderPost = useCallback(({ item: post }) => (
       <View style={styles.postCard}>

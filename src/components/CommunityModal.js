@@ -4,6 +4,7 @@ import {
   Image, Alert, Dimensions, ActivityIndicator, SafeAreaView,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { safeUserId } from '../utils/keyExtractors';
 import ApiService from '../services/safeApiService';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -235,7 +236,7 @@ export default function CommunityModal({ visible, onClose, currentUser }) {
   const renderSuggested = () => (
     <FlatList
       data={suggestedUsers}
-      keyExtractor={(u) => String(u.id)}
+      keyExtractor={safeUserId}
       horizontal
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={{ paddingLeft: 16, paddingVertical: 8 }}
@@ -251,7 +252,7 @@ export default function CommunityModal({ visible, onClose, currentUser }) {
   const renderFollowing = () => (
     <FlatList
       data={followingUsers}
-      keyExtractor={(u) => String(u.id)}
+      keyExtractor={safeUserId}
       contentContainerStyle={styles.followingList}
       renderItem={({ item }) => <RowUser item={item} />}
       ListEmptyComponent={!loading ? (
@@ -264,7 +265,7 @@ export default function CommunityModal({ visible, onClose, currentUser }) {
   const renderFollowers = () => (
     <FlatList
       data={followersUsers}
-      keyExtractor={(u) => String(u.id)}
+      keyExtractor={safeUserId}
       contentContainerStyle={styles.followingList}
       renderItem={({ item }) => <RowUser item={item} showFollowBack />}
       ListEmptyComponent={!loading ? (

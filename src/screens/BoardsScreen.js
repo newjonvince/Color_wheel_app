@@ -6,6 +6,7 @@ import ApiService from '../services/safeApiService';
 import { getColorScheme as computeScheme } from '../utils/optimizedColor';
 import { getAllSchemes } from '../constants/colorSchemes';
 import { apiPatterns } from '../utils/apiHelpers';
+import { safeId } from '../utils/keyExtractors';
 
 const { width: screenWidth } = Dimensions.get('window');
 const boardWidth = (screenWidth - 45) / 2; // 2 columns with margins
@@ -99,7 +100,6 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
     return base.filter(m => m.scheme === schemeId);
   }, [colorMatches, publicMatches, privateMatches]);
 
-  const safeId = (item, idx) => String(item.id ?? item._id ?? item.uuid ?? `${item.baseColor}-${idx}`);
   const safeDate = (item) => item.timestamp || item.created_at || item.createdAt || null;
 
   const getColorScheme = useCallback((baseColor, scheme) => computeScheme(baseColor, scheme), []);
@@ -282,7 +282,7 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
           <FlatList
             data={boardMatches}
             numColumns={2}
-            keyExtractor={(item) => item.id}
+            keyExtractor={safeId}
             contentContainerStyle={styles.colorMatchGrid}
             renderItem={({ item }) => (
               <View style={styles.colorMatchCard}>
