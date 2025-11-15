@@ -1,9 +1,14 @@
 // screens/ColorWheelScreen/index.js - Refactored ColorWheelScreen
-// ✅ SAFER: Lazy load with fallbacks
+// SAFER: Lazy load with fallbacks
 import React, { useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { ScrollView, View, Text, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import PropTypes from 'prop-types';
+import Constants from 'expo-constants';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 // Core components (required)
 import { SchemeSelector } from './components/SchemeSelector';
@@ -77,12 +82,15 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
       const result = await apiPatterns.loadUserData();
 
       if (result.success) {
-        // Always log API integration status for production debugging
-        console.log('✅ API Integration Status:', {
-          authenticated: !!ApiService.getToken(),
-          userDataLoaded: !!result.data,
-          apiReady: true,
-        });
+        // Log API integration status only in debug mode
+        if (IS_DEBUG_MODE) {
+          console.log('✅ API Integration Status:', {
+            authenticated: !!ApiService.getToken(),
+            userDataLoaded: !!result.data,
+            apiReady: true,
+            timestamp: new Date().toISOString()
+          });
+        }
         return;
       }
 
@@ -126,7 +134,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     }
     
     const duration = Date.now() - startTime;
-    if (__DEV__ && duration > 50) {
+    if (IS_DEBUG_MODE && duration > 50) {
       console.log(`⏱️ Scheme calculation took ${duration}ms for ${selectedScheme}`);
     }
     
@@ -155,28 +163,21 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
         return;
       }
 
-      // Update selected color and active index
-      setSelectedColor(color);
-      setBaseHex(color);
+      // ✅ CRASH FIX: Use existing hook handlers instead of undefined setters
+      handleHexChange(color);
       
       if (index >= 0) {
         // Valid palette index - update active handle
-        setActiveIdx(index);
-        
-        // Update wheel if available
-        const wheel = wheelRef?.current;
-        if (wheel?.setActiveHandle) {
-          wheel.setActiveHandle(index);
-        }
+        handleActiveHandleChange(index);
       }
       
-      if (__DEV__) {
+      if (IS_DEBUG_MODE) {
         console.log(`🎨 Color selected from swatch: ${color} (index: ${index})`);
       }
     } catch (error) {
       console.error('❌ Error handling swatch press:', error);
     }
-  }, [setSelectedColor, setBaseHex, setActiveIdx, wheelRef]);
+  }, [handleHexChange, handleActiveHandleChange]);
 
   // ✅ Memoized color match object to prevent unnecessary recreations
   const colorMatchData = useMemo(() => ({
@@ -193,22 +194,26 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     
     try {
       
-      // Always log color match saving for production debugging
-      console.log('💾 Saving Color Match:', {
-        baseColor: colorMatchData.base_color,
-        scheme: colorMatchData.scheme,
-        colorsCount: colorMatchData.colors.length,
-        colors: colorMatchData.colors
-      });
+      // Log color match saving only in debug mode
+      if (IS_DEBUG_MODE) {
+        console.log('💾 Saving Color Match:', {
+          baseColor: colorMatchData.base_color,
+          scheme: colorMatchData.scheme,
+          colorsCount: colorMatchData.colors.length,
+          timestamp: new Date().toISOString()
+        });
+      }
       
       const result = await onSaveColorMatch(colorMatchData);
       
-      // Always log successful color match saves for production debugging
-      console.log('✅ Color Match Saved:', {
-        success: !!result,
-        matchId: result?.id,
-        timestamp: new Date().toISOString()
-      });
+      // Log successful color match saves only in debug mode
+      if (IS_DEBUG_MODE) {
+        console.log('✅ Color Match Saved:', {
+          success: !!result,
+          matchId: result?.id,
+          timestamp: new Date().toISOString()
+        });
+      }
       
       return result;
     } catch (error) {

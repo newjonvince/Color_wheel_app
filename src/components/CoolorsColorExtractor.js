@@ -9,13 +9,19 @@
 //  - initialSlots?: number (default 5)
 //  - onComplete?(result: { imageUri, slots: string[], activeIndex: number }): void
 //  - onColorExtracted?(hex: string): void  // kept for backward-compat (uses slots[0])
+//  - debugMode?: boolean (default false)
 //
-import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, Alert, StyleSheet, Dimensions, PanResponder } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
 import ApiService from '../services/safeApiService';
+import Constants from 'expo-constants';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 // Safe wrapper to log real errors + stack traces from component layer
 const safe = (fn, context = 'unknown') => (...args) => {
@@ -199,8 +205,10 @@ export default function CoolorsColorExtractor({
     setIsLoading(true);
     try {
       setSelectedImage(asset);
-      // Always log image processing for production debugging
-      console.log('CoolorsColorExtractor: Processing image with ApiService.extractColorsFromImage');
+      // Log image processing only in debug mode
+      if (IS_DEBUG_MODE) {
+        console.log('CoolorsColorExtractor: Processing image with ApiService.extractColorsFromImage');
+      }
       
       // iOS image safety: Re-encode to JPEG to avoid HEIC 415 from server
       const assetSafe = await prepareAssetForUpload(asset);
@@ -212,8 +220,10 @@ export default function CoolorsColorExtractor({
       const response = await Promise.race([
         ApiService.extractColorsFromImage(assetSafe.uri, {
           onProgress: (progress) => {
-            // Always log upload progress for production debugging
-            console.log(`Upload progress: ${progress}%`);
+            // Log upload progress only in debug mode
+            if (IS_DEBUG_MODE) {
+              console.log(`Upload progress: ${progress}%`);
+            }
           }
         }),
         new Promise((_, reject) => 
@@ -235,8 +245,10 @@ export default function CoolorsColorExtractor({
       });
       setLiveColor(dominant || basePalette[0]);
       
-      // Always log successful image processing for production debugging
-      console.log('CoolorsColorExtractor: Image processed successfully, dominant:', dominant);
+      // Log successful image processing only in debug mode
+      if (IS_DEBUG_MODE) {
+        console.log('CoolorsColorExtractor: Image processed successfully, dominant:', dominant);
+      }
     } catch (e) {
       // Always log image processing errors for production debugging
       console.error('🚨 CoolorsColorExtractor Error in processImage:', e);
@@ -355,8 +367,18 @@ export default function CoolorsColorExtractor({
     })();
   }, [initialImageUri, mode, onClose, processImage]);
 
-  // Close server session on unmount
-  useEffect(() => () => { if (imageToken) ApiService.closeImageSession(imageToken); }, [imageToken]);
+  // ✅ SAFETY FIX: Close server session on unmount with proper guards
+  useEffect(() => {
+    return () => {
+      if (imageToken && ApiService.closeImageSession) {
+        try {
+          ApiService.closeImageSession(imageToken);
+        } catch (error) {
+          console.warn('Failed to close image session on unmount:', error);
+        }
+      }
+    };
+  }, [imageToken]);
 
   // --- magnifier interactions ---------------------------------------------------
   const updateActiveSlot = useCallback((hex) => {

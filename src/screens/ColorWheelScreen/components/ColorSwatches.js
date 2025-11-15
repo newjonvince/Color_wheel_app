@@ -1,7 +1,12 @@
 // screens/ColorWheelScreen/components/ColorSwatches.js
-import React, { useCallback } from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import React, { memo, useCallback } from 'react';
+import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import PropTypes from 'prop-types';
+import Constants from 'expo-constants';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 import { styles } from '../styles';
 import { getSchemeDisplayName } from '../constants';
 
@@ -19,7 +24,7 @@ export const ColorSwatches = React.memo(({
     if (onSwatchPress && typeof onSwatchPress === 'function') {
       try {
         onSwatchPress(color, index);
-        if (__DEV__) {
+        if (IS_DEBUG_MODE) {
           console.log(`🎨 Swatch selected: ${color} at index ${index}`);
         }
       } catch (error) {

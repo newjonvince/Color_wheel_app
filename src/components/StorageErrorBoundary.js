@@ -1,6 +1,12 @@
 // components/StorageErrorBoundary.js - Error boundary for storage-related crashes
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import Constants from 'expo-constants';
+import { safeAsyncStorage } from '../utils/safeAsyncStorage';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 class StorageErrorBoundary extends React.Component {
   constructor(props) {
@@ -78,7 +84,7 @@ class StorageErrorBoundary extends React.Component {
             💡 You can still use the color wheel, but your changes won't be saved until storage is restored.
           </Text>
           
-          {__DEV__ && this.state.error && (
+          {IS_DEBUG_MODE && this.state.error && (
             <View style={styles.debugInfo}>
               <Text style={styles.debugTitle}>Debug Info:</Text>
               <Text style={styles.debugText}>{this.state.error.toString()}</Text>

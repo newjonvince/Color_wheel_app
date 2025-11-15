@@ -1,4 +1,5 @@
 // Simple validation rules and constants for LoginScreen
+import Constants from 'expo-constants';
 export const VALIDATION_RULES = {
   email: {
     pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
@@ -202,34 +203,43 @@ export const sanitizeInput = (input, maxLength = 255) => {
     .slice(0, maxLength);
 };
 
-// Simple error message extraction
+// ✅ PRODUCTION-READY: Error message handling with debug mode support
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+
 export const getErrorMessage = (error) => {
-  if (!error) return 'Unknown error occurred';
+  if (!error) return 'An error occurred. Please try again.';
 
-  const errorMessage = error.message || error.toString();
-  
-  if (errorMessage.toLowerCase().includes('network')) {
-    return 'Unable to connect to server. Please check your internet connection or try demo login.';
-  }
-  
-  if (errorMessage.toLowerCase().includes('timeout')) {
-    return 'Request timed out. Please try again or use demo login.';
+  const rawMessage = (error.message || String(error) || '').toLowerCase();
+
+  // Network / offline
+  if (rawMessage.includes('network')) {
+    return 'Unable to connect. Check your internet and try again.';
   }
 
-  // Handle authentication errors (string match for safeApiService errors)
-  if (errorMessage.includes('Authentication required')) {
+  // Timeout
+  if (rawMessage.includes('timeout')) {
+    return 'Request timed out. Please try again.';
+  }
+
+  // Auth
+  if (rawMessage.includes('authentication required')) {
     return 'Invalid email or password.';
   }
 
-  // Handle HTTP status codes (for direct axios errors)
   if (error.response?.status === 401) {
     return 'Invalid email or password.';
   }
-  
+
   if (error.response?.status >= 500) {
     return 'Server error. Please try again later.';
   }
 
-  // Always return detailed error in production for better user experience
-  return errorMessage || 'An error occurred. Please try again.';
+  // Debug-only: show full message if you *explicitly* turn on debug mode
+  if (IS_DEBUG_MODE) {
+    return error.message || String(error) || 'An error occurred. Please try again.';
+  }
+
+  // Default safe fallback
+  return 'An error occurred. Please try again.';
 };

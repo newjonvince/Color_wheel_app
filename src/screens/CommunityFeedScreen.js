@@ -98,9 +98,11 @@ IMPROVEMENTS MADE:
       if (loading && !replace) return;
       setLoading(true);
       
-      const result = await apiPatterns.loadCommunityPosts(cursor);
-      
-      if (result.success) {
+      // ✅ CRASH FIX: Add error handling even though safeApiCall shouldn't throw
+      try {
+        const result = await apiPatterns.loadCommunityPosts(cursor);
+        
+        if (result.success) {
         const res = result.data;
         const data = (res?.data ?? res) || [];
         const next = res?.nextCursor ?? null;
@@ -113,12 +115,20 @@ IMPROVEMENTS MADE:
           comments_count: Number(p.comments_count ?? 0),
         }));
 
-        setPosts((prev) => (replace ? normalized : [...prev, ...normalized]));
-        setPageCursor(next);
-        setHasMore(Boolean(next) && normalized.length > 0);
-      } else {
-        console.error('Error fetching community page:', result.error);
-        // On error, ensure we don't break pagination state
+          setPosts((prev) => (replace ? normalized : [...prev, ...normalized]));
+          setPageCursor(next);
+          setHasMore(Boolean(next) && normalized.length > 0);
+        } else {
+          console.error('Error fetching community page:', result.error);
+          // On error, ensure we don't break pagination state
+          if (replace) {
+            setPosts([]);
+          }
+          setHasMore(false);
+        }
+      } catch (error) {
+        // ✅ CRASH FIX: Handle unexpected errors from loadCommunityPosts
+        console.error('Unexpected error fetching community posts:', error);
         if (replace) {
           setPosts([]);
         }
@@ -380,14 +390,34 @@ ${post.image_url || ''}` : (post.image_url || ''),
 
         {/* Navigation Icons */}
         <View style={styles.navIcons}>
-          <TouchableOpacity style={styles.navIcon} onPress={() => navigation.navigate('Upload')}>
+          <TouchableOpacity 
+            style={styles.navIcon} 
+            onPress={() => {
+              // ✅ CRASH FIX: Navigate to existing route instead of non-existent 'Upload'
+              try {
+                navigation.navigate('Boards'); // Navigate to Boards where users can save/upload
+              } catch (error) {
+                console.error('Navigation error:', error);
+              }
+            }}
+          >
             <View style={styles.uploadIcon}>
               <Ionicons name="cloud-upload" size={24} color="#fff" />
             </View>
             <Text style={styles.navText}>Upload</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.navIcon} onPress={() => navigation.navigate('ColorWheel')}>
+          <TouchableOpacity 
+            style={styles.navIcon} 
+            onPress={() => {
+              // ✅ SAFE NAVIGATION: Add error handling for ColorWheel route
+              try {
+                navigation.navigate('ColorWheel');
+              } catch (error) {
+                console.error('Navigation error:', error);
+              }
+            }}
+          >
             <View style={styles.wheelIcon}>
               <Ionicons name="color-palette" size={24} color="#8B5CF6" />
             </View>

@@ -1,8 +1,13 @@
 // components/AuthenticatedApp.js - Main app content for authenticated users
-import React, { useCallback } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaView, Text } from 'react-native';
+import Constants from 'expo-constants';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 import ColorWheelScreen from '../screens/ColorWheelScreen';
 import CommunityFeedScreen from '../screens/CommunityFeedScreen';
@@ -33,7 +38,7 @@ const AuthenticatedApp = React.memo(({ user, handleLogout }) => {
           linking={APP_CONFIG.linking}
           fallback={<SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text>Loading navigation...</Text></SafeAreaView>}
           onStateChange={(state) => {
-            if (__DEV__) console.log('Nav state:', state);
+            if (IS_DEBUG_MODE) console.log('Nav state:', state);
           }}
           onError={(error) => {
             console.error('🚨 Navigation error:', error);

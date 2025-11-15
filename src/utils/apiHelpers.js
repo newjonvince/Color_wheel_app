@@ -1,5 +1,10 @@
 // utils/apiHelpers.js - Shared API utility functions
+import Constants from 'expo-constants';
 import ApiService from '../services/safeApiService';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 /**
  * Wrapper for API calls that ensures service is ready and handles common errors
@@ -9,7 +14,8 @@ import ApiService from '../services/safeApiService';
 export const safeApiCall = async (apiCall, options = {}) => {
   const { 
     errorMessage = 'An error occurred',
-    retryCount = 0 
+    retryCount = 0,
+    showAlert // ✅ CONSISTENCY FIX: Accept showAlert option
   } = options;
 
   let lastError;
@@ -34,8 +40,10 @@ export const safeApiCall = async (apiCall, options = {}) => {
         const delay = Math.min(1000 * Math.pow(2, attempt), 3000); // Exponential backoff, max 3s
         await new Promise(resolve => setTimeout(resolve, delay));
         
-        // Always log retry attempts for production debugging
-        console.log(`🔄 Retrying API call (attempt ${attempt + 2}/${retryCount + 1}) after ${delay}ms`);
+        // Log retry attempts only in debug mode
+        if (IS_DEBUG_MODE) {
+          console.log(`🔄 Retrying API call (attempt ${attempt + 2}/${retryCount + 1}) after ${delay}ms`);
+        }
       }
     }
   }
@@ -49,42 +57,42 @@ export const safeApiCall = async (apiCall, options = {}) => {
     error: lastError,
     errorType: 'unknown',
     userMessage: errorMessage,
-    shouldShowAlert: true, // Default to true, but will be overridden based on error type
+    shouldShowAlert: showAlert !== undefined ? showAlert : true, // ✅ Use showAlert option if provided
     attemptCount: retryCount + 1
   };
 
-  // ✅ Classify errors with appropriate alert behavior
+  // ✅ Classify errors with appropriate alert behavior (unless showAlert explicitly provided)
   if (lastError.message?.includes('Authentication required')) {
     errorInfo.errorType = 'authentication';
     errorInfo.userMessage = 'Please log in again';
-    errorInfo.shouldShowAlert = true; // ✅ Always show for auth - user needs to take action
+    if (showAlert === undefined) errorInfo.shouldShowAlert = true; // ✅ Always show for auth - user needs to take action
   } else if (lastError.message?.includes('Unable to connect to server')) {
     errorInfo.errorType = 'network';
     errorInfo.userMessage = 'Network connection failed. Please check your internet connection.';
-    errorInfo.shouldShowAlert = false; // ✅ Don't show alert, show network indicator instead
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Don't show alert, show network indicator instead
   } else if (lastError.message?.includes('timed out')) {
     errorInfo.errorType = 'timeout';
     errorInfo.userMessage = 'Request timed out. Please try again.';
-    errorInfo.shouldShowAlert = false; // ✅ Silent retry or show toast instead
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Silent retry or show toast instead
   } else if (lastError.message?.includes('Rate limit exceeded')) {
     errorInfo.errorType = 'rate_limit';
     errorInfo.userMessage = 'Too many requests. Please wait a moment and try again.';
-    errorInfo.shouldShowAlert = false; // ✅ Show toast, not blocking alert
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Show toast, not blocking alert
   } else if (lastError.message?.includes('Server error')) {
     errorInfo.errorType = 'server_error';
     errorInfo.userMessage = 'Server is temporarily unavailable. Please try again later.';
-    errorInfo.shouldShowAlert = false; // ✅ Show status indicator, not alert
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Show status indicator, not alert
   } else if (lastError.message?.includes('Validation failed') || lastError.message?.includes('Invalid')) {
     errorInfo.errorType = 'validation';
-    errorInfo.shouldShowAlert = true; // ✅ Show alert - user needs to fix input
+    if (showAlert === undefined) errorInfo.shouldShowAlert = true; // ✅ Show alert - user needs to fix input
   } else if (lastError.message?.includes('Not found') || lastError.message?.includes('Resource not found')) {
     errorInfo.errorType = 'not_found';
     errorInfo.userMessage = 'The requested resource was not found.';
-    errorInfo.shouldShowAlert = false; // ✅ Handle gracefully in UI
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Handle gracefully in UI
   } else {
     // Unknown errors - be conservative and show alert
     errorInfo.errorType = 'unknown';
-    errorInfo.shouldShowAlert = true; // ✅ Show alert for unknown errors
+    if (showAlert === undefined) errorInfo.shouldShowAlert = true; // ✅ Show alert for unknown errors
   }
   
   return errorInfo;

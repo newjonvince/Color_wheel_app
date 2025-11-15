@@ -7,9 +7,16 @@ import {
   ScrollView, 
   View,
   Alert,
-  Linking 
+  Linking,
+  Dimensions
 } from 'react-native';
 import { StyleSheet } from 'react-native';
+import Constants from 'expo-constants';
+import { safeStorage } from '../utils/safeStorage';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 class AppErrorBoundary extends React.Component {
   state = { 
@@ -291,7 +298,7 @@ class AppErrorBoundary extends React.Component {
               ))}
             </View>
             
-            {__DEV__ && this.state.error && (
+            {IS_DEBUG_MODE && this.state.error && (
               <View style={styles.debugSection}>
                 <Text style={styles.debugTitle}>Debug Info:</Text>
                 <ScrollView style={styles.stackTrace}>

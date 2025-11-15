@@ -1,5 +1,10 @@
 // utils/dependencyChecker.js - Verify dependencies for FullColorWheel
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 // Check if all required dependencies are available for FullColorWheel
 export const checkFullColorWheelDependencies = () => {
@@ -85,9 +90,11 @@ export const verifyRuntimeDependencies = () => {
   try {
     const fullCheck = checkFullColorWheelDependencies();
     
-    // Always log dependency status for production debugging
-    console.log('🔍 FullColorWheel Dependency Check:');
-    console.log('Status:', fullCheck.compatible ? '✅ Ready' : '❌ Issues found');
+    // Log dependency status only in debug mode
+    if (IS_DEBUG_MODE) {
+      console.log('🔍 FullColorWheel Dependency Check:');
+      console.log('Status:', fullCheck.compatible ? '✅ Ready' : '❌ Issues found');
+    }
     
     if (fullCheck.errors.length > 0) {
       console.error('FullColorWheel errors:', fullCheck.errors);

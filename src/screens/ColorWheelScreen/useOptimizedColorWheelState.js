@@ -1,10 +1,15 @@
 // screens/ColorWheelScreen/useOptimizedColorWheelState.js - Enhanced state management for FullColorWheel
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { getColorScheme, hexToHsl, hslToHex } from '../../utils/optimizedColor';
+import Constants from 'expo-constants';
+import { analyzeColor, getColorScheme, getCacheStats, hexToHsl, hslToHex } from '../../utils/optimizedColor';
 import { useThrottledCallbacks } from '../../utils/throttledCallbacks';
 import { useOptimizedColorProcessing } from '../../hooks/useOptimizedColorProcessing';
 import { DEFAULT_SCHEME, DEFAULT_COLOR, generateRandomColor, validateHSL } from './constants';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 export const useOptimizedColorWheelState = (options = {}) => {
   const {
@@ -149,12 +154,14 @@ export const useOptimizedColorWheelState = (options = {}) => {
         if (getCacheStats) {
           try {
             const cacheStats = getCacheStats();
-            console.log('🎨 Color Processing Stats:', {
-              paletteSize: currentPalette.length,
-              cacheHits: cacheStats.hits,
-              cacheMisses: cacheStats.misses,
-              cacheSize: cacheStats.size
-            });
+            if (IS_DEBUG_MODE) {
+              console.log(' Color Processing Stats:', {
+                paletteSize: currentPalette.length,
+                cacheHits: cacheStats.hits,
+                cacheMisses: cacheStats.misses,
+                hitRate: `${Math.round((cacheStats.hits / (cacheStats.hits + cacheStats.misses)) * 100)}%`
+              });
+            }
           } catch (statsError) {
             console.warn('Failed to get cache stats:', statsError);
           }
@@ -184,18 +191,18 @@ export const useOptimizedColorWheelState = (options = {}) => {
       const colorAnalysis = analyzeColor ? analyzeColor(hex) : null;
       
       // Log color analysis for production insights (when available)
-      if (colorAnalysis) {
-        console.log('🎯 Color Analysis:', {
+      if (colorAnalysis && IS_DEBUG_MODE) {
+        console.log(' Color Analysis:', {
           hex,
           brightness: colorAnalysis.brightness,
           category: colorAnalysis.analysis?.category,
-          temperature: colorAnalysis.analysis?.temperature,
+          harmony: colorAnalysis.analysis?.harmony,
           accessibility: colorAnalysis.accessibility
         });
       }
     } catch (error) {
       // Always log color analysis errors for production debugging
-      console.warn('⚠️ Color analysis error (fallback to basic mode):', error);
+      console.warn(' Color analysis error (fallback to basic mode):', error);
     }
     
     // Update local state immediately for UI responsiveness
@@ -332,7 +339,9 @@ export const useOptimizedColorWheelState = (options = {}) => {
         
         forceUpdate(validColors, 0);
         
-        console.log('✅ Extracted colors applied:', validColors.length, 'colors');
+        if (IS_DEBUG_MODE) {
+          console.log('✅ Extracted colors applied:', validColors.length, 'colors');
+        }
       } else {
         // Always log extraction issues for production debugging
         console.warn('⚠️ No valid hex colors extracted from:', extractedColors.slice(0, 3), '...');

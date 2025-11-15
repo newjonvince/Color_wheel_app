@@ -1,6 +1,11 @@
-// utils/moduleLoader.js - Safe module loading with fallbacks
+// utils/moduleLoader.js - Safe module loading with error handling
 import React from 'react';
 import { View, Text, TouchableOpacity, Platform } from 'react-native';
+import Constants from 'expo-constants';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 // Safe module loader with fallbacks
 export const loadModules = () => {
@@ -30,8 +35,10 @@ export const loadModules = () => {
     
     modules.ApiService = require('../services/safeApiService').default;
     
-    // Always log successful module loading for production debugging
-    console.log('✅ App modules loaded successfully');
+    // Log successful module loading only in debug mode
+    if (IS_DEBUG_MODE) {
+      console.log('✅ App modules loaded successfully');
+    }
   } catch (e) {
     console.error('FATAL: Module import failed at launch:', e?.message);
     console.error('Stack:', e?.stack);
@@ -64,8 +71,10 @@ export const loadScreens = () => {
     screens.SignUpScreen = require('../screens/SignUpScreen').default;
     screens.UserSettingsScreen = require('../screens/UserSettingsScreen').default;
     
-    // Always log successful screen loading for production debugging
-    console.log('✅ All screen modules loaded successfully');
+    // Log successful screen loading only in debug mode
+    if (IS_DEBUG_MODE) {
+      console.log('✅ All screen modules loaded successfully');
+    }
   } catch (e) {
     console.error('Screen module load error:', e?.message);
     console.error('Stack:', e?.stack);
@@ -98,11 +107,15 @@ export const loadColorWheelScreen = () => {
 
   try { 
     ColorWheelScreen = require('../screens/ColorWheelScreen/index').default; 
-    // Always log ColorWheel loading for production debugging
-    console.log('✅ ColorWheelScreen loaded successfully');
+    // Log ColorWheel loading only in debug mode
+    if (IS_DEBUG_MODE) {
+      console.log('✅ ColorWheelScreen loaded successfully');
+    }
   } catch (e) {
-    // Always log ColorWheel failures for production debugging
-    console.log('❌ ColorWheelScreen load failed on', Platform.OS + ':', e?.message);
+    // Log ColorWheel failures only in debug mode (keep error for production)
+    if (IS_DEBUG_MODE) {
+      console.log('❌ ColorWheelScreen load failed on', Platform.OS + ':', e?.message);
+    }
     console.error('Critical module load error:', e);
     error = e;
     

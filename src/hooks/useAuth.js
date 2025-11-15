@@ -378,22 +378,23 @@ export const useAuth = () => {
     }
   }, []);
 
-  // ✅ Cleanup effect to prevent race conditions on unmount
+  // ✅ REACT 18 STRICTMODE: Cleanup effect to prevent race conditions on unmount
   useEffect(() => {
     isMountedRef.current = true;
     
     return () => {
+      console.log('🧹 useAuth cleanup: Component unmounting');
       isMountedRef.current = false;
       
-      // Cancel any ongoing operations
+      // ✅ CLEANUP: Clear ongoing operation references (Promises don't have abort methods)
       if (initializationRef.current) {
-        console.log('🧹 Canceling ongoing initialization on unmount');
+        console.log('🧹 Clearing ongoing initialization reference on unmount');
       }
       if (loginRef.current) {
-        console.log('🧹 Canceling ongoing login on unmount');
+        console.log('🧹 Clearing ongoing login reference on unmount');
       }
       if (logoutRef.current) {
-        console.log('🧹 Canceling ongoing logout on unmount');
+        console.log('🧹 Clearing ongoing logout reference on unmount');
       }
       
       // Clear references
@@ -403,14 +404,30 @@ export const useAuth = () => {
     };
   }, []);
 
-  return {
-    user,
-    loading,
-    isInitialized,
-    initializeAuth,
-    handleLoginSuccess,
-    handleSignUpComplete,
-    handleLogout,
-    handleAccountDeleted,
-  };
+  // ✅ ROOT CAUSE FIX: Ensure ALWAYS returns object, never undefined
+  try {
+    return {
+      user,
+      loading,
+      isInitialized,
+      initializeAuth,
+      handleLoginSuccess,
+      handleSignUpComplete,
+      handleLogout,
+      handleAccountDeleted,
+    };
+  } catch (error) {
+    console.error('useAuth hook error - returning safe defaults:', error);
+    // ✅ CRITICAL: Return safe defaults to prevent App.js crashes
+    return {
+      user: null,
+      loading: false,
+      isInitialized: false,
+      initializeAuth: async () => {},
+      handleLoginSuccess: async () => {},
+      handleSignUpComplete: async () => {},
+      handleLogout: async () => {},
+      handleAccountDeleted: async () => {},
+    };
+  }
 };

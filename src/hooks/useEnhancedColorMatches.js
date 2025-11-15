@@ -22,6 +22,7 @@ export const useEnhancedColorMatches = () => {
   const abortControllerRef = useRef(null);
   const isMountedRef = useRef(true);
   const isFetchingRef = useRef(false);
+  const colorMatchesRef = useRef([]);
 
   // Load cached data on mount
   useEffect(() => {
@@ -40,6 +41,7 @@ export const useEnhancedColorMatches = () => {
         // Use cached data if recent, otherwise fetch fresh
         if (Date.now() - timestamp < CACHE_DURATION) {
           setColorMatches(matches);
+          colorMatchesRef.current = matches;
           setLastFetch(timestamp);
         } else {
           // Cached data is stale, fetch fresh
@@ -77,7 +79,7 @@ export const useEnhancedColorMatches = () => {
     // Skip if already fetching or recently fetched (unless forced)
     if (isFetchingRef.current || (!force && lastFetch && Date.now() - lastFetch < 30000)) {
       // ✅ FIX: Return cached data instead of undefined
-      return colorMatches;
+      return colorMatchesRef.current;
     }
 
     // ✅ FIX: Set flag BEFORE any async operations to prevent race condition
@@ -107,6 +109,7 @@ export const useEnhancedColorMatches = () => {
       // Only update state if component is still mounted
       if (isMountedRef.current) {
         setColorMatches(enhancedMatches);
+        colorMatchesRef.current = enhancedMatches;
         setLastFetch(Date.now());
         
         // Cache the results
@@ -124,6 +127,7 @@ export const useEnhancedColorMatches = () => {
         if (cached) {
           const { matches } = JSON.parse(cached);
           setColorMatches(matches);
+          colorMatchesRef.current = matches;
         }
       }
     } finally {
@@ -131,7 +135,7 @@ export const useEnhancedColorMatches = () => {
       setLoading(false);
       abortControllerRef.current = null;
     }
-  }, [lastFetch, cacheMatches, colorMatches]);
+  }, [lastFetch, cacheMatches]);
 
   /**
    * Enhance color matches with like information

@@ -7,7 +7,10 @@
  * ✅ SAFER: Use LRU cache with size limit to prevent memory leaks
  */
 import LRUCache from './LRUCache';
-const colorCache = new LRUCache(1000); // Max 1000 colors cached
+
+// ✅ CRASH FIX: Define cache size constant
+const MAX_CACHE_SIZE = 1000;
+const colorCache = new LRUCache(MAX_CACHE_SIZE);
 
 /**
  * Normalize and validate hex color input
@@ -601,9 +604,9 @@ export function hslToHex(h, s, l) {
  */
 export function getColorCache() {
   return {
-    size: colorCache.size,
+    size: colorCache.size(), // ✅ API FIX: Use size() method, not property
     maxSize: MAX_CACHE_SIZE,
-    colors: Array.from(colorCache.keys())
+    colors: Array.from(colorCache.cache.keys()) // ✅ API FIX: Access internal Map's keys
   };
 }
 

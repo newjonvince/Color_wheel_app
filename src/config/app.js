@@ -1,9 +1,13 @@
 // config/app.js - Ultra-optimized app configuration with caching and validation
 import { Platform, LogBox } from 'react-native';
+import Constants from 'expo-constants';
+import { logger } from '../utils/AppLogger';
 
-// Environment-specific configuration
-const IS_DEV = __DEV__;
-const IS_PROD = !__DEV__;
+// Production-ready environment configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+const IS_DEV = IS_DEBUG_MODE;
+const IS_PROD = !IS_DEBUG_MODE;
 
 // Performance constants
 const PERFORMANCE_CONFIG = {
@@ -125,7 +129,7 @@ const validateAppConfig = (config) => {
     console.warn('⚠️ Missing tab icons:', missingIcons);
   }
   
-  console.log('✅ App configuration validated successfully');
+  logger.debug('✅ App configuration validated successfully');
 };
 
 // Memoized configuration getter
@@ -185,18 +189,18 @@ export const initializeAppConfig = () => {
         
         // Note: Use AppLogger from utils/AppLogger.js for filtered logging
         // Leave console.* untouched for libraries and React Native internals
-        console.log('✅ Production logging configured - using LogBox for noise reduction');
+        logger.debug('✅ Production logging configured - using LogBox for noise reduction');
       }
       
       // Development-specific optimizations
       if (IS_DEV) {
         // Enable performance monitoring
         if (APP_CONFIG.performance.ENABLED) {
-          console.log('🚀 Performance monitoring enabled');
+          logger.debug('🚀 Performance monitoring enabled');
         }
         
         // Log configuration summary
-        console.log('📱 App configuration initialized:', {
+        logger.debug('📱 App configuration initialized:', {
           screens: Object.keys(APP_CONFIG.linking.config.screens).length,
           icons: Object.keys(APP_CONFIG.tabIcons).length,
           performance: APP_CONFIG.performance.ENABLED,
@@ -207,7 +211,7 @@ export const initializeAppConfig = () => {
       
       const initTime = Date.now() - startTime;
       if (IS_DEV && initTime > 10) {
-        console.log(`⏱️ App config initialization took ${initTime}ms`);
+        logger.debug(`⏱️ App config initialization took ${initTime}ms`);
       }
       
       resolve();
@@ -283,7 +287,7 @@ export const performanceUtils = IS_DEV ? {
     return () => {
       const duration = Date.now() - startTime;
       if (duration > APP_CONFIG.performance.LOG_THRESHOLD) {
-        console.log(`⏱️ ${label}: ${duration}ms`);
+        logger.debug(`⏱️ ${label}: ${duration}ms`);
       }
       return duration;
     };
@@ -313,7 +317,7 @@ export const memoryUtils = {
     // userCache is WeakMap, so it clears automatically
     
     if (IS_DEV) {
-      console.log('🧹 Configuration caches cleared');
+      logger.debug('🧹 Configuration caches cleared');
     }
   },
   
@@ -331,7 +335,7 @@ export const cleanupAppConfig = () => {
   initializationPromise = null;
   
   if (IS_DEV) {
-    console.log('🧹 App configuration cleaned up');
+    logger.debug('🧹 App configuration cleaned up');
   }
 };
 

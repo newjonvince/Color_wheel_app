@@ -3,6 +3,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { safeStorage } from '../../utils/safeStorage';
 import ApiService from '../../services/safeApiService';
 import { debounce } from '../../utils/debounce';
+import { logger } from '../../utils/AppLogger';
 import { validateForm, validateEmail, parseLoginResponse, getErrorMessage, withTimeout, DEMO_USER, TIMEOUTS, STORAGE_KEYS, sanitizeEmail, sanitizePassword } from './constants';
 
 export const useOptimizedLoginState = (onLoginSuccess) => {
@@ -127,7 +128,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       await Promise.all(writeOperations);
       
     } catch (error) {
-      console.error('Session save failed:', error);
+      logger.error('Session save failed:', error);
       
       // Clean up partial state on failure
       try {
@@ -137,7 +138,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
           safeStorage.removeItem(STORAGE_KEYS.isLoggedIn),
         ]);
       } catch (cleanupError) {
-        console.error('Session cleanup failed:', cleanupError);
+        logger.error('Session cleanup failed:', cleanupError);
       }
       
       throw new Error('Failed to save login session');
@@ -274,7 +275,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       return;
       
     } catch (backendError) {
-      console.warn('Backend demo failed:', backendError);
+      logger.warn('Backend demo failed:', backendError);
       
       // ✅ Only use local fallback if backend completely failed
       if (backendAttempted && !isMountedRef.current) {
@@ -304,7 +305,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         }
         
       } catch (localError) {
-        console.error('Local demo fallback failed:', localError);
+        logger.error('Local demo fallback failed:', localError);
         if (isMountedRef.current) {
           setGlobalError('Demo login failed. Please try again.');
         }

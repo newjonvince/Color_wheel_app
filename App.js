@@ -41,74 +41,114 @@ function FashionColorWheelApp() {
     user = null,
     loading: authLoading = false,
     isInitialized = false,
-    initializeAuth = async () => { console.warn('Auth not initialized'); },
-    handleLoginSuccess = () => { console.warn('Auth not initialized'); },
-    handleLogout = () => { console.warn('Auth not initialized'); },
+    initializeAuth = async () => { logger.warn('Auth not initialized'); },
+    handleLoginSuccess = () => { logger.warn('Auth not initialized'); },
+    handleLogout = () => { logger.warn('Auth not initialized'); },
   } = authState;
 
   // Validation for debugging
   if (!authState || typeof authState !== 'object') {
-    console.error('🚨 useAuth returned invalid state:', authState);
+    logger.error('🚨 useAuth returned invalid state:', authState);
   }
 
-  // Initialize app - sequential for dependency safety, parallel where safe
+  // ✅ REACT 18 STRICTMODE: Initialize app with proper AbortController cleanup
   useEffect(() => {
+    // ✅ SAFER: Defensive AbortController creation
+    let controller;
+    try {
+      controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    } catch (error) {
+      logger.warn('AbortController not available, proceeding without cancellation support');
+      controller = null;
+    }
+    
     const initialize = async () => {
       try {
-        console.log('🔄 Starting app initialization...');
+        logger.info('🔄 Starting app initialization...');
         
         // Step 1: Validate environment variables first
         validateEnv(); // Fail fast if config is broken
         
         // Step 2: Initialize app config (required for other steps)
         await initializeAppConfig();
-        console.log('✅ initializeAppConfig() completed');
+        logger.info('✅ initializeAppConfig() completed');
 
         // Step 3: Initialize storage layer (required by API service and auth)
         try {
           await safeStorage.init();
-          console.log('✅ safeStorage.init() completed');
+          logger.info('✅ safeStorage.init() completed');
         } catch (storageError) {
-          console.error('❌ safeStorage.init() failed:', storageError);
+          logger.error('❌ safeStorage.init() failed:', storageError);
           // Continue anyway - safeStorage has internal fallbacks
-          console.warn('⚠️ Continuing with limited storage functionality');
+          logger.warn('⚠️ Continuing with limited storage functionality');
         }
 
-        // Step 4: ✅ SAFER: Graceful degradation pattern
-        console.log('🔄 Starting parallel API and auth initialization...');
+        // ✅ SAFER: Check if aborted before continuing
+        if (controller?.signal?.aborted) {
+          logger.debug('🛑 Initialization aborted before auth step');
+          return;
+        }
+
+        // Step 4: ✅ SAFER: Graceful degradation pattern with signal support
+        logger.info('🔄 Starting parallel API and auth initialization...');
         const [apiResult, authResult] = await Promise.allSettled([
           safeApiService.ready.then(() => ({ success: true, service: 'API' })),
-          initializeAuth().then(() => ({ success: true, service: 'Auth' }))
+          initializeAuth({ signal: controller?.signal }).then(() => ({ success: true, service: 'Auth' }))
         ]);
+
+        // ✅ SAFER: Check if aborted after async operations
+        if (controller?.signal?.aborted) {
+          logger.debug('🛑 Initialization aborted after async operations');
+          return; // Don't update state if aborted
+        }
 
         // Check results and continue with degraded functionality
         if (apiResult.status === 'rejected') {
-          console.error('⚠️ API service failed, running in offline mode:', apiResult.reason);
+          logger.warn('⚠️ API service failed, running in offline mode:', apiResult.reason);
           // App can still work without API (local palette generation)
         }
 
         if (authResult.status === 'rejected') {
-          console.error('⚠️ Auth failed, showing login screen:', authResult.reason);
+          logger.warn('⚠️ Auth failed, showing login screen:', authResult.reason);
           // Auth failure is expected if user isn't logged in
         }
         
-        console.log('✅ All initialization steps completed');
+        logger.info('✅ All initialization steps completed');
       } catch (error) {
-        console.error('🚨 App initialization failed:', error);
-        console.error('Error stack:', error.stack);
-        console.error('Error details:', {
+        // ✅ SAFER: Don't log errors if aborted
+        if (controller?.signal?.aborted) {
+          logger.debug('🛑 Initialization aborted during error handling');
+          return;
+        }
+        
+        logger.error('🚨 App initialization failed:', error);
+        logger.error('Error stack:', error.stack);
+        logger.error('Error details:', {
           message: error.message,
           name: error.name,
           cause: error.cause
         });
       } finally {
-        setIsLoading(false);
+        // ✅ SAFER: Only update state if not aborted
+        if (!controller?.signal?.aborted) {
+          setIsLoading(false);
+        }
       }
     };
 
     initialize();
     
-    // ✅ SAFER: Run only once on mount
+    // ✅ REACT 18 STRICTMODE: Cleanup AbortController
+    return () => {
+      if (controller?.abort) {
+        logger.debug('🧹 App cleanup: Aborting initialization');
+        try {
+          controller.abort();
+        } catch (error) {
+          logger.warn('Failed to abort controller during cleanup:', error);
+        }
+      }
+    };
   }, []); // Empty deps = run once
   
 
@@ -199,33 +239,6 @@ const styles = StyleSheet.create({
   },
 });
 
-// Error boundary wrapper
-class AppErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-
-  componentDidCatch(error, errorInfo) {
-    console.error('App Error Boundary caught an error:', error, errorInfo);
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <SafeAreaView style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Something went wrong. Please restart the app.</Text>
-        </SafeAreaView>
-      );
-    }
-
-    return this.props.children;
-  }
-}
 
 // Main app export with enhanced error boundaries
 export default function App() {

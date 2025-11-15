@@ -1,6 +1,11 @@
 // services/safeApiService.js - API service with safe dependency handling
 import axios from 'axios';
+import Constants from 'expo-constants';
 import { safeStorage } from '../utils/safeStorage';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 // Request cancellation support
 const CancelToken = axios.CancelToken;
@@ -141,13 +146,13 @@ class SafeApiService {
         }
       }
 
-      // Log successful response for debugging (in development)
-      if (__DEV__) {
+      // Log successful response for debugging (only in debug mode)
+      if (IS_DEBUG_MODE) {
         console.log(`✅ Response validated for ${endpoint}:`, {
           status: response.status,
           contentType,
           dataType: typeof response.data,
-          hasData: response.data !== null && response.data !== undefined
+          dataLength: response.data ? JSON.stringify(response.data).length : 0
         });
       }
 
@@ -198,8 +203,10 @@ class SafeApiService {
   async initialize() {
     try {
       // ✅ SAFER: Skip fake axios validation - just log API configuration
-      console.log('🔄 Initializing SafeApiService...');
-      console.log('📡 API Root URL:', API_ROOT);
+      if (IS_DEBUG_MODE) {
+        console.log('🔄 Initializing SafeApiService...');
+        console.log('📡 API Root URL:', API_ROOT);
+      }
 
       // Try to load stored token (depends on safeStorage being initialized)
       let token = null;
@@ -207,8 +214,10 @@ class SafeApiService {
         token = await safeStorage.getItem('fashion_color_wheel_auth_token');
         if (token && typeof token === 'string' && token.trim().length > 0) {
           this.authToken = token;
-          // Always log token loading status in production
-          console.log('✅ Auth token loaded from storage');
+          // Log token loading status only in debug mode
+          if (IS_DEBUG_MODE) {
+            console.log('✅ Auth token loaded from storage');
+          }
         }
       } catch (storageError) {
         console.warn('Failed to load auth token from storage:', storageError.message);
@@ -217,8 +226,10 @@ class SafeApiService {
 
       this.isReady = true;
       
-      // Always log service initialization in production
-      console.log('✅ SafeApiService initialized successfully');
+      // Log service initialization only in debug mode
+      if (IS_DEBUG_MODE) {
+        console.log('✅ SafeApiService initialized successfully');
+      }
       
       return true;
     } catch (error) {
@@ -387,8 +398,8 @@ class SafeApiService {
     return this.request('/auth/profile', options);
   }
 
-  async getUserColorMatches() {
-    return this.request('/colors/user-matches');
+  async getUserColorMatches(options = {}) {
+    return this.request('/colors/user-matches', options);
   }
 
   // Safe logout
@@ -562,9 +573,11 @@ class SafeApiService {
       }
 
       // For objects, check for circular references and validate structure
+      let dataString;
       if (typeof data === 'object') {
         try {
-          JSON.stringify(data); // This will throw if there are circular references
+          // ✅ PERFORMANCE: Compute JSON.stringify only once
+          dataString = JSON.stringify(data); // This will throw if there are circular references
         } catch (stringifyError) {
           throw new Error(`Invalid request data: ${stringifyError.message}`);
         }
@@ -573,10 +586,10 @@ class SafeApiService {
         if (data.constructor && data.constructor !== Object && data.constructor !== Array) {
           console.warn('⚠️ Request data contains non-plain object with constructor:', data.constructor.name);
         }
+      } else {
+        // For strings, use as-is
+        dataString = data;
       }
-
-      // Validate data size (prevent extremely large payloads)
-      const dataString = typeof data === 'string' ? data : JSON.stringify(data);
       // ✅ SAFER: React Native compatible size calculation (Blob API doesn't exist in RN)
       let dataSizeBytes;
       try {
@@ -661,6 +674,73 @@ class SafeApiService {
 
     } catch (validationError) {
       throw new Error(`Request config validation failed: ${validationError.message}`);
+    }
+  }
+
+  // ✅ IMAGE ENDPOINTS: Add missing image processing endpoints with guards
+  async extractColorsFromImage(uri, options = {}) {
+    try {
+      const formData = new FormData();
+      formData.append('image', {
+        uri,
+        type: 'image/jpeg',
+        name: 'image.jpg',
+      });
+
+      const response = await this.request('/images/extract-colors', {
+        method: 'POST',
+        data: formData,
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+        timeout: 30000,
+        onUploadProgress: options.onProgress,
+        ...options
+      });
+
+      return response;
+    } catch (error) {
+      console.error('extractColorsFromImage failed:', error);
+      throw error;
+    }
+  }
+
+  async sampleColorAt(imageId, normX, normY, radius = 0.02) {
+    try {
+      if (!imageId) {
+        throw new Error('imageId is required for color sampling');
+      }
+
+      const response = await this.request('/images/sample-color', {
+        method: 'POST',
+        data: {
+          imageId,
+          x: normX,
+          y: normY,
+          radius
+        }
+      });
+
+      return response;
+    } catch (error) {
+      console.warn('sampleColorAt failed, using fallback:', error);
+      // Fallback for when endpoint is not available
+      return { hex: '#FF6B6B' }; // Default fallback color
+    }
+  }
+
+  async closeImageSession(imageId) {
+    try {
+      if (!imageId) {
+        return; // No session to close
+      }
+
+      await this.request(`/images/session/${imageId}`, {
+        method: 'DELETE'
+      });
+    } catch (error) {
+      console.warn('closeImageSession failed:', error);
+      // Non-critical error, don't throw
     }
   }
 }

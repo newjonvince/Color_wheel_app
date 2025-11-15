@@ -1,4 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 /**
  * Safe AsyncStorage wrapper with enhanced error handling for iOS production crashes
@@ -52,7 +57,9 @@ class SafeAsyncStorage {
 
   async _performInit() {
     try {
-      console.log('🔄 Initializing SafeAsyncStorage...');
+      if (IS_DEBUG_MODE) {
+        console.log('🔄 Initializing SafeAsyncStorage...');
+      }
 
       // Test basic AsyncStorage functionality with minimal operations
       const testKey = '__safe_storage_test__';
@@ -82,7 +89,9 @@ class SafeAsyncStorage {
       
       if (success) {
         this.isAvailable = true;
-        console.log('✅ AsyncStorage is available and working');
+        if (IS_DEBUG_MODE) {
+          console.log('✅ AsyncStorage is available and working');
+        }
       } else {
         throw new Error('AsyncStorage test failed - retrieved value mismatch');
       }
@@ -123,7 +132,9 @@ class SafeAsyncStorage {
 
     // Retry AsyncStorage after cooldown period
     if (this.isAvailable === false && this.shouldRetryAsyncStorage()) {
-      console.log('🔄 Retrying AsyncStorage after cooldown...');
+      if (IS_DEBUG_MODE) {
+        console.log('🔄 Retrying AsyncStorage after cooldown...');
+      }
       await this.init();
     }
 
@@ -161,7 +172,9 @@ class SafeAsyncStorage {
 
     // Retry AsyncStorage after cooldown period
     if (this.isAvailable === false && this.shouldRetryAsyncStorage()) {
-      console.log('🔄 Retrying AsyncStorage after cooldown...');
+      if (IS_DEBUG_MODE) {
+        console.log('🔄 Retrying AsyncStorage after cooldown...');
+      }
       await this.init();
     }
 
@@ -199,7 +212,9 @@ class SafeAsyncStorage {
 
     // Retry AsyncStorage after cooldown period
     if (this.isAvailable === false && this.shouldRetryAsyncStorage()) {
-      console.log('🔄 Retrying AsyncStorage after cooldown...');
+      if (IS_DEBUG_MODE) {
+        console.log('🔄 Retrying AsyncStorage after cooldown...');
+      }
       await this.init();
     }
 
@@ -237,7 +252,9 @@ class SafeAsyncStorage {
 
     // Retry AsyncStorage after cooldown period
     if (this.isAvailable === false && this.shouldRetryAsyncStorage()) {
-      console.log('🔄 Retrying AsyncStorage after cooldown...');
+      if (IS_DEBUG_MODE) {
+        console.log('🔄 Retrying AsyncStorage after cooldown...');
+      }
       await this.init();
     }
 

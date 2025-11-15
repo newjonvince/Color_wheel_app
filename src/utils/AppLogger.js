@@ -1,27 +1,60 @@
-// utils/AppLogger.js - Production-safe logging without console override
+// utils/AppLogger.js - Production-safe logging with EXPO_PUBLIC flags
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
+
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+const LOG_LEVEL = extra.EXPO_PUBLIC_LOG_LEVEL || 'warn';
 
 class AppLogger {
   constructor() {
-    this.isDev = __DEV__;
+    this.isDebugMode = IS_DEBUG_MODE;
+    this.logLevel = LOG_LEVEL;
+  }
+  
+  debug(...args) {
+    if (this.shouldLog('debug')) {
+      console.log('[DEBUG]', ...args);
+    }
+  }
+  
+  info(...args) {
+    if (this.shouldLog('info')) {
+      console.log('[INFO]', ...args);
+    }
   }
   
   log(...args) {
-    if (this.isDev || this.isImportantMessage(args[0])) {
-      console.log(...args);
-    }
+    // Alias for info for backward compatibility
+    this.info(...args);
   }
   
   warn(...args) {
-    console.warn(...args); // Always show warnings
+    if (this.shouldLog('warn')) {
+      console.warn('[WARN]', ...args);
+    }
   }
   
   error(...args) {
-    console.error(...args); // Always show errors
-    // Send to crash reporting
-    if (!this.isDev) {
+    if (this.shouldLog('error')) {
+      console.error('[ERROR]', ...args);
+    }
+    // Send to crash reporting in production
+    if (!this.isDebugMode) {
       this.reportToSentry(args);
     }
+  }
+  
+  shouldLog(level) {
+    const levels = ['debug', 'info', 'warn', 'error'];
+    const currentLevelIndex = levels.indexOf(this.logLevel);
+    const requestedLevelIndex = levels.indexOf(level);
+    
+    // If debug mode is on, show everything
+    if (this.isDebugMode) return true;
+    
+    // Otherwise, only show messages at or above the configured level
+    return requestedLevelIndex >= currentLevelIndex;
   }
   
   isImportantMessage(msg) {

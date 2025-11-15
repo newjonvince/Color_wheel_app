@@ -1,7 +1,13 @@
 // screens/ColorWheelScreen/components/HSLInputs.js
-import React, { useCallback, useRef, useEffect } from 'react';
-import { View, Text, TextInput, Platform } from 'react-native';
+import React, { useState, useCallback, useMemo, memo, useRef, useEffect } from 'react';
+import { View, Text, TextInput, StyleSheet, Platform } from 'react-native';
 import PropTypes from 'prop-types';
+import Constants from 'expo-constants';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+
 import { debounce } from '../../../utils/debounce';
 import { styles } from '../styles';
 
@@ -53,7 +59,7 @@ export const HSLInputs = React.memo(({
       wheel.setGesturesEnabled(false);
     }
     
-    if (__DEV__) {
+    if (IS_DEBUG_MODE) {
       console.log(`🎯 HSL input ${component} focused - wheel gestures disabled`);
     }
   }, [wheelRef]);
@@ -70,7 +76,7 @@ export const HSLInputs = React.memo(({
     // Apply the input changes
     onApplyInputs();
     
-    if (__DEV__) {
+    if (IS_DEBUG_MODE) {
       console.log(`🎯 HSL input ${component} blurred - wheel gestures enabled`);
     }
   }, [wheelRef, onApplyInputs]);

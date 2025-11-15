@@ -1,5 +1,6 @@
 // config/env.js - Environment variables validation and management
 import Constants from 'expo-constants';
+import { logger } from '../utils/AppLogger';
 
 const ENV_VARS = {
   API_BASE_URL: Constants.expoConfig?.extra?.EXPO_PUBLIC_API_BASE_URL,
@@ -43,8 +44,8 @@ export function validateEnv() {
     warnings.forEach(warning => console.warn(`⚠️ ${warning}`));
   }
   
-  console.log(`✅ Environment variables validated for ${ENV_VARS.ENVIRONMENT} environment`);
-  console.log(`📡 API URL: ${getApiUrl()}`);
+  logger.info(`✅ Environment variables validated for ${ENV_VARS.ENVIRONMENT} environment`);
+  logger.info(`📡 API URL: ${getApiUrl()}`);
 }
 
 export default ENV_VARS;

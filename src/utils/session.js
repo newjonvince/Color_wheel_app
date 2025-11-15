@@ -1,5 +1,11 @@
 import { safeAsyncStorage } from './safeAsyncStorage';
-import * as SecureStore from 'expo-secure-store';
+import { SecureStore } from 'expo-secure-store';
+import Constants from 'expo-constants';
+import { safeStorage } from './safeStorage';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 /**
  * Wipes all local session data securely
@@ -13,7 +19,9 @@ export async function wipeLocalSession() {
       // Remove SecureStore token (catch errors if key doesn't exist)
       SecureStore.deleteItemAsync('authToken').catch(() => {}),
     ]);
-    console.log('✅ Local session wiped successfully');
+    if (IS_DEBUG_MODE) {
+      console.log('✅ Local session wiped successfully');
+    }
   } catch (error) {
     console.error('❌ Error wiping local session:', error);
     // Still try to remove items individually if batch fails
@@ -50,7 +58,9 @@ export async function performSecureLogout(apiService, onLogout) {
       onLogout();
     }
 
-    console.log('✅ Secure logout completed');
+    if (IS_DEBUG_MODE) {
+      console.log('✅ Secure logout completed');
+    }
   } catch (error) {
     console.error('❌ Error during secure logout:', error);
     // Still execute callback even if there were errors
@@ -74,7 +84,9 @@ export async function performSecureAccountDeletion(onAccountDeleted) {
       onAccountDeleted();
     }
 
-    console.log('✅ Secure account deletion cleanup completed');
+    if (IS_DEBUG_MODE) {
+      console.log('✅ Secure account deletion cleanup completed');
+    }
   } catch (error) {
     console.error('❌ Error during account deletion cleanup:', error);
     // Still execute callback even if there were errors

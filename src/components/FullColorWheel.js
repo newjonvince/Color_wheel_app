@@ -2,8 +2,14 @@
 // Canva-style multi-handle color wheel with Skia + Reanimated
 // Crash-safe: no non-serializable captures inside worklets (no Set/refs); hex conversion on JS thread
 
-// Build verification tag for crash debugging (always log for production debugging)
-console.log('FullColorWheel build tag: 2025-08-16 worklet-patched');
+// Build verification tag for crash debugging (only in debug mode)
+import Constants from 'expo-constants';
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+
+if (IS_DEBUG_MODE) {
+  console.log('FullColorWheel build tag: 2025-08-16 worklet-patched');
+}
 
 import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
 import { View, Platform } from 'react-native';
@@ -20,8 +26,10 @@ const REANIMATED_READY = (() => {
   try {
     return typeof global?.__reanimatedWorkletInit === 'function';
   } catch (e) {
-    // Always log Reanimated issues for production debugging
-    console.log('Reanimated worklet init check failed:', e.message);
+    // Log Reanimated issues only in debug mode
+    if (IS_DEBUG_MODE) {
+      console.log('Reanimated worklet init check failed:', e.message);
+    }
     return false;
   }
 })();
@@ -49,8 +57,10 @@ try {
     vec = Skia.vec;
   }
 } catch (e) {
-  // Always log Skia loading failures for production debugging
-  console.log('Skia module load failed on', Platform.OS + ':', e.message);
+  // Log Skia loading failures only in debug mode
+  if (IS_DEBUG_MODE) {
+    console.log('Skia module load failed on', Platform.OS + ':', e.message);
+  }
   Canvas = View;
   SkiaCircle = () => null;
   SweepGradient = () => null;

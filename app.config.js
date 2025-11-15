@@ -7,6 +7,7 @@ export default {
     orientation: "portrait",
     icon: "./assets/icon.png",
     userInterfaceStyle: "light",
+    scheme: "colorwheel",
     splash: {
       image: "./assets/splash.png",
       resizeMode: "contain",
@@ -18,7 +19,23 @@ export default {
     ios: {
       supportsTablet: true,
       bundleIdentifier: "com.fashioncolorwheel.app",
-      buildNumber: "153"
+      buildNumber: "153",
+      requireFullScreen: false,
+      infoPlist: {
+        ITSAppUsesNonExemptEncryption: false,
+        NSCameraUsageDescription: "This app uses the camera to capture photos and extract color information for creating fashion color palettes.",
+        NSPhotoLibraryUsageDescription: "This app accesses your photo library to analyze images and extract color palettes for fashion coordination.",
+        NSPhotoLibraryAddUsageDescription: "This app can save your custom color palettes and fashion combinations to your photo library.",
+        NSAppTransportSecurity: {
+          NSAllowsArbitraryLoads: false,
+          NSExceptionDomains: {
+            "colorwheelapp-production.up.railway.app": {
+              NSExceptionAllowsInsecureHTTPLoads: false,
+              NSExceptionMinimumTLSVersion: "TLSv1.2"
+            }
+          }
+        }
+      }
     },
     android: {
       adaptiveIcon: {
@@ -49,6 +66,11 @@ export default {
       "expo-asset"
     ],
     extra: {
+      // ✅ EAS Build Configuration
+      eas: {
+        projectId: "3ac50c4a-9445-4311-a36c-b3c7f9466fbb"
+      },
+      
       // ✅ Dynamic API configuration based on environment
       EXPO_PUBLIC_API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL || 
         'https://colorwheelapp-production.up.railway.app',

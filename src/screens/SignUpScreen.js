@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, TextInput, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { safeAsyncStorage } from '../utils/safeAsyncStorage';
 import ApiService from '../services/safeApiService';
@@ -39,6 +39,9 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
   });
   const [loading, setLoading] = useState(false);
   const [usernameStatus, setUsernameStatus] = useState({ isValid: null, message: '' });
+  
+  // ✅ SAFER: Track component mount status to prevent state updates on unmounted component
+  const isMountedRef = useRef(true);
   
   // Debounce username for availability checks
   const debouncedUsername = useDebounce(formData.username, 400);
@@ -97,16 +100,30 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
     return dob <= min;
   };
 
+  // ✅ SAFER: Cleanup effect to prevent state updates on unmounted component
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Debounced username validation effect
   useEffect(() => {
     if (debouncedUsername && debouncedUsername.length >= 3) {
       validateUsername(debouncedUsername).then(result => {
-        setUsernameStatus(result);
+        // ✅ SAFER: Only update state if component is still mounted
+        if (isMountedRef.current) {
+          setUsernameStatus(result);
+        }
       });
     } else if (debouncedUsername && debouncedUsername.length > 0) {
-      setUsernameStatus({ isValid: false, message: 'Username too short' });
+      if (isMountedRef.current) {
+        setUsernameStatus({ isValid: false, message: 'Username too short' });
+      }
     } else {
-      setUsernameStatus({ isValid: null, message: '' });
+      if (isMountedRef.current) {
+        setUsernameStatus({ isValid: null, message: '' });
+      }
     }
   }, [debouncedUsername]);
 
@@ -150,32 +167,44 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
     // Don't proceed if step is invalid (button should be disabled)
     if (!isStepValid()) return;
     
-    setLoading(true);
+    if (isMountedRef.current) {
+      setLoading(true);
+    }
     
     try {
       switch (currentStep) {
         case SIGNUP_STEPS.EMAIL:
           const email = formData.email.trim().toLowerCase();
-          setFormData(prev => ({ ...prev, email }));
-          setCurrentStep(SIGNUP_STEPS.PASSWORD);
+          if (isMountedRef.current) {
+            setFormData(prev => ({ ...prev, email }));
+            setCurrentStep(SIGNUP_STEPS.PASSWORD);
+          }
           break;
 
         case SIGNUP_STEPS.PASSWORD:
-          setCurrentStep(SIGNUP_STEPS.USERNAME);
+          if (isMountedRef.current) {
+            setCurrentStep(SIGNUP_STEPS.USERNAME);
+          }
           break;
 
         case SIGNUP_STEPS.USERNAME:
           const username = formData.username.trim().toLowerCase();
-          setFormData(prev => ({ ...prev, username }));
-          setCurrentStep(SIGNUP_STEPS.LOCATION);
+          if (isMountedRef.current) {
+            setFormData(prev => ({ ...prev, username }));
+            setCurrentStep(SIGNUP_STEPS.LOCATION);
+          }
           break;
 
         case SIGNUP_STEPS.LOCATION:
-          setCurrentStep(SIGNUP_STEPS.BIRTHDAY);
+          if (isMountedRef.current) {
+            setCurrentStep(SIGNUP_STEPS.BIRTHDAY);
+          }
           break;
 
         case SIGNUP_STEPS.BIRTHDAY:
-          setCurrentStep(SIGNUP_STEPS.GENDER);
+          if (isMountedRef.current) {
+            setCurrentStep(SIGNUP_STEPS.GENDER);
+          }
           break;
 
         case SIGNUP_STEPS.GENDER:
@@ -188,10 +217,14 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
     } catch (error) {
       console.error('Navigation error:', error);
       // Only show error for actual failures, not validation issues
-      Alert.alert('Error', 'Something went wrong. Please try again.');
+      if (isMountedRef.current) {
+        Alert.alert('Error', 'Something went wrong. Please try again.');
+      }
     }
     
-    setLoading(false);
+    if (isMountedRef.current) {
+      setLoading(false);
+    }
   };
 
   const completeSignUp = async () => {
@@ -219,11 +252,13 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
           ApiService.setToken(result.data.token);
         }  
         
-        setCurrentStep(SIGNUP_STEPS.COMPLETE);
+        if (isMountedRef.current) {
+          setCurrentStep(SIGNUP_STEPS.COMPLETE);
+        }
         
         // Auto-complete after showing success with safer callback handling
         setTimeout(() => {
-          if (onSignUpComplete && typeof onSignUpComplete === 'function') {
+          if (isMountedRef.current && onSignUpComplete && typeof onSignUpComplete === 'function') {
             try {
               onSignUpComplete(result.data.user);
             } catch (callbackError) {
@@ -255,19 +290,29 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
         }
         break;
       case SIGNUP_STEPS.PASSWORD:
-        setCurrentStep(SIGNUP_STEPS.EMAIL);
+        if (isMountedRef.current) {
+          setCurrentStep(SIGNUP_STEPS.EMAIL);
+        }
         break;
       case SIGNUP_STEPS.USERNAME:
-        setCurrentStep(SIGNUP_STEPS.PASSWORD);
+        if (isMountedRef.current) {
+          setCurrentStep(SIGNUP_STEPS.PASSWORD);
+        }
         break;
       case SIGNUP_STEPS.LOCATION:
-        setCurrentStep(SIGNUP_STEPS.USERNAME);
+        if (isMountedRef.current) {
+          setCurrentStep(SIGNUP_STEPS.USERNAME);
+        }
         break;
       case SIGNUP_STEPS.BIRTHDAY:
-        setCurrentStep(SIGNUP_STEPS.LOCATION);
+        if (isMountedRef.current) {
+          setCurrentStep(SIGNUP_STEPS.LOCATION);
+        }
         break;
       case SIGNUP_STEPS.GENDER:
-        setCurrentStep(SIGNUP_STEPS.BIRTHDAY);
+        if (isMountedRef.current) {
+          setCurrentStep(SIGNUP_STEPS.BIRTHDAY);
+        }
         break;
     }
   };

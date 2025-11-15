@@ -11,16 +11,10 @@ const UnauthenticatedApp = React.memo(({ handleLoginSuccess }) => {
   return (
     <SafeAreaView style={styles.container}>
       {showSignUp ? (
-        <View style={styles.authContainer}>
-          <Text style={styles.authTitle}>Sign Up</Text>
-          <Text style={styles.authSubtitle}>Create your account</Text>
-          <Text 
-            style={styles.switchAuth}
-            onPress={() => setShowSignUp(false)}
-          >
-            Already have an account? Login
-          </Text>
-        </View>
+        <SignUpScreen 
+          onSignUpComplete={handleLoginSuccess}
+          onBackToLogin={() => setShowSignUp(false)}
+        />
       ) : (
         <LoginScreen 
           onLoginSuccess={handleLoginSuccess}

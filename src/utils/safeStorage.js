@@ -1,5 +1,11 @@
 // utils/safeStorage.js - Secure storage with expo-secure-store and proper initialization
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { safeAsyncStorage } from './safeAsyncStorage';
+
+// Production-ready configuration
+const extra = Constants.expoConfig?.extra || {};
+const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 // Error monitoring for critical failures
 const reportError = (error, context) => {
@@ -82,8 +88,10 @@ class OptimizedSafeStorage {
         await safeAsyncStorage.init();
         asyncStorageAvailable = safeAsyncStorage.isAsyncStorageAvailable();
         
-        // Always log critical storage status in production
-        console.log('📱 AsyncStorage status:', asyncStorageAvailable ? '✅ Working' : '❌ Failed');
+        // Log critical storage status only in debug mode
+        if (IS_DEBUG_MODE) {
+          console.log('📱 AsyncStorage status:', asyncStorageAvailable ? '✅ Working' : '❌ Failed');
+        }
       } catch (asyncError) {
         console.error('❌ AsyncStorage is not available or corrupted:', asyncError.message);
         reportError(asyncError, 'AsyncStorage test failed during initialization');
@@ -120,8 +128,10 @@ class OptimizedSafeStorage {
           });
 
           this.isSecureStoreAvailable = await secureOperation;
-          // Always log SecureStore status in production for debugging
-          console.log('🔐 SecureStore status:', this.isSecureStoreAvailable ? '✅ Available' : '❌ Not available');
+          // Log SecureStore status only in debug mode
+          if (IS_DEBUG_MODE) {
+            console.log('🔐 SecureStore status:', this.isSecureStoreAvailable ? '✅ Available' : '❌ Not available');
+          }
         } catch (secureError) {
           console.warn('SecureStore availability check failed:', secureError.message);
           reportError(secureError, 'SecureStore availability check failed');
@@ -137,12 +147,14 @@ class OptimizedSafeStorage {
       
       this.isInitialized = true;
       
-      // Always log initialization status in production for debugging
-      console.log('🔐 SafeStorage initialized:', {
-        asyncStorage: asyncStorageAvailable,
-        secureStore: this.isSecureStoreAvailable,
-        platform: 'iOS Production'
-      });
+      // Log initialization status only in debug mode
+      if (IS_DEBUG_MODE) {
+        console.log('🔐 SafeStorage initialized:', {
+          asyncStorage: asyncStorageAvailable,
+          secureStore: this.isSecureStoreAvailable,
+          platform: 'iOS Production'
+        });
+      }
 
       // Warn if AsyncStorage failed but continue
       if (!asyncStorageAvailable) {

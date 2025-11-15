@@ -44,7 +44,8 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
     );
     
     if (result.success) {
-      const preferences = result.data.preferences;
+      // ✅ DEFENSIVE: Ensure preferences object exists and has expected shape
+      const preferences = result.data?.preferences || {};
       setNotificationsEnabled(preferences.notifications_enabled ?? true);
       setShareDataEnabled(preferences.share_data_enabled ?? false);
     } else {
@@ -101,8 +102,16 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
             text: 'OK',
             onPress: async () => {
               setShowDeleteConfirmation(false);
-              // Use secure session cleanup
-              await performSecureAccountDeletion(onAccountDeleted);
+              // ✅ SAFETY: Secure account deletion with error handling
+              try {
+                await performSecureAccountDeletion(onAccountDeleted);
+              } catch (error) {
+                console.error('Secure account deletion cleanup failed:', error);
+                // Fallback to direct callback if secure cleanup fails
+                if (onAccountDeleted && typeof onAccountDeleted === 'function') {
+                  onAccountDeleted();
+                }
+              }
             }
           }
         ]
@@ -280,8 +289,16 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
         <TouchableOpacity
           style={styles.settingItem}
           onPress={async () => {
-            // Secure logout using reusable helper
-            await performSecureLogout(ApiService, onLogout);
+            // ✅ SAFETY: Secure logout with error handling
+            try {
+              await performSecureLogout(ApiService, onLogout);
+            } catch (error) {
+              console.error('Secure logout failed:', error);
+              // Fallback to direct callback if secure logout fails
+              if (onLogout && typeof onLogout === 'function') {
+                onLogout();
+              }
+            }
           }}
           accessibilityRole="button"
           accessibilityLabel="Sign out of your account"
