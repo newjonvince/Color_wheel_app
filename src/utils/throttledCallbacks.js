@@ -62,7 +62,7 @@ export const useThrottledCallbacks = ({
       
       const delay = throttleMs - (now - lastPaletteEmit.current);
       pendingPaletteUpdate.current = setTimeout(() => {
-        onColorsChange(colors);
+        if (onColorsChange) onColorsChange(colors);
         lastPaletteEmit.current = Date.now();
         pendingPaletteUpdate.current = null;
       }, Math.max(0, delay));
@@ -107,7 +107,7 @@ export const useThrottledCallbacks = ({
       
       const delay = immediateMs - (now - lastSelectedEmit.current);
       pendingSelectedUpdate.current = setTimeout(() => {
-        onHexChange(selectedColor);
+        if (onHexChange) onHexChange(selectedColor);
         lastSelectedEmit.current = Date.now();
         pendingSelectedUpdate.current = null;
       }, Math.max(0, delay));
