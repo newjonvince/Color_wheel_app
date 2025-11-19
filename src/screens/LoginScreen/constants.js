@@ -1,5 +1,7 @@
 // Simple validation rules and constants for LoginScreen
 import Constants from 'expo-constants';
+import { STORAGE_KEYS } from '../../constants/storageKeys';
+
 export const VALIDATION_RULES = {
   email: {
     pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
@@ -11,7 +13,8 @@ export const VALIDATION_RULES = {
   },
 };
 
-export const DEMO_USER = {
+// ✅ Factory function instead of static object
+export const createDemoUser = () => ({
   id: 'demo-user',
   email: 'demo@fashioncolorwheel.com',
   username: 'demo_user',
@@ -20,19 +23,14 @@ export const DEMO_USER = {
   gender: 'Prefer not to say',
   isLoggedIn: true,
   demo: true,
-  createdAt: new Date().toISOString(),
-};
+  createdAt: new Date().toISOString(), // ✅ Fresh timestamp each call
+});
 
 export const TIMEOUTS = {
   login: 10000,
   demoLogin: 10000,
 };
 
-export const STORAGE_KEYS = {
-  userData: 'userData',
-  isLoggedIn: 'isLoggedIn',
-  authToken: 'fashion_color_wheel_auth_token',
-};
 
 // Simple validation functions
 export const validateEmail = (email) => {
@@ -84,26 +82,77 @@ export const validateForm = (email, password) => {
 // Safe timeout wrapper that prevents unhandled rejections
 export const withTimeout = (maybePromise, timeoutMs) => {
   const promise = Promise.resolve(maybePromise);
+  let timeoutId;
+  let settled = false;
 
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      reject(new Error(`Operation timed out after ${timeoutMs}ms`));
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(`Operation timed out after ${timeoutMs}ms`));
+      }
     }, timeoutMs);
+  });
 
+  return Promise.race([
     promise.then(
       (value) => {
-        clearTimeout(timeoutId);
-        resolve(value);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutId);
+          return value;
+        }
       },
       (error) => {
-        clearTimeout(timeoutId);
-        reject(error);
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeoutId);
+          throw error;
+        }
       }
-    );
+    ),
+    timeoutPromise
+  ]).finally(() => {
+    // ✅ Always cleanup
+    if (timeoutId) clearTimeout(timeoutId);
   });
 };
 
-// ✅ Enhanced response parser to handle all response shapes
+// 🔧 Whitelist of allowed properties
+const ALLOWED_USER_FIELDS = new Set([
+  'id', '_id', 'userId',
+  'email', 'username', 'name', 'displayName',
+  'location', 'birthday', 'gender',
+  'createdAt', 'updatedAt',
+  'profileImage', 'avatar',
+  'bio', 'preferences',
+]);
+
+// 🔧 Safe property picker - prevents prototype pollution
+const pickSafeProperties = (obj, allowedFields) => {
+  if (!obj || typeof obj !== 'object') return {};
+  
+  const safe = Object.create(null); // 🔧 No prototype!
+  
+  for (const key of allowedFields) {
+    // 🔧 Only copy own properties, not prototype properties
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const value = obj[key];
+      
+      // 🔧 Deep validation for nested objects
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        // For nested objects like birthday, validate structure
+        safe[key] = JSON.parse(JSON.stringify(value));
+      } else {
+        safe[key] = value;
+      }
+    }
+  }
+  
+  return safe;
+};
+
+// 🔧 Secure response parser with property whitelisting
 export const parseLoginResponse = (response) => {
   // Handle various response structures
   let data;
@@ -153,25 +202,49 @@ export const parseLoginResponse = (response) => {
                 user?.accessToken ||
                 user?.jwt;
 
-  // Validate user object
+  // 🔧 Validate user object has required fields
   if (!user || typeof user !== 'object') {
     throw new Error('Invalid user data structure');
   }
 
-  // Ensure user has required fields
   if (!user.id && !user._id && !user.userId && !user.email) {
-    throw new Error('User missing required identifier (id, _id, userId, or email)');
+    throw new Error('User missing required identifier');
   }
 
-  // Normalize user object
-  const normalizedUser = {
-    id: user.id || user._id || user.userId,
-    email: user.email,
-    username: user.username || user.name || user.displayName,
-    ...user // Include all other user properties
-  };
+  // 🔧 Safely pick only whitelisted properties
+  const safeUser = pickSafeProperties(user, ALLOWED_USER_FIELDS);
+  
+  // 🔧 Build normalized user with explicit properties
+  const normalizedUser = Object.create(null); // No prototype
+  
+  normalizedUser.id = safeUser.id || safeUser._id || safeUser.userId;
+  normalizedUser.email = safeUser.email;
+  normalizedUser.username = safeUser.username || safeUser.name || safeUser.displayName;
+  
+  // Optional fields
+  if (safeUser.location) normalizedUser.location = safeUser.location;
+  if (safeUser.birthday) normalizedUser.birthday = safeUser.birthday;
+  if (safeUser.gender) normalizedUser.gender = safeUser.gender;
+  if (safeUser.profileImage) normalizedUser.profileImage = safeUser.profileImage;
+  if (safeUser.bio) normalizedUser.bio = safeUser.bio;
+  
+  normalizedUser.createdAt = safeUser.createdAt || new Date().toISOString();
 
-  return { user: normalizedUser, token };
+  // 🔧 Validate token format
+  if (!token || typeof token !== 'string') {
+    throw new Error('Invalid token format');
+  }
+  
+  // 🔧 Basic JWT validation (should have 3 parts)
+  const tokenParts = token.split('.');
+  if (tokenParts.length !== 3) {
+    throw new Error('Invalid JWT token structure');
+  }
+
+  return { 
+    user: normalizedUser, 
+    token: token.trim() 
+  };
 };
 
 // ✅ Input sanitization to prevent injection attacks and DOS
@@ -181,9 +254,9 @@ export const sanitizeEmail = (email) => {
   return email
     .trim()
     .toLowerCase()
-    .replace(/\s+/g, '') // Remove all whitespace
-    .replace(/[<>'"&]/g, '') // Remove potentially dangerous characters
-    .slice(0, 255); // Prevent extremely long inputs
+    .replace(/\s+/g, '') // Remove whitespace
+    .replace(/[<>"&]/g, '') // ✅ Only remove HTML injection chars (keep ' and +)
+    .slice(0, 254); // ✅ RFC 5321 max length is 254
 };
 
 export const sanitizePassword = (password) => {
@@ -210,7 +283,14 @@ const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 export const getErrorMessage = (error) => {
   if (!error) return 'An error occurred. Please try again.';
 
-  const rawMessage = (error.message || String(error) || '').toLowerCase();
+  let rawMessage = (error.message || String(error) || '').toLowerCase();
+  
+  // ✅ SECURITY: Remove any potential credential leaks from error messages
+  rawMessage = rawMessage
+    .replace(/password[:\s]*[^\s]+/gi, 'password: [REDACTED]')
+    .replace(/email[:\s]*[^\s@]+@[^\s]+/gi, 'email: [REDACTED]')
+    .replace(/token[:\s]*[^\s]+/gi, 'token: [REDACTED]')
+    .replace(/key[:\s]*[^\s]+/gi, 'key: [REDACTED]');
 
   // Network / offline
   if (rawMessage.includes('network')) {

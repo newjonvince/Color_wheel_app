@@ -5,6 +5,17 @@ const config = getDefaultConfig(__dirname);
 // Disable New Architecture to prevent Swift compilation errors
 config.resolver.unstable_enablePackageExports = false;
 
+// Fix file watcher issues with platform-specific packages
+config.resolver.blockList = [
+  /node_modules\/.*lightningcss-.*/,
+  /node_modules\/.*fsevents.*/,
+  /node_modules\/.*babel-plugin-transform-react-remove-prop-types.*/,
+];
+
+// Reduce file watching scope to avoid platform-specific package issues
+config.watchFolders = [];
+config.resolver.platforms = ['ios', 'android', 'native', 'web'];
+
 // Path aliases temporarily disabled - need to install babel-plugin-module-resolver properly
 // config.resolver.alias = {
 //   '@': path.resolve(__dirname, 'src'),

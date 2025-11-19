@@ -153,9 +153,9 @@ export const loadColorWheelScreen = () => {
 export const loadErrorBoundary = () => {
   let ErrorBoundary = React.Fragment;
   try { 
-    ErrorBoundary = require('../components/ErrorBoundary').default; 
+    ErrorBoundary = require('../components/UnifiedErrorBoundary').default; 
   } catch (error) {
-    console.warn('ErrorBoundary failed to load:', error);
+    console.warn('UnifiedErrorBoundary failed to load:', error);
   }
   return ErrorBoundary;
 };

@@ -1,14 +1,14 @@
 // screens/ColorWheelScreen/components/HSLInputs.js
 import React, { useState, useCallback, useMemo, memo, useRef, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet, Platform } from 'react-native';
-import PropTypes from 'prop-types';
+import { View, Text, TextInput, StyleSheet } from 'react-native';
 import Constants from 'expo-constants';
+import { debounce } from '../../../utils/throttledCallbacks';
+import { LAYOUT } from '../../../constants/layout';
 
 // Production-ready configuration
 const extra = Constants.expoConfig?.extra || {};
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
-import { debounce } from '../../../utils/debounce';
 import { styles } from '../styles';
 
 export const HSLInputs = React.memo(({ 
@@ -23,60 +23,107 @@ export const HSLInputs = React.memo(({
   const isInputFocused = useRef(false);
 
   // ✅ Debounced live update to prevent excessive updates on every keypress
-  const debouncedLiveUpdate = useRef(
-    debounce((component, value, wheelRef) => {
-      if (onLiveUpdate && typeof onLiveUpdate === 'function') {
-        try {
-          onLiveUpdate(component, value, wheelRef);
-        } catch (error) {
-          console.error('❌ Error in debounced live update:', error);
+  const debouncedLiveUpdate = useRef(null);
+  
+  // ✅ Initialize debounce with safety checks
+  if (!debouncedLiveUpdate.current) {
+    try {
+      const debouncedFn = debounce((component, value, wheelRef) => {
+        if (onLiveUpdate && typeof onLiveUpdate === 'function') {
+          try {
+            onLiveUpdate(component, value, wheelRef);
+          } catch (error) {
+            console.error('❌ Error in debounced live update:', error);
+          }
         }
-      }
-    }, 300) // 300ms debounce - balance between responsiveness and performance
-  ).current;
+      }, LAYOUT.DEBOUNCE_MS); // Configurable debounce - balance between responsiveness and performance
+      
+      debouncedLiveUpdate.current = debouncedFn;
+    } catch (error) {
+      console.error('❌ Failed to create debounced function:', error);
+      // Fallback to direct call without debounce
+      debouncedLiveUpdate.current = (component, value, wheelRef) => {
+        if (onLiveUpdate && typeof onLiveUpdate === 'function') {
+          try {
+            onLiveUpdate(component, value, wheelRef);
+          } catch (error) {
+            console.error('❌ Error in fallback live update:', error);
+          }
+        }
+      };
+    }
+  }
 
   const handleChangeText = useCallback((component, value) => {
     // Immediate UI update (no debounce)
     onUpdateInput(component, value);
     
     // Debounced live update to color wheel (performance optimization)
-    debouncedLiveUpdate(component, value, wheelRef);
-  }, [onUpdateInput, wheelRef, debouncedLiveUpdate]);
+    if (debouncedLiveUpdate.current) {
+      debouncedLiveUpdate.current(component, value, wheelRef);
+    }
+  }, [onUpdateInput, wheelRef]);
 
-  // ✅ Cleanup debounced function on unmount
+  // ✅ Cleanup debounced function on unmount with safety checks
   useEffect(() => {
     return () => {
-      debouncedLiveUpdate.cancel();
+      const debouncedFn = debouncedLiveUpdate.current;
+      if (debouncedFn) {
+        try {
+          // Try different cleanup methods that debounce libraries might use
+          if (typeof debouncedFn.cancel === 'function') {
+            debouncedFn.cancel();
+          } else if (typeof debouncedFn.clear === 'function') {
+            debouncedFn.clear();
+          } else if (typeof debouncedFn.flush === 'function') {
+            debouncedFn.flush();
+          }
+        } catch (error) {
+          console.warn('❌ Failed to cleanup debounced function:', error);
+        }
+      }
     };
-  }, [debouncedLiveUpdate]);
+  }, []);
 
   const handleInputFocus = useCallback((component) => {
     isInputFocused.current = true;
     
-    // Disable wheel gestures when text input is focused
+    // ✅ SAFER: Check if wheel has gesture control methods
     const wheel = wheelRef?.current;
-    if (wheel?.setGesturesEnabled) {
-      wheel.setGesturesEnabled(false);
-    }
-    
-    if (IS_DEBUG_MODE) {
-      console.log(`🎯 HSL input ${component} focused - wheel gestures disabled`);
+    if (wheel && typeof wheel.setGesturesEnabled === 'function') {
+      try {
+        wheel.setGesturesEnabled(false);
+        if (IS_DEBUG_MODE) {
+          console.log(`🎯 HSL input ${component} focused - wheel gestures disabled`);
+        }
+      } catch (error) {
+        console.warn('Failed to disable wheel gestures:', error);
+      }
+    } else if (IS_DEBUG_MODE) {
+      console.log(`🎯 HSL input ${component} focused - wheel gesture control not available`);
     }
   }, [wheelRef]);
 
   const handleInputBlur = useCallback((component) => {
     isInputFocused.current = false;
     
-    // Re-enable wheel gestures when text input loses focus
+    // ✅ SAFER: Check if wheel has gesture control methods
     const wheel = wheelRef?.current;
-    if (wheel?.setGesturesEnabled) {
-      wheel.setGesturesEnabled(true);
+    if (wheel && typeof wheel.setGesturesEnabled === 'function') {
+      try {
+        wheel.setGesturesEnabled(true);
+        if (IS_DEBUG_MODE) {
+          console.log(`🎯 HSL input ${component} blurred - wheel gestures re-enabled`);
+        }
+      } catch (error) {
+        console.warn('Failed to re-enable wheel gestures:', error);
+      }
     }
     
     // Apply the input changes
     onApplyInputs();
     
-    if (IS_DEBUG_MODE) {
+    if (IS_DEBUG_MODE && !wheel?.setGesturesEnabled) {
       console.log(`🎯 HSL input ${component} blurred - wheel gestures enabled`);
     }
   }, [wheelRef, onApplyInputs]);

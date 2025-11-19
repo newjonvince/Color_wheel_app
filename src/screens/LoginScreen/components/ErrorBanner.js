@@ -1,6 +1,6 @@
 // screens/LoginScreen/components/ErrorBanner.js
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, TouchableOpacity } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { optimizedStyles as styles, optimizedColors } from '../styles';
 
@@ -18,12 +18,27 @@ const ErrorBanner = React.memo(
           style={{ marginRight: 8 }}
         />
         <Text 
-          style={styles.errorBannerText}
+          style={[styles.errorBannerText, { flex: 1 }]}
           accessibilityRole="alert"
           accessibilityLiveRegion="assertive"
         >
           {message}
         </Text>
+        {onDismiss && (
+          <TouchableOpacity
+            onPress={onDismiss}
+            style={{ marginLeft: 8, padding: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss error message"
+            accessibilityHint="Tap to close this error message"
+          >
+            <MaterialIcons 
+              name="close" 
+              size={18} 
+              color={optimizedColors.textPrimary}
+            />
+          </TouchableOpacity>
+        )}
       </View>
     );
   },

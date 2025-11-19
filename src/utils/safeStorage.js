@@ -1,7 +1,10 @@
 // utils/safeStorage.js - Secure storage with expo-secure-store and proper initialization
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import Constants from 'expo-constants';
+import * as SecureStore from 'expo-secure-store';
 import { safeAsyncStorage } from './safeAsyncStorage';
+import { logger } from './AppLogger';
+import { STORAGE_KEYS } from '../constants/storageKeys';
 
 // Production-ready configuration
 const extra = Constants.expoConfig?.extra || {};
@@ -31,14 +34,7 @@ const reportError = (error, context) => {
   }
 };
 
-// Secure storage for sensitive data
-let SecureStore = null;
-try {
-  SecureStore = require('expo-secure-store');
-} catch (error) {
-  console.warn('expo-secure-store not available, using AsyncStorage only');
-  reportError(error, 'SecureStore module loading failed');
-}
+// Secure storage for sensitive data - using ES6 import from line 4
 
 // Configuration constants
 const CONFIG = {
@@ -55,7 +51,7 @@ const CONFIG = {
   },
 };
 
-// Advanced SafeStorage class
+// Advanced SafeStorage class with proper security separation
 class OptimizedSafeStorage {
   constructor() {
     this.secureStore = SecureStore;
@@ -67,6 +63,8 @@ class OptimizedSafeStorage {
     this.pendingOperations = new Map();
     this.batchQueue = [];
     this.batchTimer = null;
+    this._isMounted = true; // ✅ Track mounted state
+    this.tokenStorageType = null; // 🔧 Track where token is stored
     
     // Don't call async initialize() in constructor - race condition
   }
@@ -247,7 +245,6 @@ class OptimizedSafeStorage {
    * Advanced getItem with caching and fallbacks
    */
   async getItem(key) {
-    // Ensure initialization
     if (!this.isInitialized) await this.init();
     
     // Check cache first
@@ -257,31 +254,50 @@ class OptimizedSafeStorage {
       return cached.value;
     }
 
-    // Check for pending operation
+    // Check pending operations
     if (this.pendingOperations.has(key)) {
       return this.pendingOperations.get(key);
     }
 
-    // Create pending operation
-    const operation = this._getItemOperation(key);
-    this.pendingOperations.set(key, operation);
+    const promise = (async () => {
+      try {
+        // Try SecureStore for sensitive keys
+        if (this.isSensitiveKey(key) && this.isSecureStoreAvailable && !this.secureStoreUnavailable) {
+          const value = await this.secureStore.getItemAsync(key, CONFIG.SECURE_STORE_OPTIONS);
+          if (value !== null) {
+            // Handle TTL wrapped values
+            try {
+              const parsed = JSON.parse(value);
+              if (parsed.expires && Date.now() > parsed.expires) {
+                // Expired, remove it
+                await this.secureStore.deleteItemAsync(key, CONFIG.SECURE_STORE_OPTIONS);
+                return null;
+              }
+              const result = parsed.value || value;
+              this.cache.set(cacheKey, { value: result, timestamp: Date.now() });
+              return result;
+            } catch {
+              // Not wrapped, return as-is
+              this.cache.set(cacheKey, { value, timestamp: Date.now() });
+              return value;
+            }
+          }
+        }
 
-    try {
-      const result = await operation;
-      
-      // Cache the result
-      if (result !== null) {
-        this.cache.set(cacheKey, {
-          value: result,
-          timestamp: Date.now()
-        });
+        // Fallback to AsyncStorage
+        const value = await safeAsyncStorage.getItem(key);
+        if (value !== null) {
+          this.cache.set(cacheKey, { value, timestamp: Date.now() });
+        }
+        return value;
+      } finally {
+        // ✅ Always clean up pending operation
+        this.pendingOperations.delete(key);
       }
+    })();
 
-      return result;
-    } finally {
-      this.pendingOperations.delete(key);
-      this.clearExpiredCache();
-    }
+    this.pendingOperations.set(key, promise);
+    return promise;
   }
 
   /**
@@ -499,16 +515,29 @@ class OptimizedSafeStorage {
    */
   _addToBatch(operation, key, value, options) {
     return new Promise((resolve, reject) => {
+      // ✅ Check if mounted before adding to batch
+      if (!this._isMounted) {
+        reject(new Error('Storage unmounted'));
+        return;
+      }
+
       this.batchQueue.push({ operation, key, value, options, resolve, reject });
 
-      // Clear existing timer
       if (this.batchTimer) {
         clearTimeout(this.batchTimer);
       }
 
-      // Set new timer
       this.batchTimer = setTimeout(() => {
-        this._processBatch();
+        // ✅ Check mounted state before processing
+        if (this._isMounted) {
+          this._processBatch();
+        } else {
+          // Clean up queue
+          this.batchQueue.forEach(item => {
+            item.reject(new Error('Storage unmounted'));
+          });
+          this.batchQueue = [];
+        }
       }, CONFIG.BATCH_DELAY);
     });
   }
@@ -545,49 +574,238 @@ class OptimizedSafeStorage {
     });
   }
 
+  // 🔧 Token ONLY goes in SecureStore or nowhere
+  async setToken(token) {
+    if (!token) {
+      throw new Error('Token is required');
+    }
+
+    try {
+      await this.secureStore.setItemAsync(STORAGE_KEYS.AUTH_TOKEN, token, CONFIG.SECURE_STORE_OPTIONS);
+      this.tokenStorageType = 'secure';
+      logger.info('✅ Token saved to SecureStore');
+    } catch (error) {
+      logger.error('❌ Failed to save token to SecureStore:', error);
+      
+      // 🔧 NEVER fallback to AsyncStorage for tokens
+      this.tokenStorageType = null;
+      
+      Alert.alert(
+        'Security Error',
+        'Cannot securely store authentication. Please enable device security (passcode/biometrics).',
+        [{ text: 'OK' }]
+      );
+      
+      throw new Error('Secure storage not available');
+    }
+  }
+
+  // 🔧 Token ONLY comes from SecureStore
+  async getToken() {
+    try {
+      const token = await this.secureStore.getItemAsync(STORAGE_KEYS.AUTH_TOKEN, CONFIG.SECURE_STORE_OPTIONS);
+      
+      if (token) {
+        this.tokenStorageType = 'secure';
+        return token;
+      }
+      
+      // 🔧 No fallback - if not in SecureStore, token doesn't exist
+      this.tokenStorageType = null;
+      return null;
+      
+    } catch (error) {
+      logger.error('❌ Failed to get token from SecureStore:', error);
+      this.tokenStorageType = null;
+      
+      // 🔧 Don't check AsyncStorage for tokens
+      return null;
+    }
+  }
+
+  // 🔧 Clear token from both locations for safety
+  async clearToken() {
+    const errors = [];
+    
+    try {
+      await this.secureStore.deleteItemAsync(STORAGE_KEYS.AUTH_TOKEN);
+    } catch (error) {
+      logger.error('Failed to clear SecureStore token:', error);
+      errors.push(error);
+    }
+    
+    // 🔧 Also clear from AsyncStorage in case old version stored it there
+    try {
+      await safeAsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
+    } catch (error) {
+      logger.error('Failed to clear AsyncStorage token:', error);
+      errors.push(error);
+    }
+    
+    this.tokenStorageType = null;
+    
+    if (errors.length > 0) {
+      throw new Error('Failed to fully clear token');
+    }
+  }
+
+  // 🔧 Non-sensitive data can use AsyncStorage
+  async setUserData(userData) {
+    try {
+      await safeAsyncStorage.setItem(
+        STORAGE_KEYS.USER_DATA,
+        JSON.stringify(userData)
+      );
+      logger.info('✅ User data saved');
+    } catch (error) {
+      logger.error('❌ Failed to save user data:', error);
+      throw error;
+    }
+  }
+
+  async getUserData() {
+    try {
+      const data = await safeAsyncStorage.getItem(STORAGE_KEYS.USER_DATA);
+      return data ? JSON.parse(data) : null;
+    } catch (error) {
+      logger.error('❌ Failed to get user data:', error);
+      return null;
+    }
+  }
+
   /**
-   * Enhanced clearAuth with pattern matching
+   * Enhanced clearAuth with pattern matching - FIXED: More robust with partial success handling
    */
   async clearAuth() {
     const authPatterns = [
       /token/i, /auth/i, /user/i, /session/i, /credential/i
     ];
 
+    const results = {
+      asyncStorageCleared: false,
+      secureStoreCleared: false,
+      cacheCleared: false,
+      errors: []
+    };
+
+    // Step 1: Clear AsyncStorage auth keys
     try {
-      // Get all AsyncStorage keys with error handling
       let allKeys = [];
       try {
         allKeys = await safeAsyncStorage.getAllKeys();
       } catch (asyncError) {
         console.error('AsyncStorage.getAllKeys failed during clearAuth:', asyncError.message);
         reportError(asyncError, 'AsyncStorage.getAllKeys failed during clearAuth');
-        return; // Can't proceed without keys
+        results.errors.push(`AsyncStorage key retrieval failed: ${asyncError.message}`);
+        // Continue with other clearing operations
       }
       
-      const authKeys = allKeys.filter(key => 
-        authPatterns.some(pattern => pattern.test(key))
-      );
-
-      // Remove in batch
-      if (authKeys.length > 0) {
-        await Promise.all(
-          authKeys.map(key => this.removeItem(key, { batch: true }))
+      if (allKeys.length > 0) {
+        const authKeys = allKeys.filter(key => 
+          authPatterns.some(pattern => pattern.test(key))
         );
-      }
 
-      // Clear auth-related cache
+        // Remove in batch with individual error handling
+        if (authKeys.length > 0) {
+          const removeResults = await Promise.allSettled(
+            authKeys.map(key => this.removeItem(key, { batch: true }))
+          );
+          
+          const failedRemovals = removeResults
+            .map((result, index) => ({ result, key: authKeys[index] }))
+            .filter(({ result }) => result.status === 'rejected');
+          
+          if (failedRemovals.length > 0) {
+            const failedKeys = failedRemovals.map(({ key }) => key);
+            results.errors.push(`Failed to remove AsyncStorage keys: ${failedKeys.join(', ')}`);
+          }
+          
+          const successCount = removeResults.filter(r => r.status === 'fulfilled').length;
+          results.asyncStorageCleared = successCount > 0;
+          
+          console.log(`🔄 AsyncStorage: ${successCount}/${authKeys.length} auth keys cleared`);
+        } else {
+          results.asyncStorageCleared = true; // No auth keys to clear
+        }
+      } else {
+        results.asyncStorageCleared = true; // No keys at all
+      }
+    } catch (error) {
+      console.error('AsyncStorage clearing failed:', error.message);
+      results.errors.push(`AsyncStorage clearing failed: ${error.message}`);
+    }
+
+    // Step 2: Clear SecureStore auth data
+    try {
+      if (this.isSecureStoreAvailable) {
+        // Try to clear known secure keys
+        const secureAuthKeys = ['authToken', 'refreshToken', 'userCredentials'];
+        const secureResults = await Promise.allSettled(
+          secureAuthKeys.map(async (key) => {
+            try {
+              await this.secureStore.deleteItemAsync(key, CONFIG.SECURE_STORE_OPTIONS);
+              return { key, success: true };
+            } catch (error) {
+              return { key, success: false, error: error.message };
+            }
+          })
+        );
+        
+        const secureSuccesses = secureResults
+          .filter(r => r.status === 'fulfilled' && r.value.success)
+          .length;
+        
+        const secureFailures = secureResults
+          .filter(r => r.status === 'fulfilled' && !r.value.success)
+          .map(r => r.value);
+        
+        if (secureFailures.length > 0) {
+          const failedKeys = secureFailures.map(f => f.key);
+          results.errors.push(`Failed to clear SecureStore keys: ${failedKeys.join(', ')}`);
+        }
+        
+        results.secureStoreCleared = secureSuccesses > 0 || secureAuthKeys.length === 0;
+        console.log(`🔐 SecureStore: ${secureSuccesses}/${secureAuthKeys.length} auth keys cleared`);
+      } else {
+        results.secureStoreCleared = true; // SecureStore not available, nothing to clear
+      }
+    } catch (error) {
+      console.error('SecureStore clearing failed:', error.message);
+      results.errors.push(`SecureStore clearing failed: ${error.message}`);
+    }
+
+    // Step 3: Clear auth-related cache (this should always succeed)
+    try {
+      let cacheCleared = 0;
       for (const [cacheKey] of this.cache.entries()) {
         const originalKey = cacheKey.replace('cache_', '');
         if (authPatterns.some(pattern => pattern.test(originalKey))) {
           this.cache.delete(cacheKey);
+          cacheCleared++;
         }
       }
-
-      return true;
+      results.cacheCleared = true;
+      console.log(`💾 Cache: ${cacheCleared} auth entries cleared`);
     } catch (error) {
-      console.warn('Failed to clear auth data:', error.message);
-      return false;
+      console.error('Cache clearing failed:', error.message);
+      results.errors.push(`Cache clearing failed: ${error.message}`);
     }
+
+    // Determine overall success
+    const overallSuccess = results.asyncStorageCleared && results.secureStoreCleared && results.cacheCleared;
+    
+    if (results.errors.length > 0) {
+      console.warn('⚠️ clearAuth completed with errors:', results.errors);
+      reportError(new Error(results.errors.join('; ')), 'clearAuth partial failure');
+    }
+    
+    if (overallSuccess) {
+      console.log('✅ clearAuth completed successfully');
+    } else {
+      console.warn('⚠️ clearAuth completed with partial success');
+    }
+
+    return overallSuccess;
   }
 
   /**
@@ -638,9 +856,18 @@ class OptimizedSafeStorage {
    * Cleanup resources
    */
   destroy() {
+    this._isMounted = false; // ✅ Mark as unmounted
+    
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
+      this.batchTimer = null;
     }
+    
+    // Reject pending batch operations
+    this.batchQueue.forEach(item => {
+      item.reject(new Error('Storage destroyed'));
+    });
+    
     this.clearCache();
     this.pendingOperations.clear();
   }
@@ -649,7 +876,7 @@ class OptimizedSafeStorage {
 // Create singleton instance
 const optimizedSafeStorage = new OptimizedSafeStorage();
 
-// Export optimized interface
+// Export optimized interface with secure token methods
 export const safeStorage = {
   init: () => optimizedSafeStorage.init(), // ✅ CRITICAL FIX: Export init method
   getItem: (key) => optimizedSafeStorage.getItem(key),
@@ -658,6 +885,16 @@ export const safeStorage = {
   clearAuth: () => optimizedSafeStorage.clearAuth(),
   getStats: () => optimizedSafeStorage.getStats(),
   clearCache: () => optimizedSafeStorage.clearCache(),
+  destroy: () => optimizedSafeStorage.destroy(), // ✅ Export destroy method
+  
+  // 🔧 Secure token methods - never fallback to AsyncStorage
+  setToken: (token) => optimizedSafeStorage.setToken(token),
+  getToken: () => optimizedSafeStorage.getToken(),
+  clearToken: () => optimizedSafeStorage.clearToken(),
+  
+  // 🔧 Non-sensitive data methods
+  setUserData: (userData) => optimizedSafeStorage.setUserData(userData),
+  getUserData: () => optimizedSafeStorage.getUserData(),
 };
 
 // Export individual functions for backward compatibility

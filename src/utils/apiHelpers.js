@@ -1,10 +1,90 @@
-// utils/apiHelpers.js - Shared API utility functions
+// utils/apiHelpers.js - Shared API utility functions with request deduplication
 import Constants from 'expo-constants';
 import ApiService from '../services/safeApiService';
+import { logger } from './AppLogger';
 
 // Production-ready configuration
 const extra = Constants.expoConfig?.extra || {};
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+
+// 🔧 Request deduplication to prevent duplicate API calls
+const inflightRequests = new Map();
+const retryPromises = new Map(); // 🔧 Store retry promises for concurrent calls
+const REQUEST_TIMEOUT = 30000; // 30 seconds
+
+/**
+ * Deduplicated API call wrapper - prevents duplicate requests
+ * @param {string} key - Unique key for the request
+ * @param {Function} apiCall - The API call function to execute
+ * @param {Object} options - Options for error handling and cancellation
+ */
+const deduplicatedApiCall = async (key, apiCall, options = {}) => {
+  const { signal } = options; // 🔧 Accept cancellation signal
+  // 🔧 Check if already cancelled
+  if (signal?.aborted) {
+    throw new Error(`Request cancelled: ${key}`);
+  }
+
+  // Check if same request is already in flight
+  if (inflightRequests.has(key)) {
+    const cached = inflightRequests.get(key);
+    
+    // 🔧 Check if cached promise is stale
+    if (Date.now() - cached.timestamp < REQUEST_TIMEOUT) {
+      logger.debug(`🔄 Reusing in-flight request: ${key}`);
+      return cached.promise;
+    } else {
+      // 🔧 Stale promise - remove and make new request
+      logger.warn(`⏰ Cached request expired: ${key}`);
+      inflightRequests.delete(key);
+    }
+  }
+
+  // 🔧 Create timeout wrapper
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Request timeout: ${key}`));
+      inflightRequests.delete(key); // 🔧 Clean up on timeout
+    }, REQUEST_TIMEOUT);
+  });
+
+  // 🔧 Create cancellation wrapper
+  const cancellationPromise = signal ? new Promise((_, reject) => {
+    signal.addEventListener('abort', () => {
+      reject(new Error(`Request cancelled: ${key}`));
+      inflightRequests.delete(key); // 🔧 Clean up on cancellation
+    });
+  }) : null;
+
+  // 🔧 Race between API call, timeout, and cancellation
+  const apiPromise = safeApiCall(apiCall, options);
+  const promises = [apiPromise, timeoutPromise];
+  if (cancellationPromise) promises.push(cancellationPromise);
+  
+  const requestPromise = Promise.race(promises);
+
+  // 🔧 Store promise with timestamp
+  inflightRequests.set(key, {
+    promise: requestPromise,
+    timestamp: Date.now()
+  });
+
+  try {
+    const result = await requestPromise;
+    return result;
+  } catch (error) {
+    // 🔧 Don't throw cancellation errors to unmounted components
+    if (signal?.aborted && error.message?.includes('cancelled')) {
+      logger.debug(`📋 Request cancelled gracefully: ${key}`);
+      return { cancelled: true }; // Return safe object instead of throwing
+    }
+    // 🔧 Always clean up on error
+    throw error;
+  } finally {
+    // 🔧 Clean up on completion
+    inflightRequests.delete(key);
+  }
+};
 
 /**
  * Wrapper for API calls that ensures service is ready and handles common errors
@@ -15,41 +95,63 @@ export const safeApiCall = async (apiCall, options = {}) => {
   const { 
     errorMessage = 'An error occurred',
     retryCount = 0,
-    showAlert // ✅ CONSISTENCY FIX: Accept showAlert option
+    showAlert, // ✅ CONSISTENCY FIX: Accept showAlert option
+    signal
   } = options;
 
-  let lastError;
+  // 🔧 Generate retry key for this specific API call
+  const retryKey = `${apiCall.toString().slice(0, 100)}-${JSON.stringify(options).slice(0, 50)}`;
   
-  // Try the API call with retries
-  for (let attempt = 0; attempt <= retryCount; attempt++) {
+  // 🔧 Check if there's already a retry in progress for this call
+  if (retryPromises.has(retryKey)) {
+    logger.debug(`⏳ Waiting for existing retry: ${retryKey}`);
     try {
-      // Execute the API call (safeApiService already handles ready state)
-      const result = await apiCall();
-      return { success: true, data: result };
-      
+      return await retryPromises.get(retryKey);
     } catch (error) {
-      lastError = error;
-      
-      // Don't retry authentication errors - they won't succeed on retry
-      if (error.message?.includes('Authentication required')) {
-        break;
-      }
-      
-      // If this isn't the last attempt, wait briefly before retrying
-      if (attempt < retryCount) {
-        const delay = Math.min(1000 * Math.pow(2, attempt), 3000); // Exponential backoff, max 3s
-        await new Promise(resolve => setTimeout(resolve, delay));
+      // If the retry failed, we'll start our own retry below
+      logger.warn(`🔄 Existing retry failed, starting new attempt: ${retryKey}`);
+    }
+  }
+
+  // 🔧 Create retry promise for concurrent calls to await
+  const retryPromise = (async () => {
+    let lastError;
+    
+    // Try the API call with retries
+    for (let attempt = 0; attempt <= retryCount; attempt++) {
+      try {
+        // Check if cancelled before each attempt
+        if (signal?.aborted) {
+          throw new Error('Request cancelled');
+        }
         
-        // Log retry attempts only in debug mode
-        if (IS_DEBUG_MODE) {
-          console.log(`🔄 Retrying API call (attempt ${attempt + 2}/${retryCount + 1}) after ${delay}ms`);
+        // Execute the API call (safeApiService already handles ready state)
+        const result = await apiCall();
+        return { success: true, data: result };
+      
+      } catch (error) {
+        lastError = error;
+        
+        // Don't retry authentication errors - they won't succeed on retry
+        if (error.message?.includes('Authentication required')) {
+          break;
+        }
+        
+        // If this isn't the last attempt, wait briefly before retrying
+        if (attempt < retryCount) {
+          const delay = Math.min(1000 * Math.pow(2, attempt), 3000); // Exponential backoff, max 3s
+          await new Promise(resolve => setTimeout(resolve, delay));
+          
+          // Log retry attempts only in debug mode
+          if (IS_DEBUG_MODE) {
+            console.log(`🔄 Retrying API call (attempt ${attempt + 2}/${retryCount + 1}) after ${delay}ms`);
+          }
         }
       }
     }
-  }
-  
-  // All attempts failed
-  console.error(`API call failed after ${retryCount + 1} attempts:`, lastError);
+    
+    // All attempts failed
+    console.error(`API call failed after ${retryCount + 1} attempts:`, lastError);
   
   // ✅ More nuanced alert logic - Return structured error information for caller to handle UI
   const errorInfo = {
@@ -61,66 +163,106 @@ export const safeApiCall = async (apiCall, options = {}) => {
     attemptCount: retryCount + 1
   };
 
-  // ✅ Classify errors with appropriate alert behavior (unless showAlert explicitly provided)
-  if (lastError.message?.includes('Authentication required')) {
+  // 🔧 Classify errors using proper error properties instead of string matching
+  if (lastError.status === 401 || lastError.code === 'UNAUTHORIZED' || lastError.name === 'AuthenticationError') {
     errorInfo.errorType = 'authentication';
     errorInfo.userMessage = 'Please log in again';
     if (showAlert === undefined) errorInfo.shouldShowAlert = true; // ✅ Always show for auth - user needs to take action
-  } else if (lastError.message?.includes('Unable to connect to server')) {
+  } else if (lastError.code === 'NETWORK_ERROR' || lastError.name === 'NetworkError' || !navigator.onLine) {
     errorInfo.errorType = 'network';
     errorInfo.userMessage = 'Network connection failed. Please check your internet connection.';
     if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Don't show alert, show network indicator instead
-  } else if (lastError.message?.includes('timed out')) {
+  } else if (lastError.code === 'TIMEOUT' || lastError.name === 'TimeoutError' || lastError.message?.includes('timeout')) {
     errorInfo.errorType = 'timeout';
     errorInfo.userMessage = 'Request timed out. Please try again.';
     if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Silent retry or show toast instead
-  } else if (lastError.message?.includes('Rate limit exceeded')) {
+  } else if (lastError.status === 429 || lastError.code === 'RATE_LIMIT' || lastError.name === 'RateLimitError') {
     errorInfo.errorType = 'rate_limit';
     errorInfo.userMessage = 'Too many requests. Please wait a moment and try again.';
     if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Show toast, not blocking alert
-  } else if (lastError.message?.includes('Server error')) {
+  } else if (lastError.status >= 500 || lastError.code === 'SERVER_ERROR' || lastError.name === 'ServerError') {
     errorInfo.errorType = 'server_error';
     errorInfo.userMessage = 'Server is temporarily unavailable. Please try again later.';
     if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Show status indicator, not alert
-  } else if (lastError.message?.includes('Validation failed') || lastError.message?.includes('Invalid')) {
+  } else if (lastError.status >= 400 && lastError.status < 500 || lastError.code === 'VALIDATION_ERROR' || lastError.name === 'ValidationError') {
     errorInfo.errorType = 'validation';
+    errorInfo.userMessage = lastError.message || 'Please check your input and try again.';
     if (showAlert === undefined) errorInfo.shouldShowAlert = true; // ✅ Show alert - user needs to fix input
-  } else if (lastError.message?.includes('Not found') || lastError.message?.includes('Resource not found')) {
+  } else if (lastError.status === 404 || lastError.code === 'NOT_FOUND' || lastError.name === 'NotFoundError') {
     errorInfo.errorType = 'not_found';
     errorInfo.userMessage = 'The requested resource was not found.';
     if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Handle gracefully in UI
+  } else if (lastError.message?.includes('cancelled') || lastError.code === 'CANCELLED') {
+    errorInfo.errorType = 'cancelled';
+    errorInfo.userMessage = 'Request was cancelled.';
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Don't show alert for cancellations
   } else {
     // Unknown errors - be conservative and show alert
     errorInfo.errorType = 'unknown';
     if (showAlert === undefined) errorInfo.shouldShowAlert = true; // ✅ Show alert for unknown errors
   }
-  
-  return errorInfo;
+    
+    return errorInfo;
+  })();
+
+  // 🔧 Store retry promise for concurrent calls
+  if (retryCount > 0) {
+    retryPromises.set(retryKey, retryPromise);
+    
+    // 🔧 Clean up retry promise when done
+    retryPromise.finally(() => {
+      retryPromises.delete(retryKey);
+      logger.debug(`🧹 Cleaned up retry promise: ${retryKey}`);
+    });
+  }
+
+  return retryPromise;
 };
 
 /**
- * Batch API calls with proper error handling
+ * Batch API calls with proper error handling and cancellation support
  * @param {Array} apiCalls - Array of API call functions
- * @param {Object} options - Options for error handling
+ * @param {Object} options - Options for error handling and cancellation
  */
 export const batchApiCalls = async (apiCalls, options = {}) => {
   const { 
     failFast = false,
-    errorMessage = 'Some operations failed' 
+    errorMessage = 'Some operations failed',
+    signal // 🔧 Accept cancellation signal
   } = options;
 
   try {
     if (failFast) {
-      // Stop on first error
+      // 🔧 Cancel remaining on first error
+      const controller = new AbortController();
       const results = [];
-      for (const call of apiCalls) {
-        const result = await call();
-        results.push(result);
+      
+      try {
+        for (const call of apiCalls) {
+          // 🔧 Check if cancelled
+          if (signal?.aborted || controller.signal.aborted) {
+            throw new Error('Batch cancelled');
+          }
+          
+          const result = await call();
+          results.push(result);
+        }
+        return { success: true, data: results };
+      } catch (error) {
+        // 🔧 Cancel all pending operations
+        controller.abort();
+        throw error;
       }
-      return { success: true, data: results };
     } else {
       // Execute all calls, collect errors
-      const results = await Promise.allSettled(apiCalls.map(call => call()));
+      const results = await Promise.allSettled(
+        apiCalls.map(call => 
+          signal?.aborted 
+            ? Promise.reject(new Error('Batch cancelled'))
+            : call()
+        )
+      );
+      
       const successes = results.filter(r => r.status === 'fulfilled').map(r => r.value);
       const errors = results.filter(r => r.status === 'rejected').map(r => r.reason);
       
@@ -139,29 +281,34 @@ export const batchApiCalls = async (apiCalls, options = {}) => {
 };
 
 /**
- * Common API patterns for different operations
- * ✅ All patterns now support request cancellation via AbortSignal
+ * 🔧 Request cancellation utilities
+ */
+export const createCancellableRequest = () => {
+  const controller = new AbortController();
+  return {
+    signal: controller.signal,
+    cancel: () => controller.abort(),
+    isCancelled: () => controller.signal.aborted
+  };
+};
+
+export const cancelAllInflightRequests = () => {
+  const count = inflightRequests.size;
+  inflightRequests.clear();
+  logger.warn(`🚫 Cancelled ${count} in-flight requests`);
+};
+
+/**
+ * 🔧 Deduplicated API patterns for different operations
+ * All read operations use deduplication, mutations do not
  */
 export const apiPatterns = {
-  // Load user data pattern
-  loadUserData: async (options = {}) => {
-    return safeApiCall(
-      () => ApiService.getUserProfile(options),
-      { errorMessage: 'Failed to load user data' }
-    );
-  },
-
-  // Load color matches pattern
-  loadColorMatches: async (options = {}) => {
-    return safeApiCall(
-      () => ApiService.getColorMatches(options),
-      { errorMessage: 'Failed to load color matches' }
-    );
-  },
-
-  // Load community posts pattern
+  // 🔧 Deduplicated load community posts
   loadCommunityPosts: async (cursor = null, options = {}) => {
-    return safeApiCall(
+    const key = `community-posts-${cursor || 'initial'}`;
+    
+    return deduplicatedApiCall(
+      key,
       () => {
         const params = cursor ? { cursor } : {};
         const qs = new URLSearchParams(params).toString();
@@ -172,7 +319,52 @@ export const apiPatterns = {
     );
   },
 
-  // Like/unlike post pattern
+  // 🔧 Deduplicated user profile load
+  loadUserData: async (options = {}) => {
+    return deduplicatedApiCall(
+      'user-profile',
+      () => ApiService.getUserProfile(options),
+      { errorMessage: 'Failed to load user data' }
+    );
+  },
+
+  // 🔧 Deduplicated color matches load
+  loadColorMatches: async (options = {}) => {
+    const { limit = 20, offset = 0 } = options;
+    const key = `color-matches-${limit}-${offset}`;
+    
+    return deduplicatedApiCall(
+      key,
+      () => ApiService.getColorMatches({ limit, offset, ...options }),
+      { errorMessage: 'Failed to load color matches' }
+    );
+  },
+
+  // 🔧 Deduplicated user settings load
+  loadUserSettings: async (options = {}) => {
+    return deduplicatedApiCall(
+      'user-settings',
+      () => ApiService.get('/users/preferences', options),
+      { errorMessage: 'Failed to load user settings' }
+    );
+  },
+
+  // 🔧 Non-deduplicated operations (mutations should not be deduplicated)
+  createColorMatch: async (colorMatchData, options = {}) => {
+    return safeApiCall(
+      () => ApiService.createColorMatch(colorMatchData, options),
+      { errorMessage: 'Failed to create color match' }
+    );
+  },
+
+  updateUserSettings: async (settings, options = {}) => {
+    return safeApiCall(
+      () => ApiService.updateSettings(settings, options),
+      { errorMessage: 'Failed to update settings' }
+    );
+  },
+
+  // 🔧 Non-deduplicated toggle operations (mutations)
   togglePostLike: async (postId, isLiked, options = {}) => {
     return safeApiCall(
       () => isLiked 
@@ -182,7 +374,6 @@ export const apiPatterns = {
     );
   },
 
-  // Follow/unfollow user pattern
   toggleUserFollow: async (userId, isFollowing, options = {}) => {
     return safeApiCall(
       () => isFollowing
@@ -192,23 +383,14 @@ export const apiPatterns = {
     );
   },
 
-  // User registration pattern
-  registerUser: async (registrationData, options = {}) => {
-    return safeApiCall(
-      () => ApiService.register(registrationData, options),
-      { 
-        errorMessage: 'Registration failed. Please try again.'
-      }
-    );
-  },
-
-  // Username availability check pattern
+  // 🔧 Username availability with smart caching (deduplicated)
   checkUsernameAvailability: async (username, options = {}) => {
-    const result = await safeApiCall(
+    const key = `username-check-${username}`;
+    
+    const result = await deduplicatedApiCall(
+      key,
       () => ApiService.checkUsername(username, options),
-      { 
-        errorMessage: 'Failed to check username availability'
-      }
+      { errorMessage: 'Failed to check username availability' }
     );
     
     // For username checks, don't show alerts by default
@@ -217,5 +399,29 @@ export const apiPatterns = {
     }
     
     return result;
+  },
+
+  // 🔧 Utility to clear specific request from cache
+  clearRequestCache: (key) => {
+    inflightRequests.delete(key);
+    logger.debug(`🧹 Cleared request cache for: ${key}`);
+  },
+
+  // 🔧 Utility to clear all cached requests
+  clearAllRequestCache: () => {
+    const count = inflightRequests.size;
+    inflightRequests.clear();
+    logger.debug(`🧹 Cleared ${count} cached requests`);
   }
 };
+
+// 🔧 Add periodic cleanup of stale requests
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, cached] of inflightRequests.entries()) {
+    if (now - cached.timestamp > REQUEST_TIMEOUT) {
+      logger.warn(`🧹 Cleaning up stale request: ${key}`);
+      inflightRequests.delete(key);
+    }
+  }
+}, 60000); // Clean up every minute

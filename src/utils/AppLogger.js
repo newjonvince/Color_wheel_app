@@ -10,6 +10,16 @@ class AppLogger {
   constructor() {
     this.isDebugMode = IS_DEBUG_MODE;
     this.logLevel = LOG_LEVEL;
+    this.sentryEnabled = false; // ✅ Flag
+    
+    // ✅ Initialize Sentry if available
+    try {
+      if (!__DEV__ && global.Sentry) {
+        this.sentryEnabled = true;
+      }
+    } catch (e) {
+      // Sentry not available
+    }
   }
   
   debug(...args) {
@@ -39,8 +49,9 @@ class AppLogger {
     if (this.shouldLog('error')) {
       console.error('[ERROR]', ...args);
     }
-    // Send to crash reporting in production
-    if (!this.isDebugMode) {
+    
+    // ✅ Only call if Sentry is enabled
+    if (this.sentryEnabled) {
       this.reportToSentry(args);
     }
   }

@@ -11,7 +11,13 @@ const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
  */
 // ✅ SAFER: Add retry mechanism and don't permanently disable AsyncStorage
 class SafeAsyncStorage {
+  static instance = null;
+  
   constructor() {
+    if (SafeAsyncStorage.instance) {
+      return SafeAsyncStorage.instance;
+    }
+    
     this.isAvailable = null;
     this.initPromise = null;
     this.fallbackStorage = new Map();
@@ -19,40 +25,66 @@ class SafeAsyncStorage {
     this.lastFailureTime = 0;
     this.MAX_FAILURES = 3;
     this.RETRY_DELAY = 60000; // 1 minute
+    
+    // 🔧 Race condition prevention locks
+    this.failureLock = false; // Prevent concurrent failure recording
+    this.retryLock = false; // Prevent concurrent retry attempts
+    
+    SafeAsyncStorage.instance = this;
   }
 
+  // 🔧 Thread-safe retry check
   shouldRetryAsyncStorage() {
-    const now = Date.now();
+    if (this.retryLock) return false; // Already retrying
     
-    // Reset failure count after retry delay
-    if (now - this.lastFailureTime > this.RETRY_DELAY) {
-      this.failureCount = 0;
+    const now = Date.now();
+    const backoffMultiplier = Math.min(this.failureCount, 5);
+    const currentDelay = this.RETRY_DELAY * backoffMultiplier;
+    
+    if (now - this.lastFailureTime > currentDelay) {
+      this.failureCount = Math.max(0, this.failureCount - 1);
       return true;
     }
     
-    // Allow retry if we haven't hit max failures
     return this.failureCount < this.MAX_FAILURES;
   }
 
+  // Thread-safe failure recording
   recordFailure() {
+    if (this.failureLock) return; // Prevent concurrent updates
+    
+    this.failureLock = true;
     this.failureCount++;
     this.lastFailureTime = Date.now();
     
     if (this.failureCount >= this.MAX_FAILURES) {
-      console.warn(`⚠️ AsyncStorage failed ${this.failureCount} times, using fallback for ${this.RETRY_DELAY/1000}s`);
+      console.warn(`⚠️ AsyncStorage failed ${this.failureCount} times`);
     }
+    
+    // Release lock after short delay to batch concurrent failures
+    setTimeout(() => {
+      this.failureLock = false;
+    }, 100);
   }
 
   /**
-   * Initialize AsyncStorage with comprehensive error handling
+   * 🔧 Ensure init() only runs once at a time
    */
   async init() {
     if (this.initPromise) {
-      return this.initPromise;
+      return this.initPromise; // Reuse existing initialization
     }
 
     this.initPromise = this._performInit();
-    return this.initPromise;
+    
+    try {
+      await this.initPromise;
+    } finally {
+      // 🔧 Clear promise after completion so future retries work
+      setTimeout(() => {
+        this.initPromise = null;
+      }, 100);
+    }
   }
 
   async _performInit() {
@@ -106,36 +138,65 @@ class SafeAsyncStorage {
   }
 
   /**
-   * Manual timeout pattern to prevent late rejections
+   * Manual timeout pattern to prevent late rejections and memory leaks
    */
   _safeTimeout(asyncOperation, timeoutMs, operationName) {
-    return new Promise((resolve, reject) => {
-      const timeoutId = setTimeout(
-        () => reject(new Error(`${operationName} timeout after ${timeoutMs}ms`)),
-        timeoutMs
-      );
+    let timeoutId;
+    let settled = false;
+    
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          reject(new Error(`${operationName} timeout after ${timeoutMs}ms`));
+        }
+      }, timeoutMs);
+    });
 
+    return Promise.race([
       asyncOperation.then(
-        (result) => { clearTimeout(timeoutId); resolve(result); },
-        (error) => { clearTimeout(timeoutId); reject(error); }
-      );
+        (result) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeoutId);
+            return result;
+          }
+        },
+        (error) => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeoutId);
+            throw error;
+          }
+        }
+      ),
+      timeoutPromise
+    ]).finally(() => {
+      // ✅ Always cleanup
+      if (timeoutId) clearTimeout(timeoutId);
     });
   }
 
   /**
-   * Safe getItem with fallback
+   * 🔧 Safe getItem with proper locking
    */
   async getItem(key) {
     if (this.isAvailable === null) {
       await this.init();
     }
 
-    // Retry AsyncStorage after cooldown period
-    if (this.isAvailable === false && this.shouldRetryAsyncStorage()) {
-      if (IS_DEBUG_MODE) {
-        console.log('🔄 Retrying AsyncStorage after cooldown...');
+    // 🔧 Use lock to prevent concurrent retry attempts
+    if (this.isAvailable === false && !this.retryLock && this.shouldRetryAsyncStorage()) {
+      this.retryLock = true;
+      
+      try {
+        if (IS_DEBUG_MODE) {
+          console.log('🔄 Retrying AsyncStorage...');
+        }
+        await this.init();
+      } finally {
+        this.retryLock = false;
       }
-      await this.init();
     }
 
     if (this.isAvailable) {
@@ -143,22 +204,23 @@ class SafeAsyncStorage {
         const getOperation = AsyncStorage.getItem(key);
         const result = await this._safeTimeout(getOperation, 5000, 'AsyncStorage.getItem');
         
-        // Success! Reset failure count
-        this.failureCount = 0;
+        // 🔧 Only reset on first success
+        if (this.failureCount > 0) {
+          this.failureCount = 0;
+          console.log('✅ AsyncStorage recovered');
+        }
         
         return result;
       } catch (error) {
         console.warn(`AsyncStorage.getItem failed for key "${key}":`, error);
         this.recordFailure();
         
-        // Temporarily mark as unavailable (will retry after cooldown)
         if (this.failureCount >= this.MAX_FAILURES) {
           this.isAvailable = false;
         }
       }
     }
 
-    // Fallback to in-memory storage
     return this.fallbackStorage.get(key) || null;
   }
 
@@ -170,12 +232,18 @@ class SafeAsyncStorage {
       await this.init();
     }
 
-    // Retry AsyncStorage after cooldown period
-    if (this.isAvailable === false && this.shouldRetryAsyncStorage()) {
-      if (IS_DEBUG_MODE) {
-        console.log('🔄 Retrying AsyncStorage after cooldown...');
+    // 🔧 Use lock to prevent concurrent retry attempts
+    if (this.isAvailable === false && !this.retryLock && this.shouldRetryAsyncStorage()) {
+      this.retryLock = true;
+      
+      try {
+        if (IS_DEBUG_MODE) {
+          console.log('🔄 Retrying AsyncStorage...');
+        }
+        await this.init();
+      } finally {
+        this.retryLock = false;
       }
-      await this.init();
     }
 
     if (this.isAvailable) {
@@ -183,8 +251,11 @@ class SafeAsyncStorage {
         const setOperation = AsyncStorage.setItem(key, value);
         await this._safeTimeout(setOperation, 5000, 'AsyncStorage.setItem');
         
-        // Success! Reset failure count
-        this.failureCount = 0;
+        // 🔧 Only reset on first success
+        if (this.failureCount > 0) {
+          this.failureCount = 0;
+          console.log('✅ AsyncStorage recovered');
+        }
         
         return;
       } catch (error) {

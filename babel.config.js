@@ -1,43 +1,43 @@
-// babel.config.js — Production-ready configuration with console log management
+// babel.config.js — Production-ready configuration with robust plugin loading
 module.exports = function (api) {
   api.cache(true);
   
   const isProduction = process.env.NODE_ENV === 'production';
   const isEASBuild = process.env.EAS_BUILD === 'true';
 
+  // Helper function to safely load plugins
+  const safePlugin = (pluginName, options = null) => {
+    try {
+      require.resolve(pluginName);
+      return options ? [pluginName, options] : pluginName;
+    } catch (e) {
+      console.warn(`⚠️ Babel plugin '${pluginName}' not found, skipping...`);
+      return null;
+    }
+  };
+
+  // Build plugins array safely
+  const plugins = [];
+
+  // Production: Remove console logs (only if plugin is available)
+  if (isProduction && !isEASBuild) {
+    const consolePlugin = safePlugin('babel-plugin-transform-remove-console', {
+      exclude: ['error', 'warn'] // Keep console.error and console.warn for debugging crashes
+    });
+    if (consolePlugin) plugins.push(consolePlugin);
+  }
+  
+  // Production: Strip PropTypes (only if plugin is available)
+  if (isProduction) {
+    const propTypesPlugin = safePlugin('babel-plugin-transform-react-remove-prop-types');
+    if (propTypesPlugin) plugins.push(propTypesPlugin);
+  }
+  
+  // IMPORTANT: Reanimated plugin MUST be last
+  plugins.push('react-native-reanimated/plugin');
+
   return {
     presets: ['babel-preset-expo'],
-    plugins: [
-      // Production: Remove console logs but preserve fatal logs (skip in EAS builds for now)
-      ...(isProduction && !isEASBuild ? [
-        [
-          'babel-plugin-transform-remove-console',
-          {
-            exclude: ['error', 'warn'] // Keep console.error and console.warn for debugging crashes
-          }
-        ]
-      ] : []),
-      
-      // Path aliases temporarily disabled - need to install babel-plugin-module-resolver properly
-      // [
-      //   'module-resolver',
-      //   {
-      //     root: ['./src'],
-      //     alias: {
-      //       '@': './src',
-      //       '@components': './src/components',
-      //       '@screens': './src/screens',
-      //       '@services': './src/services',
-      //       '@utils': './src/utils',
-      //       '@hooks': './src/hooks',
-      //       '@config': './src/config',
-      //       '@assets': './assets',
-      //     },
-      //   },
-      // ],
-      
-      // IMPORTANT: Reanimated plugin MUST be last
-      'react-native-reanimated/plugin'
-    ],
+    plugins,
   };
 };

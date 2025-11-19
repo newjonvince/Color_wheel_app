@@ -1,6 +1,6 @@
 // components/UnauthenticatedApp.js - Auth flow for unauthenticated users
 import React, { useState } from 'react';
-import { SafeAreaView, View, Text } from 'react-native';
+import { SafeAreaView, View, Text, StyleSheet } from 'react-native';
 
 import LoginScreen from '../screens/LoginScreen';
 import SignUpScreen from '../screens/SignUpScreen';
@@ -25,7 +25,7 @@ const UnauthenticatedApp = React.memo(({ handleLoginSuccess }) => {
   );
 });
 
-const styles = {
+const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
@@ -52,7 +52,7 @@ const styles = {
     color: '#3498db',
     textDecorationLine: 'underline',
   },
-};
+});
 
 UnauthenticatedApp.displayName = 'UnauthenticatedApp';
 

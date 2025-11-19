@@ -2,7 +2,19 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
 import { MaterialIcons, Feather, Ionicons } from '@expo/vector-icons';
-import { COLOR_WHEEL_CONFIG } from '../config/colorWheelConfig';
+// ✅ Safe import with fallback
+let COLOR_WHEEL_CONFIG;
+try {
+  COLOR_WHEEL_CONFIG = require('../config/colorWheelConfig').COLOR_WHEEL_CONFIG;
+} catch (error) {
+  console.warn('COLOR_WHEEL_CONFIG not found, using defaults');
+  COLOR_WHEEL_CONFIG = {
+    ICON_COLORS: {
+      focused: '#e74c3c',
+      unfocused: '#7f8c8d',
+    }
+  };
+}
 
 // Custom icon components using vector icons instead of emojis
 const TAB_ICONS = {

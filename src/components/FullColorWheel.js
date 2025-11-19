@@ -11,7 +11,7 @@ if (IS_DEBUG_MODE) {
   console.log('FullColorWheel build tag: 2025-08-16 worklet-patched');
 }
 
-import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle } from 'react';
+import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { View, Platform } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -73,8 +73,9 @@ try {
 export { SCHEME_OFFSETS, SCHEME_COUNTS } from '../constants/colorWheelConstants';
 
 // JS helper functions for worklet callbacks (defined at top-level for performance)
-const addFreedIndex = (freedRef, index) => {
-  freedRef.current.add(index);
+// ✅ Don't pass ref to worklet - use callback instead
+const addFreedIndexCallback = (freedRef) => (idx) => {
+  freedRef.current.add(idx);
 };
 
 // Helper: run callback on JS when invoked from a worklet
@@ -133,6 +134,9 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   const activeIdx = useSharedValue(0);
   const freed = useRef(new Set(freedIndices || []));                      // JS-only
   const freedIdxSV = useSharedValue((freedIndices || []).slice());        // UI-thread safe (array)
+  
+  // ✅ Create callback that doesn't pass ref to worklet
+  const addFreedIndex = useCallback(addFreedIndexCallback(freed), []);
   
   // ✅ Throttling for worklet memory leak prevention
   const lastEmitTime = useSharedValue(0);
@@ -225,10 +229,10 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   }, [linked, scheme, count, offsets]);
 
   // ===== Palette emission: compute hexes on JS (avoid calling hslToHex in a worklet) =====
-  const jsEmitPalette = (triples, activePref) => {
+  const jsEmitPalette = (triples, activePref, phase = 'change') => {
     try {
       const out = triples.map(([ang, s01, light]) => hslToHex(ang, s01 * 100, light));
-      if (typeof onColorsChange === 'function') onColorsChange(out);
+      if (typeof onColorsChange === 'function') onColorsChange(out, phase);
       if (typeof onHexChange === 'function') {
         const idx = (selectedFollowsActive ? Math.max(0, Math.min(activePref, out.length - 1)) : 0);
         onHexChange(out[idx]);
@@ -236,7 +240,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
     } catch {}
   };
 
-  const emitPalette = () => {
+  const emitPalette = (phase = 'change') => {
     'worklet';
     try {
       const c = schemeCount.value;
@@ -245,7 +249,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
         triples.push([handleAngles[i].value, handleSats[i].value, handleLights[i].value]);
       }
       const idxPref = followActive.value ? Math.max(0, Math.min(activeIdx.value, c - 1)) : 0;
-      callJS(jsEmitPalette, triples, idxPref);
+      callJS(jsEmitPalette, triples, idxPref, phase);
     } catch(e) {}
   };
 
@@ -281,7 +285,8 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   // Choose nearest handle
   const nearestHandle = (x, y) => {
     'worklet';
-    const c = SCHEME_COUNTS[scheme] || 1;
+    // ✅ Add extra safety for worklet context
+    const c = (SCHEME_COUNTS && SCHEME_COUNTS[scheme]) ? SCHEME_COUNTS[scheme] : 1;
     let best = 0, bestDist = 1e9;
     for (let i=0;i<c;i++) {
       const ang = ((handleAngles[i].value - 90) * Math.PI)/180;
@@ -346,7 +351,9 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
         for (let k = 1; k < c; k++) {
           const freedArray = Array.isArray(freedIdxSV.value) ? freedIdxSV.value : [];
           if (freedArray.indexOf(k) === -1) {
-            const offset = k < SCHEME_OFFSETS[scheme]?.length ? SCHEME_OFFSETS[scheme][k] : 0;
+            // ✅ Add extra safety for worklet context
+            const schemeOffsets = (SCHEME_OFFSETS && SCHEME_OFFSETS[scheme]) ? SCHEME_OFFSETS[scheme] : [0];
+            const offset = k < schemeOffsets.length ? schemeOffsets[k] : 0;
             handleAngles[k].value = mod(deg + offset, 360);
             handleSats[k].value = sat;
           }
@@ -355,25 +362,11 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
         // Mark non-primary handles as freed when dragged independently
         const arr = Array.isArray(freedIdxSV.value) ? freedIdxSV.value.slice() : [];
         if (arr.indexOf(idx) === -1) {
-          arr.push(idx);
-          freedIdxSV.value = arr;
+          handleAngles[idx].value = withTiming(deg, { duration: 100 });
         }
-        callJS(addFreedIndex, freed, idx);
       }
       
-      // ✅ Throttle JS calls using shared value
-      const now = Date.now();
-      if (now - lastEmitTime.value > 16) {  // ~60fps
-        lastEmitTime.value = now;
-        emitPalette();
-      }
-    })
-    .onFinalize((e) => {
-      'worklet';
-      const idx = activeIdx.value;
-      const ang = (Math.atan2(e.y - cy, e.x - cx) * 180) / Math.PI;
-      const deg = mod(ang + 450, 360);
-      handleAngles[idx].value = withTiming(deg, { duration: 100 });
+      emitPalette();
     });
 
   // Public setters live on JS: safe to consult JS Set + props

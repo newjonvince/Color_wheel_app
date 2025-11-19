@@ -14,7 +14,7 @@ export default function LoginButtons({ loading = false, onLogin = () => {}, onDe
         style={styles.gradientWrapper}
         accessibilityRole="button"
         accessibilityLabel={loading ? "Logging in, please wait" : "Log in"}
-        accessibilityState={{ disabled: loading }}
+        accessibilityState={{ disabled: loading, busy: loading }} // ✅ Add busy state
       >
         <LinearGradient
           colors={[optimizedColors.buttonStart, optimizedColors.buttonEnd]}
@@ -22,7 +22,17 @@ export default function LoginButtons({ loading = false, onLogin = () => {}, onDe
           end={{ x: 1, y: 0 }}
           style={styles.primaryButton}
         >
-          {loading ? <ActivityIndicator color={optimizedColors.textPrimary} /> : <Text style={styles.primaryButtonText}>Log in</Text>}
+          {loading ? (
+            <View style={styles.activityIndicatorContainer}>
+              <ActivityIndicator 
+                color={optimizedColors.textPrimary}
+                accessibilityLabel="Loading" // ✅ Label the spinner
+              />
+              <Text style={styles.activityIndicatorText}>Logging in...</Text> {/* ✅ Visual text too */}
+            </View>
+          ) : (
+            <Text style={styles.primaryButtonText}>Log in</Text>
+          )}
         </LinearGradient>
       </TouchableOpacity>
 
@@ -32,7 +42,7 @@ export default function LoginButtons({ loading = false, onLogin = () => {}, onDe
         disabled={loading}
         activeOpacity={loading ? 1 : 0.8}
         accessibilityRole="button"
-        accessibilityLabel="Try Demo Account"
+        accessibilityLabel={loading ? "Demo account disabled during login" : "Try Demo Account"}
         accessibilityState={{ disabled: loading }}
       >
         <Text style={[styles.secondaryButtonText, loading && styles.disabledButtonText]}>

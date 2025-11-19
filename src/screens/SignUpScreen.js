@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, TextInput, ScrollView, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { safeAsyncStorage } from '../utils/safeAsyncStorage';
 import ApiService from '../services/safeApiService';
-import { saveToken } from '../services/secureStore';
+import { safeStorage } from '../utils/safeStorage';
 import useDebounce from '../hooks/useDebounce';
 import { safeApiCall, apiPatterns } from '../utils/apiHelpers';
 
@@ -247,7 +247,7 @@ export default function SignUpScreen({ onSignUpComplete, onBackToLogin }) {
         await safeAsyncStorage.setItem('isLoggedIn', 'true');
         
         if (result.data.token) {
-          await saveToken(result.data.token);
+          await safeStorage.setToken(result.data.token);
           // Set token in ApiService for authenticated requests
           ApiService.setToken(result.data.token);
         }  

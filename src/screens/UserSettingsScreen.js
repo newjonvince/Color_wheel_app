@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import ApiService from '../services/safeApiService';
-import { wipeLocalSession, performSecureLogout, performSecureAccountDeletion } from '../utils/session';
+import { safeStorage } from '../utils/safeStorage';
 import { safeApiCall } from '../utils/apiHelpers';
 
 function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
@@ -104,7 +104,14 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
               setShowDeleteConfirmation(false);
               // ✅ SAFETY: Secure account deletion with error handling
               try {
-                await performSecureAccountDeletion(onAccountDeleted);
+                // Clear all auth data after successful account deletion
+                await safeStorage.clearAuth();
+                await ApiService.logout();
+                
+                // Call the callback to update UI
+                if (onAccountDeleted && typeof onAccountDeleted === 'function') {
+                  onAccountDeleted();
+                }
               } catch (error) {
                 console.error('Secure account deletion cleanup failed:', error);
                 // Fallback to direct callback if secure cleanup fails
@@ -291,7 +298,13 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
           onPress={async () => {
             // ✅ SAFETY: Secure logout with error handling
             try {
-              await performSecureLogout(ApiService, onLogout);
+              // Use ApiService's built-in logout method
+              await ApiService.logout();
+              
+              // Call the callback to update UI
+              if (onLogout && typeof onLogout === 'function') {
+                onLogout();
+              }
             } catch (error) {
               console.error('Secure logout failed:', error);
               // Fallback to direct callback if secure logout fails

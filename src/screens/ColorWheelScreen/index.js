@@ -5,6 +5,8 @@ import { ScrollView, View, Text, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import PropTypes from 'prop-types';
 import Constants from 'expo-constants';
+import { AppErrorBoundary } from '../../components/AppErrorBoundary';
+import { isValidHex6 } from '../../utils/colorValidation';
 
 // Production-ready configuration
 const extra = Constants.expoConfig?.extra || {};
@@ -158,7 +160,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
   // ✅ Handle swatch press to select different palette colors
   const handleSwatchPress = useCallback((color, index) => {
     try {
-      if (typeof color !== 'string' || !/^#[0-9A-Fa-f]{6}$/.test(color)) {
+      if (!isValidHex6(color)) {
         console.warn('⚠️ Invalid color selected from swatch:', color);
         return;
       }
@@ -310,4 +312,11 @@ ColorWheelScreen.defaultProps = {
   onSaveColorMatch: () => {},
 };
 
-export default React.memo(ColorWheelScreen);
+// ✅ Wrap with error boundary for production safety
+const ColorWheelScreenWithErrorBoundary = (props) => (
+  <AppErrorBoundary>
+    <ColorWheelScreen {...props} />
+  </AppErrorBoundary>
+);
+
+export default React.memo(ColorWheelScreenWithErrorBoundary);

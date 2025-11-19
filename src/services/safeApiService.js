@@ -67,8 +67,14 @@ const API_ROOT = buildApiRoot();
 class SafeApiService {
   constructor() {
     this.authToken = null;
-    this.isReady = false;
-    this.readyPromise = this.initialize();
+    this.refreshToken = null;
+    this.isInitialized = false;
+    this.ready = this.initialize();
+    
+    // 🔧 Token refresh race condition prevention
+    this.isRefreshing = false;
+    this.refreshPromise = null;
+    this.failedQueue = [];
   }
 
   // Expose ready promise for app bootstrap
@@ -208,20 +214,27 @@ class SafeApiService {
         console.log('📡 API Root URL:', API_ROOT);
       }
 
-      // Try to load stored token (depends on safeStorage being initialized)
-      let token = null;
+      // Try to load stored tokens (depends on safeStorage being initialized)
       try {
-        token = await safeStorage.getItem('fashion_color_wheel_auth_token');
+        const token = await safeStorage.getItem('fashion_color_wheel_auth_token');
+        const refreshToken = await safeStorage.getItem('fashion_color_wheel_refresh_token');
+        
         if (token && typeof token === 'string' && token.trim().length > 0) {
           this.authToken = token;
-          // Log token loading status only in debug mode
           if (IS_DEBUG_MODE) {
             console.log('✅ Auth token loaded from storage');
           }
         }
+        
+        if (refreshToken && typeof refreshToken === 'string' && refreshToken.trim().length > 0) {
+          this.refreshToken = refreshToken;
+          if (IS_DEBUG_MODE) {
+            console.log('✅ Refresh token loaded from storage');
+          }
+        }
       } catch (storageError) {
-        console.warn('Failed to load auth token from storage:', storageError.message);
-        // Continue without token - not critical for initialization
+        console.warn('Failed to load tokens from storage:', storageError.message);
+        // Continue without tokens - not critical for initialization
       }
 
       this.isReady = true;
@@ -250,19 +263,105 @@ class SafeApiService {
     return this.authToken;
   }
 
-  async setToken(token) {
+  async setToken(token, refreshToken = null) {
     try {
       this.authToken = token;
+      this.refreshToken = refreshToken;
+      
       if (token) {
         await safeStorage.setItem('fashion_color_wheel_auth_token', token);
+        if (refreshToken) {
+          await safeStorage.setItem('fashion_color_wheel_refresh_token', refreshToken);
+        }
       } else {
         await safeStorage.removeItem('fashion_color_wheel_auth_token');
+        await safeStorage.removeItem('fashion_color_wheel_refresh_token');
       }
       return true;
     } catch (error) {
       console.warn('Failed to set token:', error.message);
       return false;
     }
+  }
+
+  // 🔧 Token refresh with race condition prevention
+  async refreshTokens() {
+    // If already refreshing, return the existing promise
+    if (this.isRefreshing && this.refreshPromise) {
+      return this.refreshPromise;
+    }
+
+    // If no refresh token, can't refresh
+    if (!this.refreshToken) {
+      throw new Error('No refresh token available');
+    }
+
+    this.isRefreshing = true;
+    
+    this.refreshPromise = (async () => {
+      try {
+        logger.info('🔄 Refreshing authentication tokens...');
+        
+        const response = await fetch(`${API_ROOT}/auth/refresh`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.refreshToken}`
+          },
+          body: JSON.stringify({
+            refreshToken: this.refreshToken
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Token refresh failed: ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        if (!data.accessToken) {
+          throw new Error('No access token in refresh response');
+        }
+
+        // Update tokens
+        await this.setToken(data.accessToken, data.refreshToken || this.refreshToken);
+        
+        // Process failed queue
+        this.processFailedQueue(null, data.accessToken);
+        
+        logger.info('✅ Tokens refreshed successfully');
+        return data.accessToken;
+        
+      } catch (error) {
+        logger.error('❌ Token refresh failed:', error);
+        
+        // Clear tokens on refresh failure
+        await this.setToken(null);
+        
+        // Process failed queue with error
+        this.processFailedQueue(error, null);
+        
+        throw error;
+      } finally {
+        this.isRefreshing = false;
+        this.refreshPromise = null;
+      }
+    })();
+
+    return this.refreshPromise;
+  }
+
+  // Process queued requests after token refresh
+  processFailedQueue(error, token) {
+    this.failedQueue.forEach(({ resolve, reject }) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve(token);
+      }
+    });
+    
+    this.failedQueue = [];
   }
 
   // Safe request method with error handling and cancellation support
@@ -354,11 +453,51 @@ class SafeApiService {
       
       // Handle different types of errors
       if (error.response?.status === 401) {
-        // Only clear token if this isn't a refresh endpoint to avoid clearing during token rotation
-        if (!endpoint.includes('/auth/refresh')) {
-          await this.setToken(null);
+        // 🔧 Token refresh with race condition prevention
+        if (!endpoint.includes('/auth/refresh') && this.refreshToken) {
+          try {
+            // If already refreshing, wait for it
+            if (this.isRefreshing) {
+              return new Promise((resolve, reject) => {
+                this.failedQueue.push({ resolve, reject });
+              }).then((token) => {
+                // Retry original request with new token
+                const newOptions = {
+                  ...options,
+                  headers: {
+                    ...options.headers,
+                    'Authorization': `Bearer ${token}`
+                  }
+                };
+                return this.request(endpoint, newOptions);
+              });
+            }
+            
+            // Attempt token refresh
+            const newToken = await this.refreshTokens();
+            
+            // Retry original request with new token
+            const newOptions = {
+              ...options,
+              headers: {
+                ...options.headers,
+                'Authorization': `Bearer ${newToken}`
+              }
+            };
+            return this.request(endpoint, newOptions);
+            
+          } catch (refreshError) {
+            logger.error('❌ Token refresh failed, clearing auth:', refreshError);
+            await this.setToken(null);
+            throw new Error('Authentication expired. Please log in again.');
+          }
+        } else {
+          // No refresh token or this is a refresh endpoint
+          if (!endpoint.includes('/auth/refresh')) {
+            await this.setToken(null);
+          }
+          throw new Error('Authentication required');
         }
-        throw new Error('Authentication required');
       }
       
       // Handle network errors

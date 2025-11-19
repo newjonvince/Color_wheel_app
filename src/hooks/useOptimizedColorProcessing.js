@@ -3,65 +3,28 @@
 
 import { useState, useCallback, useMemo, useRef } from 'react';
 import { hexToRgb, hexToHsl, hslToHex } from '../utils/optimizedColor';
+import { LRUCache } from '../utils/LRUCache';
 
 /**
- * Custom hook that implements your exact caching strategy
+ * Custom hook that implements optimized caching strategy
  * - Reuses calculation results within functions
- * - Caches across calls with Map-based memoization
+ * - Caches across calls with industry-standard LRU implementation
  * - Eliminates redundant HEX→RGB conversions
+ * - Uses centralized cache with TTL and performance monitoring
  */
-// SAFER: LRU (Least Recently Used) cache with proper limits
-class LRUCache {
-  constructor(maxSize = 500) {
-    this.maxSize = maxSize;
-    this.cache = new Map();
-  }
-  
-  get(key) {
-    if (!this.cache.has(key)) {
-      return undefined;
-    }
-    
-    // Move to end (most recently used)
-    const value = this.cache.get(key);
-    this.cache.delete(key);
-    this.cache.set(key, value);
-    
-    return value;
-  }
-  
-  set(key, value) {
-    // If key exists, delete it first to update position
-    if (this.cache.has(key)) {
-      this.cache.delete(key);
-    }
-    
-    // Evict oldest (first) entry if at capacity
-    if (this.cache.size >= this.maxSize) {
-      const firstKey = this.cache.keys().next().value;
-      this.cache.delete(firstKey);
-    }
-    
-    this.cache.set(key, value);
-  }
-  
-  has(key) {
-    return this.cache.has(key);
-  }
-  
-  clear() {
-    this.cache.clear();
-  }
-  
-  get size() {
-    return this.cache.size;
-  }
-}
 
 export const useOptimizedColorProcessing = () => {
-  // Use LRU caches with reasonable limits
-  const colorCache = useRef(new LRUCache(500));
-  const contrastCache = useRef(new LRUCache(1000)); // More contrast pairs than colors
+  // Use optimized LRU caches with TTL and performance monitoring
+  const colorCache = useRef(new LRUCache({ 
+    maxSize: 500, 
+    ttl: 300000, // 5 minutes TTL for color analysis
+    cleanupInterval: 60000 // 1 minute cleanup
+  }));
+  const contrastCache = useRef(new LRUCache({ 
+    maxSize: 1000, // More contrast pairs than colors
+    ttl: 600000, // 10 minutes TTL for contrast calculations
+    cleanupInterval: 120000 // 2 minute cleanup
+  }));
   
   /**
    * Optimized analyzeColor - implements your exact strategy
@@ -219,13 +182,22 @@ export const useOptimizedColorProcessing = () => {
   }, [analyzePalette, analyzePaletteContrast]);
 
   /**
-   * Get cache statistics for monitoring
+   * Get comprehensive cache statistics for monitoring
    */
   const getCacheStats = useCallback(() => {
+    const colorStats = colorCache.current.getStats();
+    const contrastStats = contrastCache.current.getStats();
+    
     return {
-      colorCacheSize: colorCache.current.size,
-      contrastCacheSize: contrastCache.current.size,
-      totalCacheSize: colorCache.current.size + contrastCache.current.size
+      colorCache: colorStats,
+      contrastCache: contrastStats,
+      combined: {
+        totalSize: colorStats.size + contrastStats.size,
+        totalMaxSize: colorStats.maxSize + contrastStats.maxSize,
+        averageHitRate: ((colorStats.hitRate + contrastStats.hitRate) / 2).toFixed(2),
+        totalEvictions: colorStats.evictions + contrastStats.evictions,
+        totalExpired: colorStats.expired + contrastStats.expired
+      }
     };
   }, []);
 

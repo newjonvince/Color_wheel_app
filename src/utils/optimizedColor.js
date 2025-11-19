@@ -4,13 +4,19 @@
 /**
  * Color data cache to avoid redundant conversions
  * Structure: { hex: { rgb, hsl, luminance, brightness, analysis } }
- * ✅ SAFER: Use LRU cache with size limit to prevent memory leaks
+ * SAFER: Use LRU cache with size limit to prevent memory leaks
  */
-import LRUCache from './LRUCache';
+import { LRUCache } from './LRUCache';
+import { reportError, ERROR_EVENTS } from './errorTelemetry';
 
-// ✅ CRASH FIX: Define cache size constant
+// Industry-standard LRU cache configuration
 const MAX_CACHE_SIZE = 1000;
-const colorCache = new LRUCache(MAX_CACHE_SIZE);
+const colorCache = new LRUCache({
+  maxSize: MAX_CACHE_SIZE,
+  ttl: 1800000, // 30 minutes TTL for color data
+  cleanupInterval: 300000, // 5 minutes cleanup
+  updateAgeOnGet: true // Update access time on get
+});
 
 /**
  * Normalize and validate hex color input
@@ -32,23 +38,33 @@ function getCachedColorData(hex) {
   // Validate and normalize hex input
   const normalizedHex = normalizeHex(hex);
   if (!normalizedHex) {
-    // Return safe fallback for invalid hex
+    // ✅ Report invalid colors to analytics
+    if (!__DEV__ && global.Analytics) {
+      global.Analytics.track('invalid_color_input', {
+        input: hex,
+        source: 'getCachedColorData'
+      });
+    }
+    
+    // Return safe fallback for invalid colors
     return {
       hex: '#000000',
-      rgb: { r: 0, g: 0, b: 0 },
-      hsl: { h: 0, s: 0, l: 0 },
+      r: 0, g: 0, b: 0,
+      h: 0, s: 0, l: 0,
       luminance: 0,
-      brightness: 0,
-      analysis: { isLight: false, isDark: true, isVibrant: false },
+      brightnessWeighted: 0,
+      isLight: false,
+      category: 'dark',
+      temperature: 'neutral',
       lastUsed: Date.now(),
       isInvalid: true // Flag to indicate this was a fallback
     };
   }
 
-  // Check LRU cache (automatically handles access order)
+  // Check LRU cache with automatic TTL and access tracking
   const existing = colorCache.get(normalizedHex);
   if (existing) {
-    existing.lastUsed = Date.now();
+    // ✅ Advanced LRU cache handles access tracking and TTL automatically
     return existing;
   }
 
@@ -80,14 +96,20 @@ function computeColorData(hex) {
   // Compute color analysis once
   const analysis = computeColorAnalysis(rgb, hsl, brightness);
 
+  // ✅ Use flat structure to reduce object depth and property count
   return {
     hex,
-    rgb,
-    hsl,
+    r: rgb.r,
+    g: rgb.g,
+    b: rgb.b,
+    h: hsl.h,
+    s: hsl.s,
+    l: hsl.l,
     luminance,
-    brightness,
-    analysis,
-    // Add timestamp for cache management
+    brightnessWeighted: brightness.weighted,
+    isLight: brightness.isLight,
+    category: analysis.category,
+    temperature: analysis.temperature,
     lastUsed: Date.now()
   };
 }
@@ -104,9 +126,9 @@ function hexToRgbOptimized(hex) {
   const cleanHex = normalized.slice(1); // Remove #
   
   return {
-    r: parseInt(cleanHex.substr(0, 2), 16),
-    g: parseInt(cleanHex.substr(2, 2), 16),
-    b: parseInt(cleanHex.substr(4, 2), 16)
+    r: parseInt(cleanHex.substring(0, 2), 16), // ✅ Use substring
+    g: parseInt(cleanHex.substring(2, 4), 16), // ✅ Also: note end index changed to 4 (clearer)
+    b: parseInt(cleanHex.substring(4, 6), 16)
   };
 }
 
@@ -114,6 +136,18 @@ function hexToRgbOptimized(hex) {
  * Convert RGB to HSL efficiently
  */
 function rgbToHsl(r, g, b) {
+  // ✅ Guard against NaN, undefined, Infinity
+  if (!isFinite(r) || !isFinite(g) || !isFinite(b)) {
+    console.warn('Invalid RGB values:', { r, g, b });
+    reportError(ERROR_EVENTS.COLOR_VALIDATION_FAILED, new Error('Invalid RGB values'), { r, g, b });
+    return { h: 0, s: 0, l: 0 }; // Safe fallback
+  }
+  
+  // ✅ Clamp to valid RGB range
+  r = Math.max(0, Math.min(255, r));
+  g = Math.max(0, Math.min(255, g));
+  b = Math.max(0, Math.min(255, b));
+  
   r /= 255;
   g /= 255;
   b /= 255;
@@ -136,10 +170,15 @@ function rgbToHsl(r, g, b) {
     h /= 6;
   }
 
+  // ✅ Final validation of results
+  const hResult = Math.round(h * 360);
+  const sResult = Math.round(s * 100);
+  const lResult = Math.round(l * 100);
+  
   return {
-    h: Math.round(h * 360),
-    s: Math.round(s * 100),
-    l: Math.round(l * 100)
+    h: isFinite(hResult) ? hResult : 0,
+    s: isFinite(sResult) ? sResult : 0,
+    l: isFinite(lResult) ? lResult : 0
   };
 }
 
@@ -147,12 +186,21 @@ function rgbToHsl(r, g, b) {
  * Compute luminance for contrast calculations
  */
 function computeLuminance(r, g, b) {
+  // ✅ Validate inputs
+  if (!isFinite(r) || !isFinite(g) || !isFinite(b)) {
+    console.warn('Invalid RGB for luminance:', { r, g, b });
+    return 0;
+  }
+  
   const [rs, gs, bs] = [r, g, b].map(c => {
-    c = c / 255;
+    c = Math.max(0, Math.min(255, c)) / 255; // ✅ Clamp first
     return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
   });
   
-  return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+  const luminance = 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+  
+  // ✅ Final validation
+  return isFinite(luminance) ? Math.max(0, Math.min(1, luminance)) : 0;
 }
 
 /**
@@ -293,14 +341,14 @@ export function analyzeColor(hex) {
   
   return {
     hex: colorData.hex,
-    rgb: colorData.rgb,
-    hsl: colorData.hsl,
-    brightness: colorData.brightness.weighted,
-    brightnessLabel: colorData.brightness.label,
-    isLight: colorData.brightness.isLight,
-    isDark: colorData.brightness.isDark,
+    rgb: { r: colorData.r, g: colorData.g, b: colorData.b },
+    hsl: { h: colorData.h, s: colorData.s, l: colorData.l },
+    brightness: colorData.brightnessWeighted,
+    brightnessLabel: colorData.isLight ? 'light' : 'dark',
+    isLight: colorData.isLight,
+    isDark: !colorData.isLight,
     luminance: colorData.luminance,
-    analysis: colorData.analysis
+    analysis: { category: colorData.category, temperature: colorData.temperature }
   };
 }
 
@@ -309,7 +357,7 @@ export function analyzeColor(hex) {
  */
 export function getColorBrightness(hex) {
   const colorData = getCachedColorData(hex);
-  return colorData.brightness.weighted;
+  return colorData.brightnessWeighted;
 }
 
 /**
@@ -327,10 +375,26 @@ export function getContrastRatio(color1, color2) {
   const lum1 = getColorLuminance(color1);
   const lum2 = getColorLuminance(color2);
   
+  // ✅ Validate luminance values
+  if (!isFinite(lum1) || !isFinite(lum2) || lum1 < 0 || lum2 < 0) {
+    console.warn('Invalid luminance values for contrast:', { color1, color2, lum1, lum2 });
+    return 1; // Safe fallback - no contrast
+  }
+  
   const brightest = Math.max(lum1, lum2);
   const darkest = Math.min(lum1, lum2);
   
-  return (brightest + 0.05) / (darkest + 0.05);
+  // ✅ Prevent division by zero (though mathematically impossible with +0.05)
+  const denominator = darkest + 0.05;
+  if (denominator <= 0) {
+    console.warn('Division by zero prevented in contrast calculation');
+    return 1;
+  }
+  
+  const ratio = (brightest + 0.05) / denominator;
+  
+  // ✅ Validate result
+  return isFinite(ratio) && ratio > 0 ? ratio : 1;
 }
 
 /**
@@ -366,10 +430,20 @@ export function getBatchContrastRatios(colors) {
       }
       
       const lum2 = luminanceMap.get(color2);
+      
+      // ✅ Validate luminance values
+      if (!isFinite(lum1) || !isFinite(lum2) || lum1 < 0 || lum2 < 0) {
+        contrastMatrix[color1][color2] = 1; // Safe fallback
+        continue;
+      }
+      
       const brightest = Math.max(lum1, lum2);
       const darkest = Math.min(lum1, lum2);
+      const denominator = darkest + 0.05;
       
-      contrastMatrix[color1][color2] = (brightest + 0.05) / (darkest + 0.05);
+      // ✅ Prevent division by zero and validate result
+      const ratio = denominator > 0 ? (brightest + 0.05) / denominator : 1;
+      contrastMatrix[color1][color2] = isFinite(ratio) && ratio > 0 ? ratio : 1;
     }
   }
   
@@ -589,32 +663,73 @@ function adjustColorLightness(hex, adjustment) {
  * Convert HSL to Hex (optimized version)
  */
 export function hslToHex(h, s, l) {
+  // ✅ Validate inputs
+  if (!isFinite(h) || !isFinite(s) || !isFinite(l)) {
+    console.warn('Invalid HSL values:', { h, s, l });
+    reportError(ERROR_EVENTS.COLOR_VALIDATION_FAILED, new Error('Invalid HSL values'), { h, s, l });
+    return '#000000'; // Explicit fallback with warning
+  }
+  
+  // ✅ Clamp to valid ranges
+  h = ((h % 360) + 360) % 360; // Normalize to 0-360
+  s = Math.max(0, Math.min(100, s));
+  l = Math.max(0, Math.min(100, l));
+  
   l /= 100;
   const a = s * Math.min(l, 1 - l) / 100;
   const f = n => {
     const k = (n + h / 30) % 12;
     const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-    return Math.round(255 * color).toString(16).padStart(2, '0');
+    const component = Math.round(255 * color);
+    
+    // ✅ Validate component
+    if (!isFinite(component) || component < 0 || component > 255) {
+      return '00';
+    }
+    
+    return component.toString(16).padStart(2, '0');
   };
+  
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
 /**
- * Get cached color data (for debugging/inspection)
+ * Get comprehensive cache statistics (for debugging/monitoring)
  */
 export function getColorCache() {
+  const stats = colorCache.getStats();
   return {
-    size: colorCache.size(), // ✅ API FIX: Use size() method, not property
-    maxSize: MAX_CACHE_SIZE,
-    colors: Array.from(colorCache.cache.keys()) // ✅ API FIX: Access internal Map's keys
+    ...stats,
+    colors: colorCache.keys(), // Use public API method
+    recentColors: colorCache.keys().slice(-10) // Last 10 accessed colors
   };
 }
 
 /**
- * Clear color cache
+ * Clear color cache and reset statistics
  */
 export function clearColorCache() {
   colorCache.clear();
+}
+
+/**
+ * Get detailed cache entry information for debugging
+ * @param {string} hex - Hex color to inspect
+ * @returns {object|null} Entry metadata or null if not found
+ */
+export function getColorCacheEntry(hex) {
+  const normalizedHex = normalizeHex(hex);
+  if (!normalizedHex) return null;
+  
+  return colorCache.getEntryInfo(normalizedHex);
+}
+
+/**
+ * Prune expired entries from cache
+ * @returns {number} Number of entries removed
+ */
+export function pruneColorCache() {
+  return colorCache.prune();
 }
 
 // Re-export optimized versions of common functions for backward compatibility
@@ -749,8 +864,15 @@ try {
   });
   
   if (!allValid) {
-    console.error('❌ Critical hex validation failed - color processing may be unreliable');
+    // ✅ Use reportError instead of console.error for production
+    reportError(ERROR_EVENTS.COLOR_VALIDATION_FAILED, 
+      new Error('Critical hex validation failed'), 
+      { context: 'hex_validation_test' }
+    );
   }
 } catch (validationError) {
-  console.error('❌ Hex validation test failed:', validationError);
+  // ✅ Use reportError instead of console.error for production
+  reportError(ERROR_EVENTS.COLOR_VALIDATION_FAILED, validationError, {
+    context: 'hex_validation_test_exception'
+  });
 }

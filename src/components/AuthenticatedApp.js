@@ -23,7 +23,7 @@ const TabIconMemo = React.memo(({ focused, name }) => (
   <TabIcon focused={focused} name={name} />
 ));
 
-const AuthenticatedApp = React.memo(({ user, handleLogout }) => {
+const AuthenticatedApp = ({ user, handleLogout }) => {
   // ✅ Stable screen options - no dependencies on props
   const getScreenOptions = useCallback(({ route }) => ({
     tabBarIcon: ({ focused, color, size }) => <TabIconMemo focused={focused} name={route.name} />,
@@ -34,43 +34,32 @@ const AuthenticatedApp = React.memo(({ user, handleLogout }) => {
   const renderNavigation = () => {
     try {
       return (
-        <NavigationContainer 
-          linking={APP_CONFIG.linking}
-          fallback={<SafeAreaView style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><Text>Loading navigation...</Text></SafeAreaView>}
-          onStateChange={(state) => {
-            if (IS_DEBUG_MODE) console.log('Nav state:', state);
-          }}
-          onError={(error) => {
-            console.error('🚨 Navigation error:', error);
-          }}
+        <Tab.Navigator
+          initialRouteName={APP_CONFIG.tabNavigation.initialRouteName}
+          screenOptions={getScreenOptions}
+          {...APP_CONFIG.tabNavigation.options}
         >
-          <Tab.Navigator
-            initialRouteName={APP_CONFIG.tabNavigation.initialRouteName}
-            screenOptions={getScreenOptions}
-            {...APP_CONFIG.tabNavigation.options}
-          >
-            <Tab.Screen 
-              name="ColorWheel" 
-              component={ColorWheelScreen}
-              options={{ title: 'Color Wheel' }}
-            />
-            <Tab.Screen 
-              name="Community" 
-              component={CommunityFeedScreen}
-              options={{ title: 'Community' }}
-            />
-            <Tab.Screen 
-              name="Boards" 
-              component={BoardsScreen}
-              options={{ title: 'My Boards' }}
-            />
-            <Tab.Screen 
-              name="Settings" 
-              component={UserSettingsScreen}
-              options={{ title: 'Settings' }}
-            />
-          </Tab.Navigator>
-        </NavigationContainer>
+          <Tab.Screen 
+            name="ColorWheel" 
+            component={ColorWheelScreen}
+            options={{ title: 'Color Wheel' }}
+          />
+          <Tab.Screen 
+            name="Community" 
+            component={CommunityFeedScreen}
+            options={{ title: 'Community' }}
+          />
+          <Tab.Screen 
+            name="Boards" 
+            component={BoardsScreen}
+            options={{ title: 'My Boards' }}
+          />
+          <Tab.Screen 
+            name="Settings" 
+            component={UserSettingsScreen}
+            options={{ title: 'Settings' }}
+          />
+        </Tab.Navigator>
       );
     } catch (error) {
       console.error('🚨 Failed to render navigation:', error);
@@ -83,7 +72,7 @@ const AuthenticatedApp = React.memo(({ user, handleLogout }) => {
   };
 
   return renderNavigation();
-});
+};
 
 AuthenticatedApp.displayName = 'AuthenticatedApp';
 

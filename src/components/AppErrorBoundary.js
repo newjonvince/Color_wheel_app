@@ -19,74 +19,119 @@ const extra = Constants.expoConfig?.extra || {};
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 class AppErrorBoundary extends React.Component {
-  state = { 
-    hasError: false, 
-    error: null, 
-    errorInfo: null,
-    errorType: 'unknown',
-    retryCount: 0
+  static MAX_ERRORS_PER_MINUTE = 5;
+  errorTimestamps = [];
+
+  // ✅ Define action configs as static class properties
+  static ERROR_CONFIGS = {
+    network: {
+      emoji: '📡',
+      title: 'Connection Problem',
+      message: 'Unable to connect to our servers. Please check your internet connection and try again.',
+      actions: ['retry', 'offline'] // Reference action names, not functions
+    },
+    storage: {
+      emoji: '💾',
+      title: 'Storage Issue',
+      message: 'There was a problem accessing your saved data.',
+      actions: ['retry', 'clearCache']
+    },
+    navigation: {
+      emoji: '🧭',
+      title: 'Navigation Error',
+      message: 'There was a problem loading the screen. Let\'s get you back on track.',
+      actions: ['goHome', 'restart']
+    },
+    unknown: {
+      emoji: '⚠️',
+      title: 'Something went wrong',
+      message: 'An unexpected error occurred. We\'re working to fix it.',
+      actions: ['retry', 'restart']
+    }
   };
 
-  static getDerivedStateFromError(error) {
-    const errorType = AppErrorBoundary.classifyError(error);
-    return { 
-      hasError: true, 
-      error,
-      errorType
+  constructor(props) {
+    super(props);
+    this.state = { 
+      hasError: false, 
+      error: null, 
+      errorInfo: null,
+      errorType: 'unknown',
+      retryCount: 0
+    };
+    
+    // ✅ Action map bound in constructor
+    this.actionMap = {
+      retry: { text: 'Retry', action: this.handleRetry, primary: true },
+      offline: { text: 'Go Offline', action: this.handleOfflineMode },
+      clearCache: { text: 'Clear Cache', action: this.handleClearCache },
+      goHome: { text: 'Go Home', action: this.handleGoHome, primary: true },
+      restart: { text: 'Restart App', action: this.handleRestart },
     };
   }
 
   static classifyError(error) {
     const message = error?.message?.toLowerCase() || '';
-    const stack = error?.stack?.toLowerCase() || '';
     
-    // Network/API errors
-    if (message.includes('network') || message.includes('fetch') || 
-        message.includes('timeout') || message.includes('connection')) {
-      return 'network';
+    // ✅ Add error codes for tracking
+    if (message.includes('network')) {
+      return { type: 'network', code: 'ERR_NETWORK_001' };
+    }
+    if (message.includes('storage')) {
+      return { type: 'storage', code: 'ERR_STORAGE_002' };
+    }
+    if (message.includes('navigation')) {
+      return { type: 'navigation', code: 'ERR_NAVIGATION_003' };
     }
     
-    // Storage errors
-    if (message.includes('storage') || message.includes('asyncstorage') ||
-        message.includes('securestore') || stack.includes('storage')) {
-      return 'storage';
-    }
-    
-    // Navigation errors
-    if (message.includes('navigation') || stack.includes('navigation') ||
-        message.includes('screen') || stack.includes('@react-navigation')) {
-      return 'navigation';
-    }
-    
-    // Memory/performance errors
-    if (message.includes('memory') || message.includes('heap') ||
-        message.includes('maximum call stack')) {
-      return 'memory';
-    }
-    
-    // Rendering errors
-    if (message.includes('render') || message.includes('component') ||
-        stack.includes('render') || message.includes('element type')) {
-      return 'render';
-    }
-    
-    // Permission errors
-    if (message.includes('permission') || message.includes('denied') ||
-        message.includes('unauthorized')) {
-      return 'permission';
-    }
-    
-    return 'unknown';
+    return { type: 'unknown', code: 'ERR_UNKNOWN_999' };
+  }
+
+  static getDerivedStateFromError(error) {
+    const { type: errorType, code } = AppErrorBoundary.classifyError(error);
+    return { 
+      hasError: true, 
+      error,
+      errorType,
+      errorCode: code
+    };
   }
 
   componentDidCatch(error, errorInfo) {
-    console.error('🚨 App Error:', error);
-    console.error('Error Info:', errorInfo);
-    console.error('Error Type:', this.state.errorType);
+    // ✅ Only log detailed error info in debug mode
+    if (IS_DEBUG_MODE) {
+      console.error('🚨 AppErrorBoundary caught error:', error);
+      console.error('Error info:', errorInfo);
+    } else {
+      console.error('🚨 App error occurred:', this.state.errorType || 'unknown');
+    }
     
-    this.setState({ errorInfo });
+    // ✅ Error rate limiting to prevent infinite loops
+    const now = Date.now();
+    this.errorTimestamps = this.errorTimestamps.filter(t => now - t < 60000); // Last minute
+    this.errorTimestamps.push(now);
+
+    if (this.errorTimestamps.length > AppErrorBoundary.MAX_ERRORS_PER_MINUTE) {
+      // ✅ Too many errors - force app restart
+      Alert.alert(
+        'Critical Error',
+        'The app is experiencing critical issues. Please restart.',
+        [{ text: 'OK', onPress: () => { /* Can't actually restart in RN */ } }]
+      );
+      return; // Don't attempt recovery
+    }
     
-    // Send to crash reporting with context
+    this.setState({
+      error,
+      errorInfo,
+      hasError: true
+    });
+
+    // Report crash to monitoring service
+    this.reportError(error, errorInfo);
+  }
+
+  reportError = async (error, errorInfo) => {
     try {
       // Example: Sentry.captureException(error, { 
       //   extra: { 
@@ -101,89 +146,13 @@ class AppErrorBoundary extends React.Component {
   }
 
   getErrorContent() {
-    const { errorType, error, retryCount } = this.state;
+    const { errorType, retryCount } = this.state;
+    const config = AppErrorBoundary.ERROR_CONFIGS[errorType] || AppErrorBoundary.ERROR_CONFIGS.unknown;
     
-    switch (errorType) {
-      case 'network':
-        return {
-          emoji: '📡',
-          title: 'Connection Problem',
-          message: 'Unable to connect to our servers. Please check your internet connection and try again.',
-          actions: [
-            { text: 'Retry', action: this.handleRetry, primary: true },
-            { text: 'Go Offline', action: this.handleOfflineMode }
-          ]
-        };
-        
-      case 'storage':
-        return {
-          emoji: '💾',
-          title: 'Storage Issue',
-          message: 'There was a problem accessing your saved data. Your preferences and saved colors might be temporarily unavailable.',
-          actions: [
-            { text: 'Try Again', action: this.handleRetry, primary: true },
-            { text: 'Clear Cache', action: this.handleClearCache }
-          ]
-        };
-        
-      case 'navigation':
-        return {
-          emoji: '🧭',
-          title: 'Navigation Error',
-          message: 'There was a problem loading the screen. Let\'s get you back on track.',
-          actions: [
-            { text: 'Go Home', action: this.handleGoHome, primary: true },
-            { text: 'Restart App', action: this.handleRestart }
-          ]
-        };
-        
-      case 'memory':
-        return {
-          emoji: '⚡',
-          title: 'Performance Issue',
-          message: 'The app is using too much memory. Restarting will help improve performance.',
-          actions: [
-            { text: 'Restart App', action: this.handleRestart, primary: true },
-            { text: 'Report Issue', action: this.handleReportIssue }
-          ]
-        };
-        
-      case 'render':
-        return {
-          emoji: '🎨',
-          title: 'Display Problem',
-          message: 'There was an issue displaying this content. The app should work normally after restarting.',
-          actions: [
-            { text: 'Try Again', action: this.handleRetry, primary: true },
-            { text: 'Restart App', action: this.handleRestart }
-          ]
-        };
-        
-      case 'permission':
-        return {
-          emoji: '🔐',
-          title: 'Permission Required',
-          message: 'The app needs certain permissions to work properly. Please check your device settings.',
-          actions: [
-            { text: 'Open Settings', action: this.handleOpenSettings, primary: true },
-            { text: 'Continue Anyway', action: this.handleRetry }
-          ]
-        };
-        
-      default:
-        return {
-          emoji: '😔',
-          title: 'Something Went Wrong',
-          message: retryCount > 0 
-            ? 'The error persists. You may need to restart the app.'
-            : 'We encountered an unexpected error, but we can try to recover.',
-          actions: [
-            { text: 'Try Again', action: this.handleRetry, primary: true },
-            { text: 'Restart App', action: this.handleRestart },
-            { text: 'Report Issue', action: this.handleReportIssue }
-          ]
-        };
-    }
+    return {
+      ...config,
+      actions: config.actions.map(actionName => this.actionMap[actionName])
+    };
   }
 
   handleRetry = () => {
@@ -272,11 +241,31 @@ class AppErrorBoundary extends React.Component {
       const { emoji, title, message, actions } = this.getErrorContent();
       
       return (
-        <SafeAreaView style={styles.errorContainer}>
+        <SafeAreaView 
+          style={styles.errorContainer}
+          accessibilityRole="alert"
+          accessibilityLiveRegion="assertive"
+        >
           <View style={styles.errorContent}>
-            <Text style={styles.errorEmoji}>{emoji}</Text>
-            <Text style={styles.errorTitle}>{title}</Text>
-            <Text style={styles.errorMessage}>{message}</Text>
+            <Text 
+              style={styles.errorEmoji}
+              accessibilityHidden={true}
+            >
+              {emoji}
+            </Text>
+            <Text 
+              style={styles.errorTitle}
+              accessibilityRole="header"
+              accessibilityLevel={1}
+            >
+              {title}
+            </Text>
+            <Text 
+              style={styles.errorMessage}
+              accessibilityRole="text"
+            >
+              {message}
+            </Text>
             
             <View style={styles.actionsContainer}>
               {actions.map((action, index) => (
@@ -287,6 +276,9 @@ class AppErrorBoundary extends React.Component {
                     action.primary && styles.primaryButton
                   ]}
                   onPress={action.action}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${action.text}. ${action.primary ? 'Primary action' : 'Secondary action'}`}
+                  accessibilityHint={`Tap to ${action.text.toLowerCase()}`}
                 >
                   <Text style={[
                     styles.actionButtonText,

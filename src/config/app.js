@@ -1,7 +1,17 @@
 // config/app.js - Ultra-optimized app configuration with caching and validation
-import { Platform, LogBox } from 'react-native';
+import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { logger } from '../utils/AppLogger';
+
+// 🔧 FIXED: Import navigation function at module level to prevent circular dependency
+let getStateFromPathDefault = null;
+try {
+  const navigationModule = require('@react-navigation/native');
+  getStateFromPathDefault = navigationModule.getStateFromPath;
+} catch (error) {
+  logger.warn('🔧 Navigation module not available during config load:', error.message);
+  // Will be handled gracefully in the getStateFromPath function
+}
 
 // Production-ready environment configuration
 const extra = Constants.expoConfig?.extra || {};
@@ -36,7 +46,10 @@ const createAppConfig = (() => {
   let cachedConfig = null;
   
   return () => {
-    if (cachedConfig) return cachedConfig;
+    if (cachedConfig) {
+      // 🔧 Return deep clone to prevent mutations
+      return JSON.parse(JSON.stringify(cachedConfig));
+    }
     
     cachedConfig = {
       // Deep linking configuration with validation
@@ -50,14 +63,27 @@ const createAppConfig = (() => {
             Settings: 'settings' 
           } 
         },
-        // ✅ Add error handling
+        // 🔧 FIXED: Safe deep linking with circular dependency prevention
         getStateFromPath: (path, options) => {
           try {
-            // Import getStateFromPath from @react-navigation/native
-            const { getStateFromPath: getStateFromPathDefault } = require('@react-navigation/native');
-            return getStateFromPathDefault(path, options);
+            // Use the safely imported function (no circular dependency)
+            if (getStateFromPathDefault && typeof getStateFromPathDefault === 'function') {
+              return getStateFromPathDefault(path, options);
+            } else {
+              // Fallback: Try lazy loading if not available at module load
+              logger.warn('🔧 Attempting lazy load of navigation function');
+              const navigationModule = require('@react-navigation/native');
+              if (navigationModule?.getStateFromPath) {
+                getStateFromPathDefault = navigationModule.getStateFromPath;
+                return getStateFromPathDefault(path, options);
+              }
+            }
+            
+            // Final fallback: return undefined to go to initial route
+            logger.warn('🔧 Navigation function not available, using fallback');
+            return undefined;
           } catch (error) {
-            logger.error('Deep linking error:', error);
+            logger.error('🚨 Deep linking error:', error);
             return undefined; // Return to initial route
           }
         },
@@ -120,7 +146,16 @@ const createAppConfig = (() => {
       validateAppConfig(cachedConfig);
     }
     
-    return cachedConfig;
+    // 🔧 Freeze object to prevent mutations in development
+    if (__DEV__) {
+      Object.freeze(cachedConfig);
+      Object.freeze(cachedConfig.linking);
+      Object.freeze(cachedConfig.linking.config);
+      Object.freeze(cachedConfig.linking.config.screens);
+      // Note: getStateFromPath is a function, don't freeze it
+    }
+    
+    return JSON.parse(JSON.stringify(cachedConfig));
   };
 })();
 
@@ -161,7 +196,7 @@ export const initializeAppConfig = () => {
     return Promise.resolve();
   }
   
-  initializationPromise = new Promise((resolve) => {
+  initializationPromise = new Promise((resolve, reject) => { // 🔧 Added reject
     const startTime = Date.now();
     
     try {
@@ -188,11 +223,6 @@ export const initializeAppConfig = () => {
       }
 
       if (IS_PROD) {
-        // Production should have minimal LogBox ignores
-        LogBox.ignoreLogs([
-          'Setting a timer', // Known RN issue
-        ]);
-        
         // ✅ PRODUCTION: No debug logging at all
         if (__DEV__) {
           logger.debug('Production logging configured');
@@ -225,8 +255,16 @@ export const initializeAppConfig = () => {
       
     } catch (error) {
       console.error('❌ App configuration initialization failed:', error);
-      // Don't throw - allow app to continue with default behavior
-      resolve();
+      
+      // 🔧 Reject on critical errors
+      if (IS_PROD) {
+        // In production, fail gracefully
+        logger.error('Critical config error, using defaults');
+        resolve(); // Allow app to continue with defaults
+      } else {
+        // In development, fail loud
+        reject(error);
+      }
     }
   });
   
@@ -235,12 +273,19 @@ export const initializeAppConfig = () => {
 
 // Memoized status bar style with platform optimization
 const statusBarStyleCache = new Map();
+const MAX_CACHE_SIZE = 10; // Prevent unlimited growth
 
 export const getStatusBarStyle = () => {
   const cacheKey = Platform.OS;
   
   if (statusBarStyleCache.has(cacheKey)) {
     return statusBarStyleCache.get(cacheKey);
+  }
+  
+  // 🔧 Prevent memory leak: Clear cache if it gets too large
+  if (statusBarStyleCache.size >= MAX_CACHE_SIZE) {
+    logger.warn('🧹 Clearing statusBarStyleCache to prevent memory leak');
+    statusBarStyleCache.clear();
   }
   
   const style = Platform.OS === 'ios' ? 'dark-content' : 'default';
@@ -273,6 +318,7 @@ export const pickUser = (userInput) => {
 
 // Memoized storage key generator
 const storageKeyCache = new Map();
+const MAX_STORAGE_CACHE_SIZE = 100; // Reasonable limit for user IDs
 
 export const getMatchesKey = (userId) => {
   const cacheKey = userId || 'anon';
@@ -281,10 +327,54 @@ export const getMatchesKey = (userId) => {
     return storageKeyCache.get(cacheKey);
   }
   
+  // 🔧 Prevent memory leak: Clear cache if it gets too large
+  if (storageKeyCache.size >= MAX_STORAGE_CACHE_SIZE) {
+    logger.warn('🧹 Clearing storageKeyCache to prevent memory leak');
+    storageKeyCache.clear();
+  }
+  
   const key = `savedColorMatches:${cacheKey}`;
   storageKeyCache.set(cacheKey, key);
   
   return key;
+};
+
+// 🔧 Periodic cache cleanup to prevent memory leaks
+const setupCacheCleanup = () => {
+  // Only set up cleanup in long-running environments
+  if (typeof setInterval !== 'undefined') {
+    const CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 minutes
+    
+    setInterval(() => {
+      const statusCacheSize = statusBarStyleCache.size;
+      const storageCacheSize = storageKeyCache.size;
+      
+      // Clear caches if they're getting large
+      if (statusCacheSize > 5) {
+        logger.debug('🧹 Periodic cleanup: clearing statusBarStyleCache');
+        statusBarStyleCache.clear();
+      }
+      
+      if (storageCacheSize > 50) {
+        logger.debug('🧹 Periodic cleanup: clearing storageKeyCache');
+        storageKeyCache.clear();
+      }
+      
+      if (IS_DEV && (statusCacheSize > 0 || storageCacheSize > 0)) {
+        logger.debug(`📊 Cache sizes - StatusBar: ${statusCacheSize}, Storage: ${storageCacheSize}`);
+      }
+    }, CLEANUP_INTERVAL);
+  }
+};
+
+// Initialize cleanup on module load
+setupCacheCleanup();
+
+// Export cache cleanup utilities for manual cleanup if needed
+export const clearAllCaches = () => {
+  statusBarStyleCache.clear();
+  storageKeyCache.clear();
+  logger.info('🧹 All caches cleared manually');
 };
 
 // Performance monitoring utilities (development only)
