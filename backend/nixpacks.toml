@@ -1,0 +1,17 @@
+# Nixpacks configuration for Railway deployment
+# Fixes npm --production deprecation warning
+
+[phases.install]
+dependsOn = ["setup"]
+cmds = [
+    "npm ci --omit=dev --no-audit --no-fund"
+]
+
+[phases.build]
+dependsOn = ["install"]
+cmds = [
+    "echo 'Build phase - no build steps needed for this Node.js app'"
+]
+
+[start]
+cmd = "npm start"

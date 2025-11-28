@@ -108,7 +108,7 @@ function resolveConfigFromEnv(env) {
     password: cfg.password,
     database: cfg.database,
 
-    // Pool tuning
+    // Pool tuning (MySQL2 pool options)
     waitForConnections: true,
     connectionLimit: Number(env.DB_CONN_LIMIT || env.MYSQL_CONNECTION_LIMIT || 10),
     maxIdle: 10,
@@ -117,9 +117,10 @@ function resolveConfigFromEnv(env) {
     enableKeepAlive: true,
     keepAliveInitialDelay: 0,
 
-    // Timeouts
-    connectTimeout: 10_000,
-    acquireTimeout: 10_000,
+    // Timeouts (MySQL2 connection options only)
+    connectTimeout: 10_000, // Time to wait for initial connection
+    timeout: 10_000, // Query execution timeout
+    // ❌ NOTE: acquireTimeout is NOT valid for MySQL2 (that's a generic pool option)
 
     // Safety / QoL
     namedPlaceholders: true,  // native named placeholders
