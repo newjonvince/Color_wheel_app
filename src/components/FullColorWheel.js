@@ -4,7 +4,20 @@
 
 // Build verification tag for crash debugging (only in debug mode)
 import Constants from 'expo-constants';
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('FullColorWheel: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('FullColorWheel: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 if (IS_DEBUG_MODE) {
@@ -12,7 +25,7 @@ if (IS_DEBUG_MODE) {
 }
 
 import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
-import { View, Platform } from 'react-native';
+import { View, Platform, Text } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   useSharedValue,
@@ -38,35 +51,73 @@ import { hslToHex, hexToHsl } from '../utils/optimizedColor';
 
 let Canvas, SkiaCircle, SweepGradient, RadialGradient, Paint, vec;
 try {
-  // iOS-safe Skia loading with platform check
-  if (Platform.OS === 'ios') {
-    const Skia = require('@shopify/react-native-skia');
-    Canvas = Skia.Canvas;
-    SkiaCircle = Skia.Circle;
-    SweepGradient = Skia.SweepGradient;
-    RadialGradient = Skia.RadialGradient;
-    Paint = Skia.Paint;
-    vec = Skia.vec;
-  } else {
-    const Skia = require('@shopify/react-native-skia');
-    Canvas = Skia.Canvas;
-    SkiaCircle = Skia.Circle;
-    SweepGradient = Skia.SweepGradient;
-    RadialGradient = Skia.RadialGradient;
-    Paint = Skia.Paint;
-    vec = Skia.vec;
-  }
+  // ✅ SIMPLIFIED: Universal Skia loading (works on all platforms)
+  const Skia = require('@shopify/react-native-skia');
+  Canvas = Skia.Canvas;
+  SkiaCircle = Skia.Circle;
+  SweepGradient = Skia.SweepGradient;
+  RadialGradient = Skia.RadialGradient;
+  Paint = Skia.Paint;
+  vec = Skia.vec;
 } catch (e) {
   // Log Skia loading failures only in debug mode
   if (IS_DEBUG_MODE) {
     console.log('Skia module load failed on', Platform.OS + ':', e.message);
   }
-  Canvas = View;
-  SkiaCircle = () => null;
-  SweepGradient = () => null;
-  RadialGradient = () => null;
+  
+  // ✅ PROPER FALLBACK: Functional color picker UI
+  const FallbackColorWheel = ({ style, children, ...props }) => (
+    <View style={[style, {
+      backgroundColor: '#f0f0f0',
+      borderRadius: 999,
+      borderWidth: 2,
+      borderColor: '#ddd',
+      justifyContent: 'center',
+      alignItems: 'center'
+    }]} {...props}>
+      <View style={{
+        backgroundColor: '#ff6b6b',
+        width: '80%',
+        height: '80%',
+        borderRadius: 999,
+        justifyContent: 'center',
+        alignItems: 'center'
+      }}>
+        <Text style={{
+          color: 'white',
+          fontSize: 12,
+          fontWeight: 'bold',
+          textAlign: 'center'
+        }}>
+          Color{'\n'}Picker
+        </Text>
+      </View>
+      {children}
+    </View>
+  );
+  
+  const FallbackCircle = ({ cx, cy, r, color, children, ...props }) => (
+    <View style={{
+      position: 'absolute',
+      left: (cx || 0) - (r || 50),
+      top: (cy || 0) - (r || 50),
+      width: (r || 50) * 2,
+      height: (r || 50) * 2,
+      backgroundColor: color || '#ff6b6b',
+      borderRadius: 999,
+    }} {...props}>
+      {children}
+    </View>
+  );
+  
+  const FallbackGradient = () => null;
+
+  Canvas = FallbackColorWheel;
+  SkiaCircle = FallbackCircle;
+  SweepGradient = FallbackGradient;
+  RadialGradient = FallbackGradient;
   Paint = null;
-  vec = () => null;
+  vec = () => ({ x: 0, y: 0 });
 }
 
 // Import constants from shared location
@@ -270,7 +321,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       borderRadius: 999,
       backgroundColor: '#FFFFFF',
       borderWidth: 3,
-      borderColor: '#00000022',
+      borderColor: '#E0E0E0',   // Visible gray
       shadowColor: '#000',
       shadowOpacity: 0.15,
       shadowRadius: 3,
@@ -435,14 +486,10 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       <View style={{ width: size, height: size }}>
         <Canvas style={{ width: size, height: size }}>
           {/* Outer gradient rim (dark teal -> cyan) */}
-          <SkiaCircle cx={cx} cy={cy} r={radius}>
-            <RadialGradient c={vec(cx, cy)} r={radius} colors={['#0A2324', '#9EE8FF']} />
-          </SkiaCircle>
+          <SkiaCircle cx={cx} cy={cy} r={radius} color="#1A3A3F" />
 
           {/* White spacer ring */}
-          <SkiaCircle cx={cx} cy={cy} r={radius - outerRim}>
-            <RadialGradient c={vec(cx, cy)} r={radius - outerRim} colors={['#FFFFFF', '#FFFFFF']} />
-          </SkiaCircle>
+          <SkiaCircle cx={cx} cy={cy} r={radius - outerRim} color="#F8F8F8" />
 
           {/* Hue disk */}
           <SkiaCircle cx={cx} cy={cy} r={radius - outerRim - innerSpacer}>

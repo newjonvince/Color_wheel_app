@@ -1,36 +1,163 @@
 // utils/AppLogger.js - Production-safe logging with EXPO_PUBLIC flags
-import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
-const extra = Constants.expoConfig?.extra || {};
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
-const LOG_LEVEL = extra.EXPO_PUBLIC_LOG_LEVEL || 'warn';
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('AppLogger: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('AppLogger: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+// Lazy-load extra to avoid module-load crashes and handle late Constants
+let cachedExtra = null;
+const getExtra = () => {
+  if (!cachedExtra) {
+    cachedExtra = getSafeExpoExtra();
+  }
+  return cachedExtra;
+};
+
+const IS_DEBUG_MODE = () => !!getExtra().EXPO_PUBLIC_DEBUG_MODE;
+const LOG_LEVEL = () => {
+  const level = getExtra().EXPO_PUBLIC_LOG_LEVEL;
+  const validLevels = ['debug', 'info', 'warn', 'error'];
+  return validLevels.includes(level) ? level : 'warn';
+};
 
 class AppLogger {
-  constructor() {
-    this.isDebugMode = IS_DEBUG_MODE;
-    this.logLevel = LOG_LEVEL;
-    this.sentryEnabled = false; // ✅ Flag
+  constructor({ lazyInit = true } = {}) {
+    this.isDebugMode = false;
+    this.logLevel = 'warn';
+    this.sentryEnabled = false; // Flag
+    this._initialized = false;
     
-    // ✅ Initialize Sentry if available
+    // ✅ SENTRY FAILURE TRACKING WITH RECOVERY
+    this._sentryFailures = [];
+    this._sentryDisabledUntil = null;
+    this._maxFailuresInWindow = 10;
+    this._failureWindowMs = 5 * 60 * 1000; // 5 minutes
+    this._disableDurationMs = 10 * 60 * 1000; // 10 minutes
+
+    if (!lazyInit) {
+      this.initialize();
+    }
+  }
+
+  initialize() {
+    this._initialized = true;
     try {
+      this.isDebugMode = IS_DEBUG_MODE();
+      this.logLevel = LOG_LEVEL();
       if (!__DEV__ && global.Sentry) {
         this.sentryEnabled = true;
       }
     } catch (e) {
-      // Sentry not available
+      this.isDebugMode = false;
+      this.logLevel = 'warn';
+      this.sentryEnabled = false;
+    }
+  }
+
+  ensureInitialized() {
+    if (!this._initialized) {
+      this.initialize();
+    }
+  }
+
+  safeConsole(method, tag, args) {
+    try {
+      const fn = console?.[method];
+      if (typeof fn === 'function') {
+        fn(tag, ...args);
+      }
+    } catch (_) {
+      // Swallow to avoid crashing on non-serializable args
+    }
+  }
+
+  shouldLog(level) {
+    this.ensureInitialized();
+    try {
+      const levels = ['debug', 'info', 'warn', 'error'];
+      const currentLevelIndex = levels.indexOf(this.logLevel);
+      const normalizedCurrentIndex = currentLevelIndex === -1 ? levels.indexOf('warn') : currentLevelIndex;
+      const requestedLevelIndex = levels.indexOf(level);
+      const normalizedRequestedIndex = requestedLevelIndex === -1 ? levels.indexOf('error') : requestedLevelIndex;
+      
+      if (this.isDebugMode) return true;
+      return normalizedRequestedIndex >= normalizedCurrentIndex;
+    } catch (_) {
+      // On any internal error, fail safe: log errors only
+      return level === 'error';
     }
   }
   
+  isImportantMessage(msg) {
+    return typeof msg === 'string' && (
+      msg.includes('FullColorWheel') ||
+      msg.includes('SafeStorage') ||
+      msg.includes('API Integration') ||
+      msg.includes('AsyncStorage')
+    );
+  }
+
+  // ✅ SENTRY FAILURE MANAGEMENT WITH RECOVERY
+  _cleanOldFailures() {
+    const now = Date.now();
+    this._sentryFailures = this._sentryFailures.filter(
+      timestamp => now - timestamp < this._failureWindowMs
+    );
+  }
+
+  _isSentryTemporarilyDisabled() {
+    if (!this._sentryDisabledUntil) return false;
+    
+    const now = Date.now();
+    if (now > this._sentryDisabledUntil) {
+      // ✅ RECOVERY: Re-enable Sentry after disable period
+      this._sentryDisabledUntil = null;
+      this._sentryFailures = []; // Clear failure history
+      console.log('[AppLogger] Sentry re-enabled after disable period');
+      return false;
+    }
+    
+    return true;
+  }
+
+  _recordSentryFailure() {
+    const now = Date.now();
+    this._cleanOldFailures();
+    this._sentryFailures.push(now);
+    
+    if (this._sentryFailures.length >= this._maxFailuresInWindow) {
+      this._sentryDisabledUntil = now + this._disableDurationMs;
+      console.warn(`[AppLogger] Temporarily disabling Sentry for ${this._disableDurationMs / 60000} minutes after ${this._maxFailuresInWindow} failures in ${this._failureWindowMs / 60000} minutes`);
+    }
+  }
+
+  _recordSentrySuccess() {
+    // ✅ SUCCESS RESETS: Clear recent failures on successful report
+    if (this._sentryFailures.length > 0) {
+      this._sentryFailures = [];
+      console.log('[AppLogger] Sentry failure count reset after successful report');
+    }
+  }
+
   debug(...args) {
     if (this.shouldLog('debug')) {
-      console.log('[DEBUG]', ...args);
+      this.safeConsole('log', '[DEBUG]', args);
     }
   }
   
   info(...args) {
     if (this.shouldLog('info')) {
-      console.log('[INFO]', ...args);
+      this.safeConsole('log', '[INFO]', args);
     }
   }
   
@@ -41,47 +168,65 @@ class AppLogger {
   
   warn(...args) {
     if (this.shouldLog('warn')) {
-      console.warn('[WARN]', ...args);
+      this.safeConsole('warn', '[WARN]', args);
     }
   }
   
   error(...args) {
     if (this.shouldLog('error')) {
-      console.error('[ERROR]', ...args);
+      this.safeConsole('error', '[ERROR]', args);
     }
     
-    // ✅ Only call if Sentry is enabled
     if (this.sentryEnabled) {
       this.reportToSentry(args);
     }
   }
   
-  shouldLog(level) {
-    const levels = ['debug', 'info', 'warn', 'error'];
-    const currentLevelIndex = levels.indexOf(this.logLevel);
-    const requestedLevelIndex = levels.indexOf(level);
-    
-    // If debug mode is on, show everything
-    if (this.isDebugMode) return true;
-    
-    // Otherwise, only show messages at or above the configured level
-    return requestedLevelIndex >= currentLevelIndex;
-  }
-  
-  isImportantMessage(msg) {
-    return typeof msg === 'string' && (
-      msg.includes('✅') || msg.includes('❌') || msg.includes('🚨') ||
-      msg.includes('🔐') || msg.includes('📱') || msg.includes('🔄') ||
-      msg.includes('FullColorWheel') || msg.includes('SafeStorage') ||
-      msg.includes('API Integration') || msg.includes('AsyncStorage')
-    );
-  }
-  
   reportToSentry(args) {
-    // TODO: Implement Sentry integration
-    // Example: Sentry.captureException(args[0]);
+    try {
+      if (!this.sentryEnabled) {
+        return;
+      }
+
+      // ✅ CHECK TEMPORARY DISABLE STATUS
+      if (this._isSentryTemporarilyDisabled()) {
+        return; // Skip reporting during disable period
+      }
+
+      if (global?.Sentry?.captureException) {
+        const error = args?.[0];
+
+        if (error instanceof Error) {
+          global.Sentry.captureException(error);
+        } else {
+          let errorMessage = 'Unknown error';
+          try {
+            errorMessage =
+              typeof error === 'string'
+                ? error
+                : JSON.stringify(error || 'Unknown error');
+          } catch (stringifyErr) {
+            // Fallback if JSON.stringify fails (e.g., circular refs)
+            errorMessage = String(error || 'Unknown error');
+          }
+          global.Sentry.captureException(new Error(errorMessage));
+        }
+        
+        // ✅ RECORD SUCCESS: Reset failure count on successful report
+        this._recordSentrySuccess();
+      }
+    } catch (err) {
+      if (__DEV__) {
+        console.warn('[AppLogger] Sentry capture failed:', err);
+      }
+
+      // ✅ SMART FAILURE TRACKING: Time-based with recovery
+      this._recordSentryFailure();
+    }
   }
 }
 
-export const logger = new AppLogger();
+// Create logger lazily initialized to avoid module-load crashes
+export const logger = new AppLogger({ lazyInit: true });
 export default logger;
+

@@ -15,7 +15,20 @@ import Constants from 'expo-constants';
 import { safeStorage } from '../utils/safeStorage';
 
 // Production-ready configuration
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('AppErrorBoundary: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('AppErrorBoundary: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 class AppErrorBoundary extends React.Component {

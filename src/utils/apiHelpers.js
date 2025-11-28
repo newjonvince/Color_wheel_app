@@ -1,11 +1,86 @@
 // utils/apiHelpers.js - Shared API utility functions with request deduplication
 import Constants from 'expo-constants';
-import ApiService from '../services/safeApiService';
-import { logger } from './AppLogger';
+
+// ✅ LAZY LOADING: Avoid circular dependency with safeApiService
+let apiService = null;
+const getApiService = () => {
+  if (apiService) return apiService;
+  try {
+    const serviceModule = require('../services/safeApiService');
+    apiService = serviceModule.default || serviceModule;
+  } catch (error) {
+    console.warn('apiHelpers: Failed to load safeApiService:', error.message);
+    // Create fallback service
+    apiService = {
+      get: () => Promise.reject(new Error('API service not available')),
+      post: () => Promise.reject(new Error('API service not available')),
+      delete: () => Promise.reject(new Error('API service not available')),
+      getUserProfile: () => Promise.reject(new Error('API service not available')),
+      getColorMatches: () => Promise.reject(new Error('API service not available')),
+      createColorMatch: () => Promise.reject(new Error('API service not available')),
+      updateSettings: () => Promise.reject(new Error('API service not available')),
+      checkUsername: () => Promise.reject(new Error('API service not available'))
+    };
+  }
+  return apiService;
+};
+
+// Lazy logger proxy to avoid circular import crashes
+let _loggerInstance = null;
+const getLogger = () => {
+  if (_loggerInstance) return _loggerInstance;
+  try {
+    const mod = require('./AppLogger');
+    _loggerInstance = mod?.logger || mod?.default || console;
+  } catch (error) {
+    console.warn('apiHelpers: AppLogger load failed, using console', error?.message || error);
+    _loggerInstance = console;
+  }
+  return _loggerInstance;
+};
+
+const logger = {
+  debug: (...args) => getLogger()?.debug?.(...args),
+  info: (...args) => getLogger()?.info?.(...args),
+  warn: (...args) => getLogger()?.warn?.(...args),
+  error: (...args) => getLogger()?.error?.(...args),
+};
 
 // Production-ready configuration
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('apiHelpers: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('apiHelpers: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+
+// 🔧 React Native compatible network error detection
+const isNetworkError = (error) => {
+  if (!error) return false;
+  
+  // Check common network error patterns
+  const message = error.message?.toLowerCase() || '';
+  const name = error.name?.toLowerCase() || '';
+  
+  return (
+    message.includes('network') ||
+    message.includes('connection') ||
+    message.includes('fetch') ||
+    name.includes('network') ||
+    error.code === 'NETWORK_ERROR' ||
+    error.status === 0 || // Often indicates network failure
+    !error.status // No status usually means network issue
+  );
+};
 
 // 🔧 Request deduplication to prevent duplicate API calls
 const inflightRequests = new Map();
@@ -19,7 +94,7 @@ const REQUEST_TIMEOUT = 30000; // 30 seconds
  * @param {Object} options - Options for error handling and cancellation
  */
 const deduplicatedApiCall = async (key, apiCall, options = {}) => {
-  const { signal } = options; // 🔧 Accept cancellation signal
+  const { signal, maxAge = REQUEST_TIMEOUT } = options; // Accept cancellation signal and configurable max age
   // 🔧 Check if already cancelled
   if (signal?.aborted) {
     throw new Error(`Request cancelled: ${key}`);
@@ -30,7 +105,7 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
     const cached = inflightRequests.get(key);
     
     // 🔧 Check if cached promise is stale
-    if (Date.now() - cached.timestamp < REQUEST_TIMEOUT) {
+    if (Date.now() - cached.timestamp < maxAge) {
       logger.debug(`🔄 Reusing in-flight request: ${key}`);
       return cached.promise;
     } else {
@@ -40,28 +115,75 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
     }
   }
 
-  // 🔧 Create timeout wrapper
-  const timeoutPromise = new Promise((_, reject) => {
-    setTimeout(() => {
-      reject(new Error(`Request timeout: ${key}`));
-      inflightRequests.delete(key); // 🔧 Clean up on timeout
-    }, REQUEST_TIMEOUT);
-  });
-
-  // 🔧 Create cancellation wrapper
-  const cancellationPromise = signal ? new Promise((_, reject) => {
-    signal.addEventListener('abort', () => {
-      reject(new Error(`Request cancelled: ${key}`));
-      inflightRequests.delete(key); // 🔧 Clean up on cancellation
-    });
-  }) : null;
-
-  // 🔧 Race between API call, timeout, and cancellation
+  // ✅ CRITICAL FIX: Manual timeout/cancellation management to prevent uncaught promise rejections
   const apiPromise = safeApiCall(apiCall, options);
-  const promises = [apiPromise, timeoutPromise];
-  if (cancellationPromise) promises.push(cancellationPromise);
   
-  const requestPromise = Promise.race(promises);
+  const requestPromise = new Promise((resolve, reject) => {
+    let settled = false;
+    let timeoutId = null;
+    let abortHandler = null;
+    
+    const cleanup = () => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      if (abortHandler && signal) {
+        signal.removeEventListener('abort', abortHandler);
+        abortHandler = null;
+      }
+    };
+    
+    // Set up timeout
+    timeoutId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        inflightRequests.delete(key);
+        reject(new Error(`Request timeout: ${key}`));
+      }
+    }, REQUEST_TIMEOUT);
+    
+    // Set up cancellation
+    if (signal) {
+      abortHandler = () => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          inflightRequests.delete(key);
+          reject(new Error(`Request cancelled: ${key}`));
+        }
+      };
+      signal.addEventListener('abort', abortHandler, { once: true });
+    }
+    
+    // Handle API promise
+    apiPromise.then(
+      (result) => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          resolve(result);
+        }
+      },
+      (error) => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          inflightRequests.delete(key);
+          reject(error);
+        }
+      }
+    ).catch((error) => {
+      // ✅ SAFETY: Catch any remaining promise rejections
+      if (!settled) {
+        settled = true;
+        cleanup();
+        inflightRequests.delete(key);
+        reject(error);
+      }
+    });
+  });
 
   // 🔧 Store promise with timestamp
   inflightRequests.set(key, {
@@ -71,7 +193,10 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
 
   try {
     const result = await requestPromise;
-    return result;
+    if (result && result.cancelled) {
+      return result;
+    }
+    return unwrapSafeApiResult(result, key);
   } catch (error) {
     // 🔧 Don't throw cancellation errors to unmounted components
     if (signal?.aborted && error.message?.includes('cancelled')) {
@@ -81,9 +206,29 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
     // 🔧 Always clean up on error
     throw error;
   } finally {
+    // 🔧 Clean up timeout to prevent memory leak
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
     // 🔧 Clean up on completion
     inflightRequests.delete(key);
   }
+};
+
+const unwrapSafeApiResult = (result, key) => {
+  if (result && result.cancelled) return result;
+  if (result && result.success) return result.data;
+
+  const err =
+    (result && result.error) ||
+    new Error(
+      (result && result.userMessage) ||
+        `Request failed${key ? ` for ${key}` : ''}`
+    );
+  err.safeApiResult = result;
+  err.requestKey = key;
+  throw err;
 };
 
 /**
@@ -168,7 +313,7 @@ export const safeApiCall = async (apiCall, options = {}) => {
     errorInfo.errorType = 'authentication';
     errorInfo.userMessage = 'Please log in again';
     if (showAlert === undefined) errorInfo.shouldShowAlert = true; // ✅ Always show for auth - user needs to take action
-  } else if (lastError.code === 'NETWORK_ERROR' || lastError.name === 'NetworkError' || !navigator.onLine) {
+  } else if (lastError.code === 'NETWORK_ERROR' || lastError.name === 'NetworkError' || isNetworkError(lastError)) {
     errorInfo.errorType = 'network';
     errorInfo.userMessage = 'Network connection failed. Please check your internet connection.';
     if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Don't show alert, show network indicator instead
@@ -209,10 +354,14 @@ export const safeApiCall = async (apiCall, options = {}) => {
   if (retryCount > 0) {
     retryPromises.set(retryKey, retryPromise);
     
-    // 🔧 Clean up retry promise when done
+    // 🔧 Clean up retry promise when done with error handling
     retryPromise.finally(() => {
-      retryPromises.delete(retryKey);
-      logger.debug(`🧹 Cleaned up retry promise: ${retryKey}`);
+      try {
+        retryPromises.delete(retryKey);
+        logger.debug(`🧹 Cleaned up retry promise: ${retryKey}`);
+      } catch (error) {
+        logger.error('🚨 Error during retry cleanup:', error);
+      }
     });
   }
 
@@ -313,9 +462,9 @@ export const apiPatterns = {
         const params = cursor ? { cursor } : {};
         const qs = new URLSearchParams(params).toString();
         const endpoint = `/community/posts/community${qs ? `?${qs}` : ''}`;
-        return ApiService.get(endpoint, options);
+        return getApiService().get(endpoint, options);
       },
-      { errorMessage: 'Failed to load community posts' }
+      { errorMessage: 'Failed to load community posts', maxAge: 5000 }
     );
   },
 
@@ -323,7 +472,7 @@ export const apiPatterns = {
   loadUserData: async (options = {}) => {
     return deduplicatedApiCall(
       'user-profile',
-      () => ApiService.getUserProfile(options),
+      () => getApiService().getUserProfile(options),
       { errorMessage: 'Failed to load user data' }
     );
   },
@@ -335,8 +484,8 @@ export const apiPatterns = {
     
     return deduplicatedApiCall(
       key,
-      () => ApiService.getColorMatches({ limit, offset, ...options }),
-      { errorMessage: 'Failed to load color matches' }
+      () => getApiService().getColorMatches({ limit, offset, ...options }),
+      { errorMessage: 'Failed to load color matches', maxAge: 5000 }
     );
   },
 
@@ -344,7 +493,7 @@ export const apiPatterns = {
   loadUserSettings: async (options = {}) => {
     return deduplicatedApiCall(
       'user-settings',
-      () => ApiService.get('/users/preferences', options),
+      () => getApiService().get('/users/preferences', options),
       { errorMessage: 'Failed to load user settings' }
     );
   },
@@ -352,14 +501,14 @@ export const apiPatterns = {
   // 🔧 Non-deduplicated operations (mutations should not be deduplicated)
   createColorMatch: async (colorMatchData, options = {}) => {
     return safeApiCall(
-      () => ApiService.createColorMatch(colorMatchData, options),
+      () => getApiService().createColorMatch(colorMatchData, options),
       { errorMessage: 'Failed to create color match' }
     );
   },
 
   updateUserSettings: async (settings, options = {}) => {
     return safeApiCall(
-      () => ApiService.updateSettings(settings, options),
+      () => getApiService().updateSettings(settings, options),
       { errorMessage: 'Failed to update settings' }
     );
   },
@@ -368,8 +517,8 @@ export const apiPatterns = {
   togglePostLike: async (postId, isLiked, options = {}) => {
     return safeApiCall(
       () => isLiked 
-        ? ApiService.delete(`/community/posts/${postId}/like`, options)
-        : ApiService.post(`/community/posts/${postId}/like`, {}, options),
+        ? getApiService().delete(`/community/posts/${postId}/like`, options)
+        : getApiService().post(`/community/posts/${postId}/like`, {}, options),
       { errorMessage: 'Failed to update like status' }
     );
   },
@@ -377,8 +526,8 @@ export const apiPatterns = {
   toggleUserFollow: async (userId, isFollowing, options = {}) => {
     return safeApiCall(
       () => isFollowing
-        ? ApiService.delete(`/community/users/${userId}/follow`, options)
-        : ApiService.post(`/community/users/${userId}/follow`, {}, options),
+        ? getApiService().delete(`/community/users/${userId}/follow`, options)
+        : getApiService().post(`/community/users/${userId}/follow`, {}, options),
       { errorMessage: 'Failed to update follow status' }
     );
   },
@@ -389,7 +538,7 @@ export const apiPatterns = {
     
     const result = await deduplicatedApiCall(
       key,
-      () => ApiService.checkUsername(username, options),
+      () => getApiService().checkUsername(username, options),
       { errorMessage: 'Failed to check username availability' }
     );
     
@@ -415,13 +564,42 @@ export const apiPatterns = {
   }
 };
 
-// 🔧 Add periodic cleanup of stale requests
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, cached] of inflightRequests.entries()) {
-    if (now - cached.timestamp > REQUEST_TIMEOUT) {
-      logger.warn(`🧹 Cleaning up stale request: ${key}`);
-      inflightRequests.delete(key);
-    }
+// dY"? Add periodic cleanup of stale requests with error handling
+let cleanupIntervalId = null;
+
+export const startCleanupInterval = () => {
+  if (cleanupIntervalId) {
+    return; // Already running
   }
-}, 60000); // Clean up every minute
+
+  try {
+    cleanupIntervalId = setInterval(() => {
+      try {
+        const now = Date.now();
+        for (const [key, cached] of inflightRequests.entries()) {
+          if (now - cached.timestamp > REQUEST_TIMEOUT) {
+            logger.warn(`dY1 Cleaning up stale request: ${key}`);
+            inflightRequests.delete(key);
+          }
+        }
+      } catch (error) {
+        logger.error('dYs" Error during request cleanup:', error);
+      }
+    }, 60000); // Clean up every minute
+    logger.info('dY>` Started API cleanup interval');
+  } catch (error) {
+    logger.error('dYs" Failed to start cleanup interval:', error);
+  }
+};
+
+// Export cleanup function to stop the interval if needed
+export const stopCleanupInterval = () => {
+  if (cleanupIntervalId) {
+    clearInterval(cleanupIntervalId);
+    cleanupIntervalId = null;
+    logger.info('dY>` Stopped API cleanup interval');
+  }
+};
+
+// Start automatically on module load
+startCleanupInterval();

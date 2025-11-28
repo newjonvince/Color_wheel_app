@@ -5,9 +5,29 @@ import { safeStorage } from '../../utils/safeStorage';
 import { safeAsyncStorage } from '../../utils/safeAsyncStorage';
 import ApiService from '../../services/safeApiService';
 import { debounce } from '../../utils/debounce';
-import { logger } from '../../utils/AppLogger';
 import { validateForm, validateEmail, parseLoginResponse, getErrorMessage, withTimeout, createDemoUser, TIMEOUTS, sanitizeEmail, sanitizePassword } from './constants';
 import { STORAGE_KEYS } from '../../constants/storageKeys';
+
+// Lazy logger proxy to avoid circular import crashes
+let _loggerInstance = null;
+const getLogger = () => {
+  if (_loggerInstance) return _loggerInstance;
+  try {
+    const mod = require('../../utils/AppLogger');
+    _loggerInstance = mod?.logger || mod?.default || console;
+  } catch (error) {
+    console.warn('useLoginState: AppLogger load failed, using console', error?.message || error);
+    _loggerInstance = console;
+  }
+  return _loggerInstance;
+};
+
+const logger = {
+  debug: (...args) => getLogger()?.debug?.(...args),
+  info: (...args) => getLogger()?.info?.(...args),
+  warn: (...args) => getLogger()?.warn?.(...args),
+  error: (...args) => getLogger()?.error?.(...args),
+};
 
 export const useOptimizedLoginState = (onLoginSuccess) => {
   // Basic state
@@ -34,7 +54,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
 
   // 🔧 Don't use useRef for debounced function - use useMemo
   const debouncedValidate = useMemo(() => {
-    return debounce((value) => {
+    const fn = debounce((value) => {
       if (!value) return;
       
       const validation = validateEmail(value);
@@ -44,11 +64,14 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         if (!validation.isValid) {
           return { ...prev, email: validation.message };
         }
-        // Clear email error if valid
         const { email, ...rest } = prev;
         return rest;
       });
     }, 500);
+    if (!fn.cancel) {
+      fn.cancel = () => {};
+    }
+    return fn;
   }, []); // Create once
 
   // 🔧 Load persisted rate limit on mount
@@ -157,27 +180,55 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     }
   }, []);
 
+  // Reset client-side rate limit tracking (used after successful demo login fallback)
+  const resetRateLimit = useCallback(async () => {
+    loginAttemptsRef.current = [];
+    try {
+      await safeAsyncStorage.removeItem(RATE_LIMIT_KEY);
+    } catch (error) {
+      logger.warn('Failed to reset rate limit data:', error);
+    }
+  }, []);
+
   // ✅ SAFER: Save session with transaction safety
   const saveSession = useCallback(async ({ user, token }) => {
     try {
-      // Clear any existing session data first to prevent partial states
+      // Write-then-swap pattern to avoid partial state
+      const tempUserKey = '__temp_userData';
+      const tempTokenKey = '__temp_authToken';
+      const tempLoggedInKey = '__temp_isLoggedIn';
+
+      const writeOps = [
+        safeStorage.setItem(tempUserKey, JSON.stringify(user)),
+        safeStorage.setItem(tempLoggedInKey, 'true'),
+      ];
+      if (token) {
+        writeOps.push(safeStorage.setItem(tempTokenKey, token));
+      }
+      await Promise.all(writeOps);
+
+      // Swap to real keys atomically
       await Promise.all([
         safeStorage.removeItem(STORAGE_KEYS.userData),
         safeStorage.removeItem(STORAGE_KEYS.authToken),
         safeStorage.removeItem(STORAGE_KEYS.isLoggedIn),
       ]);
-      
-      // Then write fresh session data
-      const writeOperations = [
+
+      const finalOps = [
         safeStorage.setItem(STORAGE_KEYS.userData, JSON.stringify(user)),
         safeStorage.setItem(STORAGE_KEYS.isLoggedIn, 'true'),
       ];
-      
       if (token) {
-        writeOperations.push(safeStorage.setItem(STORAGE_KEYS.authToken, token));
+        finalOps.push(safeStorage.setItem(STORAGE_KEYS.authToken, token));
       }
-      
-      await Promise.all(writeOperations);
+      await Promise.all(finalOps);
+
+      // Clean up temp keys
+      await Promise.all([
+        safeStorage.removeItem(tempUserKey),
+        safeStorage.removeItem(tempTokenKey),
+        safeStorage.removeItem(tempLoggedInKey),
+      ]);
       
     } catch (error) {
       logger.error('Session save failed:', error);
@@ -347,8 +398,11 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
           return;
         }
         
-        // 🔧 If saveSession failed, it already rolled back
-        // Safe to proceed to local fallback
+        // If saveSession failed, stop here and surface error instead of fallback
+        if (backendError?.message?.includes('Failed to save login session')) {
+          setGlobalError('Demo login failed. Please try again.');
+          return;
+        }
       }
       
       // 🔧 Local fallback - only runs if backend completely failed
@@ -393,6 +447,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         }
         
         if (isMountedRef.current) {
+          await resetRateLimit();
           onLoginSuccess?.(demoUser);
         }
         

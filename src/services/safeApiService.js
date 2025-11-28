@@ -1,28 +1,67 @@
-// services/safeApiService.js - API service with safe dependency handling
+﻿// services/safeApiService.js - API service with safe dependency handling
 import axios from 'axios';
 import Constants from 'expo-constants';
 import { safeStorage } from '../utils/safeStorage';
 
+// Lazy logger proxy to avoid circular import crashes
+let _loggerInstance = null;
+const getLogger = () => {
+  if (_loggerInstance) return _loggerInstance;
+  try {
+    const mod = require('../utils/AppLogger');
+    _loggerInstance = mod?.logger || mod?.default || console;
+  } catch (error) {
+    console.warn('safeApiService: AppLogger load failed, using console', error?.message || error);
+    _loggerInstance = console;
+  }
+  return _loggerInstance;
+};
+
+const logger = {
+  debug: (...args) => getLogger()?.debug?.(...args),
+  info: (...args) => getLogger()?.info?.(...args),
+  warn: (...args) => getLogger()?.warn?.(...args),
+  error: (...args) => getLogger()?.error?.(...args),
+};
+
 // Production-ready configuration
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object') {
+      const maybeExtra = expoConfig.extra;
+      if (maybeExtra && typeof maybeExtra === 'object') {
+        return maybeExtra;
+      }
+    }
+    console.warn('safeApiService: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('safeApiService: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 // Request cancellation support
 const CancelToken = axios.CancelToken;
 
+// Safe stringify helper to avoid crashing on circular structures
+const safeStringify = (value, fallback = '') => {
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return fallback;
+  }
+};
+
 // Safe API configuration with URL validation
 const getApiBaseUrl = () => {
   try {
-    const Constants = require('expo-constants').default;
-    
-    // Safe access to expo config with type validation
-    const expoConfig = Constants?.expoConfig;
-    const extra = expoConfig && typeof expoConfig === 'object' ? expoConfig.extra : null;
+    // Safe access to expo config with type validation (no top-level require)
     const apiUrl = extra && typeof extra === 'object' ? extra.EXPO_PUBLIC_API_BASE_URL : null;
-    
-    if (apiUrl && typeof apiUrl === 'string') {
-      return apiUrl;
-    }
+    if (apiUrl && typeof apiUrl === 'string') return apiUrl;
   } catch (error) {
     console.warn('Failed to load Expo Constants:', error.message);
     // Always log Expo Constants errors for production debugging
@@ -61,7 +100,13 @@ const buildApiRoot = () => {
   }
 };
 
-const API_ROOT = buildApiRoot();
+let API_ROOT = null;
+const getApiRoot = () => {
+  if (!API_ROOT) {
+    API_ROOT = buildApiRoot();
+  }
+  return API_ROOT;
+};
 
 // Safe API service class
 class SafeApiService {
@@ -69,17 +114,21 @@ class SafeApiService {
     this.authToken = null;
     this.refreshToken = null;
     this.isInitialized = false;
-    this.ready = this.initialize();
-    
-    // 🔧 Token refresh race condition prevention
+    try {
+      this.readyPromise = this.initialize();
+    } catch (error) {
+      console.error('safeApiService: initialize threw at construction:', error);
+      this.readyPromise = Promise.resolve(false);
+    }
+    // Token refresh race condition prevention
     this.isRefreshing = false;
     this.refreshPromise = null;
     this.failedQueue = [];
   }
-
+  // Expose ready promise for app bootstrap
   // Expose ready promise for app bootstrap
   get ready() {
-    return this.readyPromise;
+    return this.readyPromise || Promise.resolve(false);  // safe fallback
   }
 
   // ✅ SAFER: Comprehensive response validation
@@ -158,7 +207,7 @@ class SafeApiService {
           status: response.status,
           contentType,
           dataType: typeof response.data,
-          dataLength: response.data ? JSON.stringify(response.data).length : 0
+          dataLength: response.data ? safeStringify(response.data, '').length : 0
         });
       }
 
@@ -181,9 +230,7 @@ class SafeApiService {
         if (typeof response.data === 'object') {
           // Common error message patterns
           if (response.data.error) {
-            return typeof response.data.error === 'string' 
-              ? response.data.error 
-              : JSON.stringify(response.data.error);
+            return typeof response.data.error === 'string' ? response.data.error : safeStringify(response.data.error, 'Unknown error');
           }
           
           if (response.data.message) {
@@ -195,7 +242,7 @@ class SafeApiService {
           }
           
           // If it's an object but no standard error fields, stringify it
-          return JSON.stringify(response.data);
+          return safeStringify(response.data, 'Unserializable response data');
         }
       }
       
@@ -206,55 +253,75 @@ class SafeApiService {
     }
   }
 
-  async initialize() {
+  async initialize({ signal } = {}) {
     try {
-      // ✅ SAFER: Skip fake axios validation - just log API configuration
-      if (IS_DEBUG_MODE) {
-        console.log('🔄 Initializing SafeApiService...');
-        console.log('📡 API Root URL:', API_ROOT);
+      // FIX: Check if initialization was aborted
+      if (signal?.aborted) {
+        throw new Error('API service initialization aborted');
       }
 
-      // Try to load stored tokens (depends on safeStorage being initialized)
+      if (IS_DEBUG_MODE) {
+        console.log('Initializing SafeApiService...');
+        console.log('API Root URL:', getApiRoot());
+      }
+
       try {
-        const token = await safeStorage.getItem('fashion_color_wheel_auth_token');
-        const refreshToken = await safeStorage.getItem('fashion_color_wheel_refresh_token');
+        // FIX: Pass signal to storage initialization
+        await safeStorage.init({ signal });
+      } catch (storageInitError) {
+        if (signal?.aborted || storageInitError.message?.includes('aborted')) {
+          throw new Error('API service initialization aborted during storage init');
+        }
+        console.warn('SafeApiService: safeStorage.init failed (continuing):', storageInitError?.message || storageInitError);
+      }
+
+      try {
+        // ✅ FIX: Check abort signal before storage operations
+        if (signal?.aborted) {
+          throw new Error('API service initialization aborted before token loading');
+        }
+
+        const token = await safeStorage.getToken();
         
+        // ✅ FIX: Check abort signal between operations
+        if (signal?.aborted) {
+          throw new Error('API service initialization aborted during token loading');
+        }
+        
+        const refreshToken = await safeStorage.getItem('fashion_color_wheel_refresh_token');
+
         if (token && typeof token === 'string' && token.trim().length > 0) {
           this.authToken = token;
           if (IS_DEBUG_MODE) {
-            console.log('✅ Auth token loaded from storage');
+            console.log('Auth token loaded from storage');
           }
         }
-        
+
         if (refreshToken && typeof refreshToken === 'string' && refreshToken.trim().length > 0) {
           this.refreshToken = refreshToken;
           if (IS_DEBUG_MODE) {
-            console.log('✅ Refresh token loaded from storage');
+            console.log('Refresh token loaded from storage');
           }
         }
       } catch (storageError) {
-        console.warn('Failed to load tokens from storage:', storageError.message);
-        // Continue without tokens - not critical for initialization
+        if (signal?.aborted || storageError.message?.includes('aborted')) {
+          throw new Error('API service initialization aborted during token loading');
+        }
+        console.warn('Failed to load tokens from storage:', storageError?.message || storageError);
       }
 
       this.isReady = true;
       
-      // Log service initialization only in debug mode
       if (IS_DEBUG_MODE) {
-        console.log('✅ SafeApiService initialized successfully');
+        console.log('SafeApiService initialized successfully');
       }
       
       return true;
     } catch (error) {
-      console.error('API service initialization failed:', error.message);
-      console.error('Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
-      });
-      
-      // Still mark as ready to prevent hanging, but log the failure
-      this.isReady = true;
+      console.error('API service initialization failed:', error?.message || error);
+      this.isReady = false;
+      this.initializationFailed = true;
+      this.initializationError = error;
       return false;
     }
   }
@@ -269,12 +336,12 @@ class SafeApiService {
       this.refreshToken = refreshToken;
       
       if (token) {
-        await safeStorage.setItem('fashion_color_wheel_auth_token', token);
+        await safeStorage.setToken(token);
         if (refreshToken) {
           await safeStorage.setItem('fashion_color_wheel_refresh_token', refreshToken);
         }
       } else {
-        await safeStorage.removeItem('fashion_color_wheel_auth_token');
+        await safeStorage.clearToken();
         await safeStorage.removeItem('fashion_color_wheel_refresh_token');
       }
       return true;
@@ -302,7 +369,7 @@ class SafeApiService {
       try {
         logger.info('🔄 Refreshing authentication tokens...');
         
-        const response = await fetch(`${API_ROOT}/auth/refresh`, {
+        const response = await fetch(`${getApiRoot()}/auth/refresh`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -413,7 +480,7 @@ class SafeApiService {
 
       const config = {
         method: method.toUpperCase(),
-        url: `${API_ROOT}${endpoint}`,
+        url: `${getApiRoot()}${endpoint}`,
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json',
@@ -888,3 +955,7 @@ class SafeApiService {
 const safeApiService = new SafeApiService();
 
 export default safeApiService;
+
+
+
+

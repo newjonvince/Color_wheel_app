@@ -3,11 +3,44 @@ import { Platform, Alert } from 'react-native';
 import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { safeAsyncStorage } from './safeAsyncStorage';
-import { logger } from './AppLogger';
+
+// Lazy logger proxy to avoid circular import crashes
+let _loggerInstance = null;
+const getLogger = () => {
+  if (_loggerInstance) return _loggerInstance;
+  try {
+    const mod = require('./AppLogger');
+    _loggerInstance = mod?.logger || mod?.default || console;
+  } catch (error) {
+    console.warn('safeStorage: AppLogger load failed, using console', error?.message || error);
+    _loggerInstance = console;
+  }
+  return _loggerInstance;
+};
+
+const logger = {
+  debug: (...args) => getLogger()?.debug?.(...args),
+  info: (...args) => getLogger()?.info?.(...args),
+  warn: (...args) => getLogger()?.warn?.(...args),
+  error: (...args) => getLogger()?.error?.(...args),
+};
 import { STORAGE_KEYS } from '../constants/storageKeys';
 
 // Production-ready configuration
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('safeStorage: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('safeStorage: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 // Error monitoring for critical failures
@@ -57,14 +90,16 @@ class OptimizedSafeStorage {
     this.secureStore = SecureStore;
     this.isSecureStoreAvailable = false;
     this.isInitialized = false;
-    this.asyncStorageUnavailable = false; // Track AsyncStorage availability
+    this.asyncStorageUnavailable = false; // Track AsyncStorage availability (permanent flag)
+    this.asyncStorageFailureCount = 0;
+    this.asyncStorageUnavailableUntil = 0; // Cooldown-based block
     this.secureStoreUnavailable = false; // Track SecureStore availability
     this.cache = new Map();
     this.pendingOperations = new Map();
     this.batchQueue = [];
     this.batchTimer = null;
-    this._isMounted = true; // ✅ Track mounted state
-    this.tokenStorageType = null; // 🔧 Track where token is stored
+    this._isMounted = true; // Track mounted state
+    this.tokenStorageType = null; // Track where token is stored
     
     // Don't call async initialize() in constructor - race condition
   }
@@ -72,10 +107,17 @@ class OptimizedSafeStorage {
   /**
    * Initialize SecureStore with availability check
    * Must be called explicitly during app startup
+   * @param {Object} options - Initialization options
+   * @param {AbortSignal} options.signal - Abort signal for cancellation
    */
-  async init() {
+  async init({ signal } = {}) {
     if (this.isInitialized) {
       return;
+    }
+
+    // Check if initialization was aborted
+    if (signal?.aborted) {
+      throw new Error('SafeStorage initialization aborted');
     }
 
     try {
@@ -104,7 +146,7 @@ class OptimizedSafeStorage {
       // Test SecureStore availability (optional dependency) with timeout protection
       if (this.secureStore) {
         try {
-          // Manual timeout management for SecureStore (safer than Promise.race)
+          // ✅ FIX: Manual timeout management for SecureStore with abort signal support
           const secureTest = this.secureStore.isAvailableAsync();
 
           const secureOperation = new Promise((resolve, reject) => {
@@ -113,10 +155,23 @@ class OptimizedSafeStorage {
               3000 // 3 second timeout for keychain access
             );
 
+            // ✅ FIX: Listen for abort signal
+            if (signal?.addEventListener) {
+              const abortHandler = () => {
+                clearTimeout(timeoutId);
+                reject(new Error('SecureStore availability test aborted'));
+              };
+              signal.addEventListener('abort', abortHandler, { once: true });
+            }
+
             secureTest.then(
               (result) => {
                 clearTimeout(timeoutId);
-                resolve(result);
+                if (signal?.aborted) {
+                  reject(new Error('SecureStore availability test aborted'));
+                } else {
+                  resolve(result);
+                }
               },
               (error) => {
                 clearTimeout(timeoutId);
@@ -220,6 +275,56 @@ class OptimizedSafeStorage {
   }
 
   /**
+   * Helper to guard async operations with a timeout to avoid hangs
+   */
+  _withTimeout(promise, timeoutMs, label) {
+    // ✅ CRITICAL FIX: Manual timeout management to prevent uncaught promise rejections
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      let timeoutId = null;
+      
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+      };
+      
+      timeoutId = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          reject(new Error(`${label || 'operation'} timed out after ${timeoutMs}ms`));
+        }
+      }, timeoutMs);
+      
+      promise.then(
+        (result) => {
+          if (!settled) {
+            settled = true;
+            cleanup();
+            resolve(result);
+          }
+        },
+        (error) => {
+          if (!settled) {
+            settled = true;
+            cleanup();
+            reject(error);
+          }
+        }
+      ).catch((error) => {
+        // ✅ SAFETY: Catch any remaining promise rejections
+        if (!settled) {
+          settled = true;
+          cleanup();
+          reject(error);
+        }
+      });
+    });
+  }
+
+  /**
    * Normalize value for storage (ensure string)
    */
   normalizeValueForStorage(value) {
@@ -245,6 +350,9 @@ class OptimizedSafeStorage {
    * Advanced getItem with caching and fallbacks
    */
   async getItem(key) {
+    // Opportunistically purge stale cache before each get
+    this.clearExpiredCache();
+
     if (!this.isInitialized) await this.init();
     
     // Check cache first
@@ -263,7 +371,17 @@ class OptimizedSafeStorage {
       try {
         // Try SecureStore for sensitive keys
         if (this.isSensitiveKey(key) && this.isSecureStoreAvailable && !this.secureStoreUnavailable) {
-          const value = await this.secureStore.getItemAsync(key, CONFIG.SECURE_STORE_OPTIONS);
+          let value;
+          try {
+            // Guard against hanging secure reads
+            const securePromise = this.secureStore.getItemAsync(key, CONFIG.SECURE_STORE_OPTIONS);
+            value = await this._withTimeout(securePromise, 4000, `SecureStore.getItem(${key})`);
+          } catch (secureError) {
+            logger.warn(`SecureStore.getItem timed out/failed for key '${key}':`, secureError?.message || secureError);
+            this.secureStoreUnavailable = true;
+            value = null;
+          }
+
           if (value !== null) {
             // Handle TTL wrapped values
             try {
@@ -285,11 +403,30 @@ class OptimizedSafeStorage {
         }
 
         // Fallback to AsyncStorage
-        const value = await safeAsyncStorage.getItem(key);
-        if (value !== null) {
-          this.cache.set(cacheKey, { value, timestamp: Date.now() });
+        const now = Date.now();
+        if (this.asyncStorageUnavailable && now < this.asyncStorageUnavailableUntil) {
+          logger.warn(`AsyncStorage temporarily unavailable (cooldown) for key '${key}'`);
+          return null;
         }
-        return value;
+
+        try {
+          const value = await safeAsyncStorage.getItem(key);
+          if (value !== null) {
+            this.cache.set(cacheKey, { value, timestamp: Date.now() });
+          }
+          this.asyncStorageFailureCount = 0;
+          this.asyncStorageUnavailable = false;
+          this.asyncStorageUnavailableUntil = 0;
+          return value;
+        } catch (asyncError) {
+          this.asyncStorageFailureCount += 1;
+          this.asyncStorageUnavailableUntil = Date.now() + 5000; // brief backoff
+          if (this.asyncStorageFailureCount >= 3) {
+            this.asyncStorageUnavailable = true;
+          }
+          logger.warn(`AsyncStorage.getItem failed for key '${key}':`, asyncError?.message || asyncError);
+          return null;
+        }
       } finally {
         // ✅ Always clean up pending operation
         this.pendingOperations.delete(key);
@@ -384,6 +521,9 @@ class OptimizedSafeStorage {
    * Advanced setItem with secure storage and batching
    */
   async setItem(key, value, options = {}) {
+    // Opportunistically purge stale cache before writes
+    this.clearExpiredCache();
+
     // Ensure initialization
     if (!this.isInitialized) await this.init();
     
@@ -466,6 +606,9 @@ class OptimizedSafeStorage {
    * Advanced removeItem with cache cleanup
    */
   async removeItem(key, options = {}) {
+    // Opportunistic cache cleanup
+    this.clearExpiredCache();
+
     const { batch = false } = options;
 
     if (batch) {
@@ -649,30 +792,61 @@ class OptimizedSafeStorage {
     }
   }
 
-  // 🔧 Non-sensitive data can use AsyncStorage
+  // dY"? Store user data securely when possible, fallback to AsyncStorage
   async setUserData(userData) {
+    let serialized;
     try {
-      await safeAsyncStorage.setItem(
-        STORAGE_KEYS.USER_DATA,
-        JSON.stringify(userData)
-      );
-      logger.info('✅ User data saved');
+      serialized = JSON.stringify(userData);
+    } catch (e) {
+      logger?.error?.('Failed to serialize userData for storage', e);
+      throw new Error('User data must be JSON-serializable');
+    }
+    let lastError = null;
+
+    if (this.isSecureStoreAvailable && !this.secureStoreUnavailable) {
+      try {
+        await this.secureStore.setItemAsync(
+          STORAGE_KEYS.USER_DATA,
+          serialized,
+          CONFIG.SECURE_STORE_OPTIONS
+        );
+        logger.info('?o. User data saved to SecureStore');
+        return;
+      } catch (error) {
+        lastError = error;
+        logger.warn('SecureStore failed to save user data, falling back:', error);
+      }
+    }
+
+    try {
+      await safeAsyncStorage.setItem(STORAGE_KEYS.USER_DATA, serialized);
+      logger.info('?o. User data saved to AsyncStorage fallback');
     } catch (error) {
-      logger.error('❌ Failed to save user data:', error);
-      throw error;
+      logger.error('??O Failed to save user data:', error);
+      throw (lastError || error);
     }
   }
 
   async getUserData() {
+    if (this.isSecureStoreAvailable && !this.secureStoreUnavailable) {
+      try {
+        const data = await this.secureStore.getItemAsync(STORAGE_KEYS.USER_DATA);
+        if (data !== null && data !== undefined) {
+          return JSON.parse(data);
+        }
+      } catch (error) {
+        logger.warn('SecureStore failed to read user data, falling back:', error);
+      }
+    }
+
     try {
       const data = await safeAsyncStorage.getItem(STORAGE_KEYS.USER_DATA);
       return data ? JSON.parse(data) : null;
     } catch (error) {
-      logger.error('❌ Failed to get user data:', error);
+      logger.error('??O Failed to get user data:', error);
       return null;
     }
   }
-
   /**
    * Enhanced clearAuth with pattern matching - FIXED: More robust with partial success handling
    */
@@ -878,7 +1052,7 @@ const optimizedSafeStorage = new OptimizedSafeStorage();
 
 // Export optimized interface with secure token methods
 export const safeStorage = {
-  init: () => optimizedSafeStorage.init(), // ✅ CRITICAL FIX: Export init method
+  init: (options) => optimizedSafeStorage.init(options), // ✅ CRITICAL FIX: Export init method with options
   getItem: (key) => optimizedSafeStorage.getItem(key),
   setItem: (key, value, options) => optimizedSafeStorage.setItem(key, value, options),
   removeItem: (key, options) => optimizedSafeStorage.removeItem(key, options),
@@ -904,3 +1078,4 @@ export const removeItem = safeStorage.removeItem;
 export const clearAuth = safeStorage.clearAuth;
 
 export default safeStorage;
+

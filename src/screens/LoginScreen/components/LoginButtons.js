@@ -1,14 +1,27 @@
 // LoginButtons.js
-import React from 'react';
+import React, { useMemo } from 'react';
 import { TouchableOpacity, Text, View, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { optimizedStyles as styles, optimizedColors } from '../styles';
 
-export default function LoginButtons({ loading = false, onLogin = () => {}, onDemo = () => {}, onSignUp = () => {} }) {
+export default function LoginButtons({ loading = false, onLogin, onDemo, onSignUp }) {
+  const noopHandlers = useMemo(
+    () => ({
+      login: () => {},
+      demo: () => {},
+      signup: () => {},
+    }),
+    []
+  );
+
+  const loginHandler = onLogin || noopHandlers.login;
+  const demoHandler = onDemo || noopHandlers.demo;
+  const signupHandler = onSignUp || noopHandlers.signup;
+
   return (
     <>
       <TouchableOpacity 
-        onPress={onLogin} 
+        onPress={loginHandler} 
         disabled={loading} 
         activeOpacity={0.9} 
         style={styles.gradientWrapper}
@@ -38,7 +51,7 @@ export default function LoginButtons({ loading = false, onLogin = () => {}, onDe
 
       <TouchableOpacity 
         style={[styles.secondaryButton, loading && styles.disabledButton]} 
-        onPress={loading ? undefined : onDemo} 
+        onPress={loading ? undefined : demoHandler} 
         disabled={loading}
         activeOpacity={loading ? 1 : 0.8}
         accessibilityRole="button"
@@ -52,7 +65,7 @@ export default function LoginButtons({ loading = false, onLogin = () => {}, onDe
 
       <TouchableOpacity 
         style={[styles.secondaryButton, loading && styles.disabledButton]} 
-        onPress={loading ? undefined : onSignUp} 
+        onPress={loading ? undefined : signupHandler} 
         disabled={loading}
         activeOpacity={loading ? 1 : 0.8}
         accessibilityRole="button"

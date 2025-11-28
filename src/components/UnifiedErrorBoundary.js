@@ -4,8 +4,28 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, SafeAreaView, ScrollView } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { logger } from '../utils/AppLogger';
 import { reportError, ERROR_EVENTS } from '../utils/errorTelemetry';
+
+// Lazy logger proxy to avoid circular import crashes
+let _loggerInstance = null;
+const getLogger = () => {
+  if (_loggerInstance) return _loggerInstance;
+  try {
+    const mod = require('../utils/AppLogger');
+    _loggerInstance = mod?.logger || mod?.default || console;
+  } catch (error) {
+    console.warn('UnifiedErrorBoundary: AppLogger load failed, using console', error?.message || error);
+    _loggerInstance = console;
+  }
+  return _loggerInstance;
+};
+
+const logger = {
+  debug: (...args) => getLogger()?.debug?.(...args),
+  info: (...args) => getLogger()?.info?.(...args),
+  warn: (...args) => getLogger()?.warn?.(...args),
+  error: (...args) => getLogger()?.error?.(...args),
+};
 
 // Error categorization for better handling
 const ERROR_CATEGORIES = {
@@ -407,7 +427,8 @@ const styles = {
   },
   buttonContainer: {
     flexDirection: 'row',
-    gap: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   button: {
     flexDirection: 'row',
@@ -415,7 +436,7 @@ const styles = {
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 8,
-    gap: 8,
+    marginHorizontal: 8,
   },
   retryButton: {
     backgroundColor: '#3498db',

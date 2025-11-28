@@ -2,19 +2,39 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 
 // Production-ready configuration
-const extra = Constants.expoConfig?.extra || {};
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('safeAsyncStorage: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('safeAsyncStorage: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+let cachedExtra = null;
+const getExtra = () => {
+  if (!cachedExtra) {
+    cachedExtra = getSafeExpoExtra();
+  }
+  return cachedExtra;
+};
+const isDebugMode = () => !!getExtra().EXPO_PUBLIC_DEBUG_MODE;
+
+const FALLBACK_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const FALLBACK_MAX_ENTRIES = 100;
 
 /**
  * Safe AsyncStorage wrapper with enhanced error handling for iOS production crashes
- * Addresses the RNCAsyncStorage _ensureSetup crash seen in TestFlight
  */
-// ✅ SAFER: Add retry mechanism and don't permanently disable AsyncStorage
 class SafeAsyncStorage {
   static instance = null;
   
-  constructor() {
-    if (SafeAsyncStorage.instance) {
+  constructor({ allowReinit = false } = {}) {
+    if (SafeAsyncStorage.instance && !allowReinit) {
       return SafeAsyncStorage.instance;
     }
     
@@ -22,20 +42,29 @@ class SafeAsyncStorage {
     this.initPromise = null;
     this.fallbackStorage = new Map();
     this.failureCount = 0;
+    this.pendingFailures = 0;
     this.lastFailureTime = 0;
     this.MAX_FAILURES = 3;
     this.RETRY_DELAY = 60000; // 1 minute
     
-    // 🔧 Race condition prevention locks
-    this.failureLock = false; // Prevent concurrent failure recording
-    this.retryLock = false; // Prevent concurrent retry attempts
+    this.failureLock = false;
+    this.retryLock = false;
     
     SafeAsyncStorage.instance = this;
   }
 
-  // 🔧 Thread-safe retry check
+  static getInstance({ forceReset = false } = {}) {
+    if (forceReset) {
+      SafeAsyncStorage.instance = null;
+    }
+    if (!SafeAsyncStorage.instance) {
+      SafeAsyncStorage.instance = new SafeAsyncStorage({ allowReinit: true });
+    }
+    return SafeAsyncStorage.instance;
+  }
+
   shouldRetryAsyncStorage() {
-    if (this.retryLock) return false; // Already retrying
+    if (this.retryLock) return false;
     
     const now = Date.now();
     const backoffMultiplier = Math.min(this.failureCount, 5);
@@ -49,149 +78,165 @@ class SafeAsyncStorage {
     return this.failureCount < this.MAX_FAILURES;
   }
 
-  // Thread-safe failure recording
   recordFailure() {
-    if (this.failureLock) return; // Prevent concurrent updates
+    if (this.failureLock) {
+      this.pendingFailures = (this.pendingFailures || 0) + 1;
+      return;
+    }
     
     this.failureLock = true;
-    this.failureCount++;
-    this.lastFailureTime = Date.now();
-    
-    if (this.failureCount >= this.MAX_FAILURES) {
-      console.warn(`⚠️ AsyncStorage failed ${this.failureCount} times`);
-    }
-    
-    // Release lock after short delay to batch concurrent failures
-    setTimeout(() => {
+    try {
+      const totalFailures = 1 + (this.pendingFailures || 0);
+      this.failureCount += totalFailures;
+      this.pendingFailures = 0;
+      this.lastFailureTime = Date.now();
+      
+      if (this.failureCount >= this.MAX_FAILURES) {
+        console.warn(`AsyncStorage failed ${this.failureCount} times`);
+      }
+    } finally {
       this.failureLock = false;
-    }, 100);
+    }
   }
 
-  /**
-   * 🔧 Ensure init() only runs once at a time
-   */
   async init() {
+    if (this.isAvailable === true) {
+      return;
+    }
+    
     if (this.initPromise) {
-      return this.initPromise; // Reuse existing initialization
+      return this.initPromise;
     }
 
-    this.initPromise = this._performInit();
-    
-    try {
-      await this.initPromise;
-    } finally {
-      // 🔧 Clear promise after completion so future retries work
-      setTimeout(() => {
+    this.initPromise = (async () => {
+      try {
+        await this._performInit();
+        this.isAvailable = true;
+      } catch (error) {
+        this.isAvailable = false;
+        throw error;
+      } finally {
         this.initPromise = null;
-      }, 100);
-    }
+      }
+    })();
+    
+    return this.initPromise;
   }
 
   async _performInit() {
     try {
-      if (IS_DEBUG_MODE) {
-        console.log('🔄 Initializing SafeAsyncStorage...');
-      }
+      console.log('🔧 Initializing SafeAsyncStorage...');
 
-      // Test basic AsyncStorage functionality with minimal operations
       const testKey = '__safe_storage_test__';
       const testValue = 'test_' + Date.now();
 
-      // Use manual timeout pattern to prevent late rejections
+      console.log('📱 Testing AsyncStorage operations...');
       const asyncTest = (async () => {
+        console.log('  - Testing setItem...');
         await AsyncStorage.setItem(testKey, testValue);
+        console.log('  - Testing getItem...');
         const retrieved = await AsyncStorage.getItem(testKey);
+        console.log('  - Testing removeItem...');
         await AsyncStorage.removeItem(testKey);
+        console.log('  - Verifying data integrity...');
         return retrieved === testValue;
       })();
 
-      const testOperation = new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(
-          () => reject(new Error('AsyncStorage test timeout')),
-          3000
-        );
-
-        asyncTest.then(
-          (result) => { clearTimeout(timeoutId); resolve(result); },
-          (error) => { clearTimeout(timeoutId); reject(error); }
-        );
-      });
-
-      const success = await testOperation;
+      const success = await this._safeTimeout(asyncTest, 5000, 'AsyncStorage test');
       
       if (success) {
         this.isAvailable = true;
-        if (IS_DEBUG_MODE) {
-          console.log('✅ AsyncStorage is available and working');
+        // Clear shadow fallback data on successful init to avoid stale state
+        this.fallbackStorage.clear();
+        if (isDebugMode()) {
+          console.log('AsyncStorage is available and working');
         }
       } else {
         throw new Error('AsyncStorage test failed - retrieved value mismatch');
       }
 
     } catch (error) {
-      console.error('❌ AsyncStorage initialization failed:', error);
+      console.error('AsyncStorage initialization failed:', error);
       this.isAvailable = false;
-      
-      // Don't throw - use fallback storage instead
-      console.warn('⚠️ Using in-memory fallback storage');
+      console.warn('Using in-memory fallback storage');
     }
   }
 
-  /**
-   * Manual timeout pattern to prevent late rejections and memory leaks
-   */
   _safeTimeout(asyncOperation, timeoutMs, operationName) {
-    let timeoutId;
-    let settled = false;
-    
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => {
+    // ✅ CRITICAL FIX: Manual timeout management to prevent uncaught promise rejections
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+      };
+      
+      let timeoutId = setTimeout(() => {
         if (!settled) {
           settled = true;
+          cleanup();
           reject(new Error(`${operationName} timeout after ${timeoutMs}ms`));
         }
       }, timeoutMs);
-    });
-
-    return Promise.race([
+      
       asyncOperation.then(
         (result) => {
           if (!settled) {
             settled = true;
-            clearTimeout(timeoutId);
-            return result;
+            cleanup();
+            resolve(result);
           }
         },
         (error) => {
           if (!settled) {
             settled = true;
-            clearTimeout(timeoutId);
-            throw error;
+            cleanup();
+            reject(error);
           }
         }
-      ),
-      timeoutPromise
-    ]).finally(() => {
-      // ✅ Always cleanup
-      if (timeoutId) clearTimeout(timeoutId);
+      ).catch((error) => {
+        // ✅ SAFETY: Catch any remaining promise rejections
+        if (!settled) {
+          settled = true;
+          cleanup();
+          reject(error);
+        }
+      });
     });
   }
 
-  /**
-   * 🔧 Safe getItem with proper locking
-   */
+  _setFallback(key, value) {
+    const now = Date.now();
+    // Drop expired entries opportunistically
+    for (const [entryKey, entry] of this.fallbackStorage.entries()) {
+      if (now - entry.timestamp > FALLBACK_TTL_MS) {
+        this.fallbackStorage.delete(entryKey);
+      }
+    }
+
+    this.fallbackStorage.set(key, { value, timestamp: now });
+    if (this.fallbackStorage.size > FALLBACK_MAX_ENTRIES) {
+      // Remove oldest entries to prevent unbounded growth
+      const entries = Array.from(this.fallbackStorage.entries());
+      entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+      const toRemove = entries.slice(0, this.fallbackStorage.size - FALLBACK_MAX_ENTRIES);
+      toRemove.forEach(([oldKey]) => this.fallbackStorage.delete(oldKey));
+    }
+  }
+
   async getItem(key) {
     if (this.isAvailable === null) {
       await this.init();
     }
 
-    // 🔧 Use lock to prevent concurrent retry attempts
     if (this.isAvailable === false && !this.retryLock && this.shouldRetryAsyncStorage()) {
       this.retryLock = true;
-      
       try {
-        if (IS_DEBUG_MODE) {
-          console.log('🔄 Retrying AsyncStorage...');
+        if (isDebugMode()) {
+          console.log('Retrying AsyncStorage...');
         }
         await this.init();
       } finally {
@@ -201,44 +246,46 @@ class SafeAsyncStorage {
 
     if (this.isAvailable) {
       try {
-        const getOperation = AsyncStorage.getItem(key);
-        const result = await this._safeTimeout(getOperation, 5000, 'AsyncStorage.getItem');
-        
-        // 🔧 Only reset on first success
+        const result = await this._safeTimeout(AsyncStorage.getItem(key), 5000, 'AsyncStorage.getItem');
         if (this.failureCount > 0) {
           this.failureCount = 0;
-          console.log('✅ AsyncStorage recovered');
+          if (isDebugMode()) console.log('AsyncStorage recovered');
         }
-        
+        // Drop shadow fallback copy on success
+        if (this.fallbackStorage.has(key)) {
+          this.fallbackStorage.delete(key);
+        }
         return result;
       } catch (error) {
         console.warn(`AsyncStorage.getItem failed for key "${key}":`, error);
         this.recordFailure();
-        
         if (this.failureCount >= this.MAX_FAILURES) {
           this.isAvailable = false;
         }
       }
     }
 
-    return this.fallbackStorage.get(key) || null;
+    const fallbackEntry = this.fallbackStorage.get(key);
+    if (fallbackEntry && Date.now() - fallbackEntry.timestamp < FALLBACK_TTL_MS) {
+      return fallbackEntry.value;
+    }
+    // Expired or missing
+    if (fallbackEntry) {
+      this.fallbackStorage.delete(key);
+    }
+    return null;
   }
 
-  /**
-   * Safe setItem with fallback
-   */
   async setItem(key, value) {
     if (this.isAvailable === null) {
       await this.init();
     }
 
-    // 🔧 Use lock to prevent concurrent retry attempts
     if (this.isAvailable === false && !this.retryLock && this.shouldRetryAsyncStorage()) {
       this.retryLock = true;
-      
       try {
-        if (IS_DEBUG_MODE) {
-          console.log('🔄 Retrying AsyncStorage...');
+        if (isDebugMode()) {
+          console.log('Retrying AsyncStorage...');
         }
         await this.init();
       } finally {
@@ -248,114 +295,97 @@ class SafeAsyncStorage {
 
     if (this.isAvailable) {
       try {
-        const setOperation = AsyncStorage.setItem(key, value);
-        await this._safeTimeout(setOperation, 5000, 'AsyncStorage.setItem');
-        
-        // 🔧 Only reset on first success
+        await this._safeTimeout(AsyncStorage.setItem(key, value), 5000, 'AsyncStorage.setItem');
         if (this.failureCount > 0) {
           this.failureCount = 0;
-          console.log('✅ AsyncStorage recovered');
+          if (isDebugMode()) console.log('AsyncStorage recovered');
         }
-        
+        // Remove any shadow fallback value
+        this.fallbackStorage.delete(key);
         return;
       } catch (error) {
         console.warn(`AsyncStorage.setItem failed for key "${key}":`, error);
         this.recordFailure();
-        
-        // Temporarily mark as unavailable (will retry after cooldown)
         if (this.failureCount >= this.MAX_FAILURES) {
           this.isAvailable = false;
         }
       }
     }
 
-    // Fallback to in-memory storage
-    this.fallbackStorage.set(key, value);
+    // Store with TTL metadata in fallback
+    this._setFallback(key, value);
   }
 
-  /**
-   * Safe removeItem with fallback
-   */
   async removeItem(key) {
     if (this.isAvailable === null) {
       await this.init();
     }
 
-    // Retry AsyncStorage after cooldown period
     if (this.isAvailable === false && this.shouldRetryAsyncStorage()) {
-      if (IS_DEBUG_MODE) {
-        console.log('🔄 Retrying AsyncStorage after cooldown...');
+      if (isDebugMode()) {
+        console.log('Retrying AsyncStorage after cooldown...');
       }
       await this.init();
     }
 
     if (this.isAvailable) {
       try {
-        const removeOperation = AsyncStorage.removeItem(key);
-        await this._safeTimeout(removeOperation, 5000, 'AsyncStorage.removeItem');
-        
-        // Success! Reset failure count
+        await this._safeTimeout(AsyncStorage.removeItem(key), 5000, 'AsyncStorage.removeItem');
         this.failureCount = 0;
-        
+        this.fallbackStorage.delete(key);
         return;
       } catch (error) {
         console.warn(`AsyncStorage.removeItem failed for key "${key}":`, error);
         this.recordFailure();
-        
-        // Temporarily mark as unavailable (will retry after cooldown)
         if (this.failureCount >= this.MAX_FAILURES) {
           this.isAvailable = false;
         }
       }
     }
 
-    // Fallback to in-memory storage
     this.fallbackStorage.delete(key);
   }
 
-  /**
-   * Safe multiGet with fallback
-   */
   async multiGet(keys) {
     if (this.isAvailable === null) {
       await this.init();
     }
 
-    // Retry AsyncStorage after cooldown period
     if (this.isAvailable === false && this.shouldRetryAsyncStorage()) {
-      if (IS_DEBUG_MODE) {
-        console.log('🔄 Retrying AsyncStorage after cooldown...');
+      if (isDebugMode()) {
+        console.log('Retrying AsyncStorage after cooldown...');
       }
       await this.init();
     }
 
     if (this.isAvailable) {
       try {
-        const multiGetOperation = AsyncStorage.multiGet(keys);
-        const result = await this._safeTimeout(multiGetOperation, 8000, 'AsyncStorage.multiGet');
-        
-        // Success! Reset failure count
+        const result = await this._safeTimeout(AsyncStorage.multiGet(keys), 8000, 'AsyncStorage.multiGet');
         this.failureCount = 0;
-        
+        // On success, clear any shadow entries for these keys
+        keys.forEach(key => this.fallbackStorage.delete(key));
         return result;
       } catch (error) {
         console.warn('AsyncStorage.multiGet failed:', error);
         this.recordFailure();
-        
-        // Temporarily mark as unavailable (will retry after cooldown)
         if (this.failureCount >= this.MAX_FAILURES) {
           this.isAvailable = false;
         }
       }
     }
 
-    // Fallback to in-memory storage
-    return keys.map(key => [key, this.fallbackStorage.get(key) || null]);
+    return keys.map(key => {
+      const entry = this.fallbackStorage.get(key);
+      if (entry && Date.now() - entry.timestamp < FALLBACK_TTL_MS) {
+        return [key, entry.value];
+      }
+      if (entry) {
+        this.fallbackStorage.delete(key);
+      }
+      return [key, null];
+    });
   }
 
-  /**
-   * Safe multiSet with fallback
-   */
   async multiSet(keyValuePairs) {
     if (this.isAvailable === null) {
       await this.init();
@@ -363,8 +393,8 @@ class SafeAsyncStorage {
 
     if (this.isAvailable) {
       try {
-        const multiSetOperation = AsyncStorage.multiSet(keyValuePairs);
-        await this._safeTimeout(multiSetOperation, 8000, 'AsyncStorage.multiSet');
+        await this._safeTimeout(AsyncStorage.multiSet(keyValuePairs), 8000, 'AsyncStorage.multiSet');
+        keyValuePairs.forEach(([key]) => this.fallbackStorage.delete(key));
         return;
       } catch (error) {
         console.warn('AsyncStorage.multiSet failed:', error);
@@ -372,15 +402,11 @@ class SafeAsyncStorage {
       }
     }
 
-    // Fallback to in-memory storage
     keyValuePairs.forEach(([key, value]) => {
-      this.fallbackStorage.set(key, value);
+      this._setFallback(key, value);
     });
   }
 
-  /**
-   * Safe multiRemove with fallback
-   */
   async multiRemove(keys) {
     if (this.isAvailable === null) {
       await this.init();
@@ -388,8 +414,7 @@ class SafeAsyncStorage {
 
     if (this.isAvailable) {
       try {
-        const multiRemoveOperation = AsyncStorage.multiRemove(keys);
-        await this._safeTimeout(multiRemoveOperation, 8000, 'AsyncStorage.multiRemove');
+        await this._safeTimeout(AsyncStorage.multiRemove(keys), 8000, 'AsyncStorage.multiRemove');
         return;
       } catch (error) {
         console.warn('AsyncStorage.multiRemove failed:', error);
@@ -397,15 +422,11 @@ class SafeAsyncStorage {
       }
     }
 
-    // Fallback to in-memory storage
     keys.forEach(key => {
       this.fallbackStorage.delete(key);
     });
   }
 
-  /**
-   * Get all keys safely
-   */
   async getAllKeys() {
     if (this.isAvailable === null) {
       await this.init();
@@ -413,21 +434,25 @@ class SafeAsyncStorage {
 
     if (this.isAvailable) {
       try {
-        const getAllKeysOperation = AsyncStorage.getAllKeys();
-        return await this._safeTimeout(getAllKeysOperation, 5000, 'AsyncStorage.getAllKeys');
+        return await this._safeTimeout(AsyncStorage.getAllKeys(), 5000, 'AsyncStorage.getAllKeys');
       } catch (error) {
         console.warn('AsyncStorage.getAllKeys failed:', error);
         this.isAvailable = false;
       }
     }
 
-    // Fallback to in-memory storage
-    return Array.from(this.fallbackStorage.keys());
+    const now = Date.now();
+    const keys = [];
+    for (const [key, entry] of this.fallbackStorage.entries()) {
+      if (entry && now - entry.timestamp < FALLBACK_TTL_MS) {
+        keys.push(key);
+      } else {
+        this.fallbackStorage.delete(key);
+      }
+    }
+    return keys;
   }
 
-  /**
-   * Clear all data safely
-   */
   async clear() {
     if (this.isAvailable === null) {
       await this.init();
@@ -435,8 +460,8 @@ class SafeAsyncStorage {
 
     if (this.isAvailable) {
       try {
-        const clearOperation = AsyncStorage.clear();
-        await this._safeTimeout(clearOperation, 5000, 'AsyncStorage.clear');
+        await this._safeTimeout(AsyncStorage.clear(), 5000, 'AsyncStorage.clear');
+        this.fallbackStorage.clear();
         return;
       } catch (error) {
         console.warn('AsyncStorage.clear failed:', error);
@@ -444,20 +469,13 @@ class SafeAsyncStorage {
       }
     }
 
-    // Fallback to in-memory storage
     this.fallbackStorage.clear();
   }
 
-  /**
-   * Check if AsyncStorage is available
-   */
   isAsyncStorageAvailable() {
     return this.isAvailable === true;
   }
 
-  /**
-   * Get storage info
-   */
   getStorageInfo() {
     return {
       isAsyncStorageAvailable: this.isAvailable,
@@ -467,6 +485,5 @@ class SafeAsyncStorage {
   }
 }
 
-// Export singleton instance
-export const safeAsyncStorage = new SafeAsyncStorage();
+export const safeAsyncStorage = SafeAsyncStorage.getInstance();
 export default safeAsyncStorage;

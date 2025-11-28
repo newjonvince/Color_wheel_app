@@ -11,42 +11,39 @@ export const reportError = (eventName, error, context = {}) => {
   // Always log to console for development
   console.error(`[${eventName}]`, error, context);
   
-  // Only report to analytics in production
-  if (!__DEV__) {
-    try {
-      // Report to Analytics if available
-      if (global.Analytics && typeof global.Analytics.trackError === 'function') {
-        global.Analytics.trackError(eventName, {
-          error: error?.message || 'Unknown error',
-          stack: error?.stack?.substring(0, 500), // Limit stack trace size
-          timestamp: new Date().toISOString(),
-          ...context,
-        });
-      }
-      
-      // Report to Sentry if available
-      if (global.Sentry && typeof global.Sentry.captureException === 'function') {
-        global.Sentry.captureException(error, {
-          tags: {
-            event: eventName,
-            ...context.tags,
-          },
-          extra: {
-            ...context,
-            timestamp: new Date().toISOString(),
-          },
-        });
-      }
-      
-      // Report to Crashlytics if available
-      if (global.Crashlytics && typeof global.Crashlytics.recordError === 'function') {
-        global.Crashlytics.recordError(error, eventName);
-      }
-      
-    } catch (reportingError) {
-      // Don't let error reporting crash the app
-      console.warn('Failed to report error to telemetry:', reportingError);
+  try {
+    // Report to Analytics if available
+    if (global.Analytics && typeof global.Analytics.trackError === 'function') {
+      global.Analytics.trackError(eventName, {
+        error: error?.message || 'Unknown error',
+        stack: error?.stack?.substring(0, 500), // Limit stack trace size
+        timestamp: new Date().toISOString(),
+        ...context,
+      });
     }
+    
+    // Report to Sentry if available
+    if (global.Sentry && typeof global.Sentry.captureException === 'function') {
+      global.Sentry.captureException(error, {
+        tags: {
+          event: eventName,
+          ...context.tags,
+        },
+        extra: {
+          ...context,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    }
+    
+    // Report to Crashlytics if available
+    if (global.Crashlytics && typeof global.Crashlytics.recordError === 'function') {
+      global.Crashlytics.recordError(error, eventName);
+    }
+    
+  } catch (reportingError) {
+    // Don't let error reporting crash the app
+    console.warn('Failed to report error to telemetry:', reportingError);
   }
 };
 

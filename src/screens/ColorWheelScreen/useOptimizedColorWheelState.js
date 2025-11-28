@@ -11,7 +11,20 @@ import { isValidHex6, filterValidHexColors } from '../../utils/colorValidation';
 import { reportError, ERROR_EVENTS } from '../../utils/errorTelemetry';
 
 // Production-ready configuration
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('useOptimizedColorWheelState: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('useOptimizedColorWheelState: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 export const useOptimizedColorWheelState = (options = {}) => {
@@ -78,16 +91,10 @@ export const useOptimizedColorWheelState = (options = {}) => {
     })
   });
 
-  // ✅ SAFER: Safe destructuring with comprehensive fallbacks
-  let colorProcessing;
-  try {
-    colorProcessing = useOptimizedColorProcessing();
-  } catch (error) {
-    console.error('🚨 useOptimizedColorProcessing hook failed:', error);
-    colorProcessing = null;
-  }
+  // ✅ RULES OF HOOKS COMPLIANCE: Call hook unconditionally at top level
+  const colorProcessing = useOptimizedColorProcessing();
 
-  // Use fallbacks if hook failed or returned invalid data
+  // ✅ SAFE: Validate hook result and use fallbacks if needed
   const safeFallbacks = createSafeFallbacks();
   const safeColorProcessing = colorProcessing && typeof colorProcessing === 'object' 
     ? colorProcessing 
@@ -182,20 +189,23 @@ export const useOptimizedColorWheelState = (options = {}) => {
     });
   }, [selectedColor]);
 
-  // ✅ SAFER: Enhanced color wheel callbacks with race condition prevention
+  // ✅ RACE CONDITION FIX: Enhanced color wheel callbacks with consistent data flow
   const handleColorsChange = useCallback((colors, phase = 'change') => {
     // Ensure colors is an array and filter to valid hex strings
     const list = Array.isArray(colors) ? colors : [];
     const hexColors = filterValidHexColors(list);
 
-    // Update refs immediately (synchronous)
+    // ✅ RACE CONDITION FIX: Use current call's data consistently throughout
+    const currentActiveIdx = latestActiveIdxRef.current;
+
+    // Update refs immediately (synchronous) - but use current call's data
     latestPaletteRef.current = hexColors;
 
     // Update state (async)
     setPalette(hexColors);
     
-    // Use ref value for gesture callback to ensure consistency
-    onGestureChange(hexColors, latestActiveIdxRef.current);
+    // ✅ CONSISTENT: Use current call's data, not potentially stale ref
+    onGestureChange(hexColors, currentActiveIdx);
 
     // ✅ IMPROVED: Smart phase detection for components that don't pass phase
     // If no explicit phase and colors haven't changed much, assume it's during gesture
@@ -209,9 +219,9 @@ export const useOptimizedColorWheelState = (options = {}) => {
       return;
     }
 
-    // At gesture end, use ref to get latest committed values
-    const currentPalette = latestPaletteRef.current;
-    const currentActiveIdx = latestActiveIdxRef.current;
+    // ✅ RACE CONDITION FIX: Use current call's data for analysis consistency
+    const currentPalette = hexColors; // Use current call's data, not ref
+    // currentActiveIdx already captured above
 
     // Enhanced optimization with caching and analysis - only at gesture end
     try {

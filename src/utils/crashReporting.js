@@ -1,9 +1,42 @@
 // utils/crashReporting.js - Production crash reporting with Sentry integration
 import Constants from 'expo-constants';
-import { logger } from './AppLogger';
+
+// Lazy logger proxy to avoid circular import crashes
+let _loggerInstance = null;
+const getLogger = () => {
+  if (_loggerInstance) return _loggerInstance;
+  try {
+    const mod = require('./AppLogger');
+    _loggerInstance = mod?.logger || mod?.default || console;
+  } catch (error) {
+    console.warn('crashReporting: AppLogger load failed, using console', error?.message || error);
+    _loggerInstance = console;
+  }
+  return _loggerInstance;
+};
+
+const logger = {
+  debug: (...args) => getLogger()?.debug?.(...args),
+  info: (...args) => getLogger()?.info?.(...args),
+  warn: (...args) => getLogger()?.warn?.(...args),
+  error: (...args) => getLogger()?.error?.(...args),
+};
 
 // Production-ready environment configuration
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('crashReporting: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('crashReporting: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_PROD = extra.EXPO_PUBLIC_NODE_ENV === 'production';
 const SENTRY_DSN = extra.EXPO_PUBLIC_SENTRY_DSN;
 
@@ -94,6 +127,13 @@ export const initializeCrashReporting = async () => {
       buildNumber: Constants.expoConfig?.ios?.buildNumber || Constants.expoConfig?.android?.versionCode || 'unknown',
       platform: Constants.platform?.ios ? 'ios' : Constants.platform?.android ? 'android' : 'web',
     });
+
+    // Expose globally for modules that expect global.Sentry
+    try {
+      global.Sentry = Sentry;
+    } catch (globalError) {
+      logger.warn('crashReporting: unable to set global.Sentry:', globalError);
+    }
 
     isInitialized = true;
     logger.info('✅ Crash reporting initialized');
@@ -269,3 +309,4 @@ export default {
   testCrashReporting,
   getSentryInstance,
 };
+

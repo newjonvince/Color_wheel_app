@@ -1,12 +1,68 @@
 // utils/AppInitializer.js - Centralized initialization manager
 // Replaces mixed initialization strategies with predictable, sequential initialization
 
-import { logger } from './AppLogger';
-import { reportError, ERROR_EVENTS } from './errorTelemetry';
-import { validateEnv } from '../config/env';
-import { initializeAppConfig } from '../config/app';
-import { safeStorage } from './safeStorage';
-import safeApiService from '../services/safeApiService';
+// Lazy loaders to break circular deps and avoid early crashes
+let loggerInstance = null;
+const getLogger = () => {
+  if (loggerInstance) return loggerInstance;
+  try {
+    const mod = require('./AppLogger');
+    loggerInstance = mod?.logger || mod?.default || console;
+  } catch (error) {
+    console.warn('AppInitializer: logger load failed, using console', error?.message || error);
+    loggerInstance = console;
+  }
+
+  return loggerInstance;
+};
+
+let telemetry = null;
+const getTelemetry = () => {
+  if (telemetry) return telemetry;
+  try {
+    telemetry = require('./errorTelemetry');
+  } catch (error) {
+    getLogger().warn?.('AppInitializer: errorTelemetry load failed', error?.message || error);
+    telemetry = { reportError: () => {}, ERROR_EVENTS: {} };
+  }
+  return telemetry;
+};
+
+const getValidateEnv = () => {
+  try {
+    return require('../config/env').validateEnv;
+  } catch (error) {
+    getLogger().warn?.('AppInitializer: validateEnv load failed', error?.message || error);
+    return () => ({ isValid: true, warnings: [], errors: [] });
+  }
+};
+
+const getInitializeAppConfig = () => {
+  try {
+    return require('../config/app').initializeAppConfig;
+  } catch (error) {
+    getLogger().warn?.('AppInitializer: initializeAppConfig load failed', error?.message || error);
+    return async () => ({ ok: true, error: null });
+  }
+};
+
+const getSafeStorage = () => {
+  try {
+    return require('./safeStorage').safeStorage;
+  } catch (error) {
+    getLogger().warn?.('AppInitializer: safeStorage load failed', error?.message || error);
+    return { init: async () => {} };
+  }
+};
+
+const getSafeApiService = () => {
+  try {
+    return require('../services/safeApiService').default;
+  } catch (error) {
+    getLogger().warn?.('AppInitializer: safeApiService load failed', error?.message || error);
+    return { ready: Promise.resolve() };
+  }
+};
 
 // Initialization step interface
 class InitializationStep {
@@ -32,36 +88,36 @@ class AppInitializer {
     
     // Define initialization steps with dependencies
     this.steps = [
-      new InitializationStep('env', validateEnv, {
+      new InitializationStep('env', () => getValidateEnv()(), {
         critical: true,
         timeout: 1000,
         retries: 0
       }),
       
-      new InitializationStep('config', initializeAppConfig, {
+      new InitializationStep('config', () => getInitializeAppConfig()(), {
         critical: true,
-        timeout: 5000,
+        timeout: 3000,
         retries: 1,
         dependencies: ['env']
       }),
       
-      new InitializationStep('storage', () => safeStorage.init(), {
+      new InitializationStep('storage', ({ signal }) => getSafeStorage().init({ signal }), {
         critical: true,
-        timeout: 10000,
+        timeout: 4000,
         retries: 2,
         dependencies: ['config']
       }),
       
-      new InitializationStep('api', () => safeApiService.ready, {
-        critical: false,
-        timeout: 15000,
+      new InitializationStep('api', ({ signal }) => getSafeApiService().initialize({ signal }), {
+        critical: true,
+        timeout: 3000,
         retries: 3,
         dependencies: ['storage']
       }),
       
       new InitializationStep('auth', null, { // Will be set dynamically
         critical: false,
-        timeout: 10000,
+        timeout: 2000,
         retries: 1,
         dependencies: ['storage', 'api']
       })
@@ -78,32 +134,40 @@ class AppInitializer {
 
   // Check if dependencies are satisfied
   areDependenciesSatisfied(step) {
-    return step.dependencies.every(dep => this.completedSteps.has(dep));
+    return step.dependencies.every(dep => {
+      if (this.completedSteps.has(dep)) return true;
+      if (this.failedSteps.has(dep)) {
+        const depStep = this.steps.find(s => s.name === dep);
+        if (depStep && !depStep.critical) {
+          return true;
+        }
+      }
+      return false;
+    });
   }
 
-  // 🚨 CRITICAL FIX: Wait for dependencies with timeout mechanism
+  // Wait for dependencies with timeout mechanism
   async waitForDependencies(step, signal) {
-    if (step.dependencies.length === 0) {
-      return; // No dependencies to wait for
+    if (!step.dependencies || step.dependencies.length === 0) {
+      return;
     }
 
-    const DEPENDENCY_TIMEOUT = 30000; // 30 seconds max wait for dependencies
-    const CHECK_INTERVAL = 100; // Check every 100ms
+    const DEPENDENCY_TIMEOUT = 10000;
+    const CHECK_INTERVAL = 100;
     const startTime = Date.now();
     
-    logger.debug(`⏳ Waiting for dependencies for step '${step.name}': [${step.dependencies.join(', ')}]`);
+    getLogger().debug(`Waiting for dependencies for step '${step.name}': [${step.dependencies.join(', ')}]`);
 
     while (!this.areDependenciesSatisfied(step)) {
       const elapsed = Date.now() - startTime;
       
-      // 🚨 TIMEOUT CHECK: Prevent infinite hangs
       if (elapsed > DEPENDENCY_TIMEOUT) {
         const pendingDeps = step.dependencies.filter(dep => !this.completedSteps.has(dep));
         const errorMsg = `Dependency timeout after ${DEPENDENCY_TIMEOUT}ms waiting for: ${pendingDeps.join(', ')}`;
-        logger.error(`🚨 ${errorMsg}`);
+        getLogger().error(errorMsg);
         
-        // Report timeout for monitoring
-        reportError(ERROR_EVENTS.COMPONENT_MOUNT_FAILED, new Error(errorMsg), {
+        const { reportError, ERROR_EVENTS } = getTelemetry();
+        reportError?.(ERROR_EVENTS.COMPONENT_MOUNT_FAILED, new Error(errorMsg), {
           step: step.name,
           pendingDependencies: pendingDeps,
           elapsedTime: elapsed,
@@ -113,12 +177,10 @@ class AppInitializer {
         throw new Error(errorMsg);
       }
       
-      // Check if aborted
       if (signal?.aborted) {
         throw new Error('Initialization aborted while waiting for dependencies');
       }
       
-      // Check if any critical dependency failed
       const failedCriticalDeps = step.dependencies.filter(dep => {
         const depStep = this.steps.find(s => s.name === dep);
         return depStep?.critical && this.failedSteps.has(dep);
@@ -126,33 +188,64 @@ class AppInitializer {
       
       if (failedCriticalDeps.length > 0) {
         const errorMsg = `Critical dependencies failed: ${failedCriticalDeps.join(', ')}`;
-        logger.error(`🚨 ${errorMsg}`);
+        getLogger().error(errorMsg);
         throw new Error(errorMsg);
       }
       
-      // Check for circular dependencies (prevent infinite loops)
       const circularDep = this.detectCircularDependency(step.name, step.dependencies);
       if (circularDep) {
         const errorMsg = `Circular dependency detected: ${circularDep}`;
-        logger.error(`🚨 ${errorMsg}`);
+        getLogger().error(errorMsg);
         throw new Error(errorMsg);
       }
       
-      // Log progress every 5 seconds to help with debugging
       if (elapsed > 0 && elapsed % 5000 < CHECK_INTERVAL) {
         const pendingDeps = step.dependencies.filter(dep => !this.completedSteps.has(dep));
-        logger.warn(`⏳ Still waiting for dependencies (${elapsed}ms): ${pendingDeps.join(', ')}`);
+        getLogger().warn(`Still waiting for dependencies (${elapsed}ms): ${pendingDeps.join(', ')}`);
       }
       
-      // Wait before checking again
-      await new Promise(resolve => setTimeout(resolve, CHECK_INTERVAL));
+      await new Promise((resolve, reject) => {
+        if (signal?.aborted) {
+          reject(new Error('Initialization aborted while waiting for dependencies'));
+          return;
+        }
+        
+        let settled = false;
+        
+        const abortHandler = () => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(timeoutId);
+            reject(new Error('Initialization aborted while waiting for dependencies'));
+          }
+        };
+        
+        const timeoutId = setTimeout(() => {
+          if (!settled) {
+            settled = true;
+            // ✅ CRITICAL: Remove listener!
+            if (signal?.removeEventListener) {
+              signal.removeEventListener('abort', abortHandler);
+            }
+            if (signal?.aborted) {
+              reject(new Error('Initialization aborted while waiting for dependencies'));
+            } else {
+              resolve();
+            }
+          }
+        }, CHECK_INTERVAL);
+        
+        if (signal?.addEventListener) {
+          signal.addEventListener('abort', abortHandler, { once: true });
+        }
+      });
     }
     
     const waitTime = Date.now() - startTime;
-    logger.debug(`✅ Dependencies satisfied for '${step.name}' after ${waitTime}ms`);
+    getLogger().debug(`Dependencies satisfied for '${step.name}' after ${waitTime}ms`);
   }
 
-  // 🔧 Helper: Detect circular dependencies to prevent infinite loops
+  // Detect circular dependencies to prevent infinite loops
   detectCircularDependency(stepName, dependencies, visited = new Set()) {
     if (visited.has(stepName)) {
       return `${Array.from(visited).join(' -> ')} -> ${stepName}`;
@@ -173,89 +266,186 @@ class AppInitializer {
     return null;
   }
 
-  // Execute a single step with timeout and retries
-  async executeStep(step, signal) {
-    if (!step.fn) {
-      logger.warn(`Step ${step.name} has no function, skipping`);
-      return;
-    }
-
+  // Execute a single step with timeout and retry logic
+  async executeStep(step, signal, onProgress) {
+    const startTime = Date.now();
     let lastError = null;
-    const maxAttempts = step.retries + 1;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    
+    for (let attempt = 1; attempt <= step.retries + 1; attempt++) {
+      if (signal?.aborted) {
+        throw new Error(`Initialization aborted during step '${step.name}'`);
+      }
+      
       try {
-        logger.info(`🔄 Executing step: ${step.name} (attempt ${attempt}/${maxAttempts})`);
+        console.log(`🔧 Executing initialization step '${step.name}' (attempt ${attempt}/${step.retries + 1})`);
+        getLogger().debug(`Executing step '${step.name}' (attempt ${attempt}/${step.retries + 1})`);
         
-        // Create timeout promise
-        const timeoutPromise = new Promise((_, reject) => {
-          const timeoutId = setTimeout(() => {
-            reject(new Error(`Step ${step.name} timed out after ${step.timeout}ms`));
+        // Pass signal to step function
+        const stepPromise = typeof step.fn === 'function' 
+          ? step.fn({ signal }) 
+          : Promise.resolve(step.fn);
+        
+        // ✅ CRITICAL FIX: Manual timeout/cancellation management to prevent uncaught promise rejections
+        const result = await new Promise((resolve, reject) => {
+          let settled = false;
+          let timeoutId = null;
+          let abortHandler = null;
+          
+          const cleanup = () => {
+            if (timeoutId) {
+              clearTimeout(timeoutId);
+              timeoutId = null;
+            }
+            if (abortHandler && signal?.removeEventListener) {
+              signal.removeEventListener('abort', abortHandler);
+              abortHandler = null;
+            }
+          };
+          
+          // Set up abort handler
+          if (signal?.addEventListener) {
+            abortHandler = () => {
+              if (!settled) {
+                settled = true;
+                cleanup();
+                reject(new Error(`Step '${step.name}' aborted`));
+              }
+            };
+            signal.addEventListener('abort', abortHandler, { once: true });
+          }
+          
+          // Set up timeout
+          timeoutId = setTimeout(() => {
+            if (!settled) {
+              settled = true;
+              cleanup();
+              reject(new Error(`Step '${step.name}' timed out after ${step.timeout}ms`));
+            }
           }, step.timeout);
           
-          // Clear timeout if signal is aborted
-          if (signal) {
-            signal.addEventListener('abort', () => {
-              clearTimeout(timeoutId);
-              reject(new Error(`Step ${step.name} was aborted`));
-            });
-          }
+          // Handle step promise
+          stepPromise.then(
+            (stepResult) => {
+              if (!settled) {
+                settled = true;
+                cleanup();
+                resolve(stepResult);
+              }
+            },
+            (error) => {
+              if (!settled) {
+                settled = true;
+                cleanup();
+                reject(error);
+              }
+            }
+          ).catch((error) => {
+            // ✅ SAFETY: Catch any remaining promise rejections
+            if (!settled) {
+              settled = true;
+              cleanup();
+              reject(error);
+            }
+          });
         });
-
-        // Race between step execution and timeout
-        await Promise.race([
-          Promise.resolve(step.fn({ signal })),
-          timeoutPromise
-        ]);
-
-        logger.info(`✅ Step completed: ${step.name}`);
+        
+        const duration = Date.now() - startTime;
+        getLogger().debug(`Step '${step.name}' completed in ${duration}ms`);
+        
+        // ✅ CRITICAL FIX: Mark step as completed
         this.completedSteps.add(step.name);
-        return;
-
+        
+        onProgress?.({
+          step: step.name,
+          progress: 1.0,
+          message: `${step.name} completed`,
+          duration
+        });
+        
+        return result;
+        
       } catch (error) {
         lastError = error;
-        logger.warn(`❌ Step ${step.name} failed (attempt ${attempt}/${maxAttempts}):`, error.message);
+        const duration = Date.now() - startTime;
         
-        // Don't retry if aborted
-        if (signal?.aborted || error.message.includes('aborted')) {
-          throw error;
+        if (signal?.aborted || error.message?.includes('aborted')) {
+          throw new Error(`Initialization aborted during step '${step.name}'`);
         }
         
-        // Wait before retry (exponential backoff)
-        if (attempt < maxAttempts) {
-          const delay = Math.min(1000 * Math.pow(2, attempt - 1), 5000);
-          await new Promise(resolve => setTimeout(resolve, delay));
+        console.error(`❌ Step '${step.name}' failed (attempt ${attempt}/${step.retries + 1}):`, error.message);
+        console.error(`🔍 Step '${step.name}' error details:`, {
+          message: error.message,
+          stack: error.stack,
+          name: error.name,
+          cause: error.cause
+        });
+        getLogger().warn(`Step '${step.name}' failed (attempt ${attempt}/${step.retries + 1}):`, error.message);
+        
+        if (attempt <= step.retries) {
+          const retryDelay = Math.min(1000 * attempt, 5000);
+          getLogger().debug(`Retrying step '${step.name}' in ${retryDelay}ms...`);
+          
+          // Make retry delay cancellable
+          await new Promise((resolve, reject) => {
+            let settled = false;
+            
+            const abortHandler = () => {
+              if (!settled) {
+                settled = true;
+                clearTimeout(delayId);
+                reject(new Error(`Retry delay aborted for step '${step.name}'`));
+              }
+            };
+            
+            const delayId = setTimeout(() => {
+              if (!settled) {
+                settled = true;
+                // ✅ CRITICAL: Remove listener!
+                if (signal?.removeEventListener) {
+                  signal.removeEventListener('abort', abortHandler);
+                }
+                resolve();
+              }
+            }, retryDelay);
+            
+            if (signal?.addEventListener) {
+              signal.addEventListener('abort', abortHandler, { once: true });
+            }
+          });
         }
       }
     }
-
-    // All attempts failed
+    
+    // ✅ CRITICAL FIX: Mark step as failed
     this.failedSteps.add(step.name);
     
-    if (step.critical) {
-      throw lastError;
-    } else {
-      logger.warn(`⚠️ Non-critical step ${step.name} failed, continuing`);
-      reportError(ERROR_EVENTS.COMPONENT_MOUNT_FAILED, lastError, {
-        step: step.name,
-        critical: step.critical,
-        attempts: maxAttempts
-      });
-    }
+    const error = new Error(`Step '${step.name}' failed after ${step.retries + 1} attempts: ${lastError?.message || 'Unknown error'}`);
+    error.originalError = lastError;
+    throw error;
   }
 
   // Main initialization method
   async initialize(options = {}) {
-    // Return existing promise if already initializing
+    // ✅ RACE CONDITION FIX: Check if already initializing BEFORE creating new promise
+    if (this.isInitializing) {
+      // If already initializing, wait for existing promise or create one if missing
+      if (this.initializationPromise) {
+        return this.initializationPromise;
+      }
+      // Edge case: isInitializing=true but no promise (shouldn't happen, but be safe)
+      throw new Error('Initialization in progress but no promise found - invalid state');
+    }
+
     if (this.initializationPromise) {
       return this.initializationPromise;
     }
 
-    // Return immediately if already initialized
     if (this.isInitialized) {
       return Promise.resolve();
     }
 
+    // ✅ ATOMIC: Set flag immediately before creating promise
+    this.isInitializing = true;
     this.initializationPromise = this._performInitialization(options);
     return this.initializationPromise;
   }
@@ -263,68 +453,93 @@ class AppInitializer {
   async _performInitialization(options = {}) {
     const { signal, onProgress } = options;
     
+    const GLOBAL_TIMEOUT = 15000;
+    let globalTimeoutId = null;
+    
+    // ✅ FIX: Create AbortController for global timeout that actually aborts operations
+    const globalAbortController = new AbortController();
+    const combinedSignal = signal ? this._combineAbortSignals(signal, globalAbortController.signal) : globalAbortController.signal;
+    
+    const globalTimeoutPromise = new Promise((_, reject) => {
+      globalTimeoutId = setTimeout(() => {
+        // ✅ CRITICAL FIX: Actually abort ongoing operations
+        globalAbortController.abort();
+        reject(new Error(`Global initialization timeout after ${GLOBAL_TIMEOUT}ms`));
+      }, GLOBAL_TIMEOUT);
+    });
+    
     try {
-      this.isInitializing = true;
+      // Note: isInitializing already set in initialize() method
       this.startTime = Date.now();
       
-      logger.info('🚀 Starting centralized app initialization...');
+      getLogger().info('Starting centralized app initialization with 15s global timeout...');
       
-      // Reset state
-      this.completedSteps.clear();
-      this.failedSteps.clear();
+      const initializationLogic = async () => {
+        this.completedSteps.clear();
+        this.failedSteps.clear();
 
-      // Execute steps in dependency order
-      const totalSteps = this.steps.length;
-      let completedCount = 0;
+        const totalSteps = this.steps.length;
+        let completedCount = 0;
 
-      for (const step of this.steps) {
-        // Check if aborted
-        if (signal?.aborted) {
-          throw new Error('Initialization aborted');
+        for (const step of this.steps) {
+          if (combinedSignal?.aborted) {
+            throw new Error('Initialization aborted');
+          }
+
+          await this.waitForDependencies(step, combinedSignal);
+          await this.executeStep(step, combinedSignal);
+          
+          completedCount++;
+          
+          if (onProgress) {
+            onProgress({
+              step: step.name,
+              completed: completedCount,
+              total: totalSteps,
+              progress: completedCount / totalSteps
+            });
+          }
         }
 
-        // 🚨 CRITICAL FIX: Wait for dependencies with timeout to prevent infinite hangs
-        await this.waitForDependencies(step, signal);
+        const initTime = Date.now() - this.startTime;
+        getLogger().info(`App initialization completed in ${initTime}ms`);
+        
+        this.isInitialized = true;
+        this.isInitializing = false;
 
-        // Execute the step
-        await this.executeStep(step, signal);
-        
-        completedCount++;
-        
-        // Report progress
-        if (onProgress) {
-          onProgress({
-            step: step.name,
-            completed: completedCount,
-            total: totalSteps,
-            progress: completedCount / totalSteps
+        if (!__DEV__ && global.Analytics) {
+          global.Analytics.track('app_initialization_success', {
+            duration: initTime,
+            completedSteps: Array.from(this.completedSteps),
+            failedSteps: Array.from(this.failedSteps)
           });
         }
-      }
+      };
 
-      const initTime = Date.now() - this.startTime;
-      logger.info(`✅ App initialization completed in ${initTime}ms`);
-      
-      this.isInitialized = true;
-      this.isInitializing = false;
-
-      // Report successful initialization
-      if (!__DEV__ && global.Analytics) {
-        global.Analytics.track('app_initialization_success', {
-          duration: initTime,
-          completedSteps: Array.from(this.completedSteps),
-          failedSteps: Array.from(this.failedSteps)
-        });
-      }
+      await Promise.race([initializationLogic(), globalTimeoutPromise]);
 
     } catch (error) {
+      // ✅ COMPREHENSIVE CLEANUP ON FAILURE
       this.isInitializing = false;
+      this.initializationPromise = null; // ✅ Clear promise to allow retry
+      
+      // ✅ Abort any ongoing operations
+      if (!globalAbortController.signal.aborted) {
+        globalAbortController.abort();
+      }
       
       const initTime = this.startTime ? Date.now() - this.startTime : 0;
-      logger.error('🚨 App initialization failed:', error);
+      getLogger().error('App initialization failed:', error);
       
-      // Report failed initialization
-      reportError(ERROR_EVENTS.COMPONENT_MOUNT_FAILED, error, {
+      // ✅ Log partial state for debugging
+      getLogger().warn('Partial initialization state:', {
+        completedSteps: Array.from(this.completedSteps),
+        failedSteps: Array.from(this.failedSteps),
+        totalSteps: this.steps.length
+      });
+      
+      const { reportError, ERROR_EVENTS } = getTelemetry();
+      reportError?.(ERROR_EVENTS.COMPONENT_MOUNT_FAILED, error, {
         duration: initTime,
         completedSteps: Array.from(this.completedSteps),
         failedSteps: Array.from(this.failedSteps),
@@ -332,6 +547,10 @@ class AppInitializer {
       });
 
       throw error;
+    } finally {
+      if (globalTimeoutId) {
+        clearTimeout(globalTimeoutId);
+      }
     }
   }
 
@@ -344,6 +563,27 @@ class AppInitializer {
       failedSteps: Array.from(this.failedSteps),
       progress: this.completedSteps.size / this.steps.length
     };
+  }
+
+  // ✅ Helper method to combine multiple abort signals
+  _combineAbortSignals(signal1, signal2) {
+    if (!signal1 && !signal2) return null;
+    if (!signal1) return signal2;
+    if (!signal2) return signal1;
+    
+    const controller = new AbortController();
+    
+    const abortHandler = () => controller.abort();
+    
+    if (!signal1.aborted && !signal2.aborted) {
+      signal1.addEventListener('abort', abortHandler, { once: true });
+      signal2.addEventListener('abort', abortHandler, { once: true });
+    } else {
+      // If either is already aborted, abort immediately
+      controller.abort();
+    }
+    
+    return controller.signal;
   }
 
   // Reset initialization state (for testing or restart)
@@ -380,3 +620,4 @@ const appInitializer = new AppInitializer();
 // Export singleton and class for testing
 export default appInitializer;
 export { AppInitializer, InitializationStep };
+

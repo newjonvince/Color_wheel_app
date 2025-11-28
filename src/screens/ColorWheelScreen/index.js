@@ -9,7 +9,20 @@ import { AppErrorBoundary } from '../../components/AppErrorBoundary';
 import { isValidHex6 } from '../../utils/colorValidation';
 
 // Production-ready configuration
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('ColorWheelScreen: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('ColorWheelScreen: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 // Core components (required)
@@ -168,12 +181,24 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
       // ✅ CRASH FIX: Use existing hook handlers instead of undefined setters
       handleHexChange(color);
       
-      if (index >= 0) {
+      // ✅ VALIDATION FIX: Proper index validation - must be actual number >= 0
+      if (typeof index === 'number' && !isNaN(index) && Number.isInteger(index) && index >= 0) {
         // Valid palette index - update active handle
         handleActiveHandleChange(index);
+        
+        if (IS_DEBUG_MODE) {
+          console.log(`🎨 Color selected from swatch: ${color} (valid index: ${index})`);
+        }
+      } else if (index !== -1) { // -1 is used for selected color swatch, so it's expected
+        console.warn('⚠️ Invalid swatch index provided:', {
+          index,
+          type: typeof index,
+          isNaN: isNaN(index),
+          isInteger: Number.isInteger(index)
+        });
       }
       
-      if (IS_DEBUG_MODE) {
+      if (IS_DEBUG_MODE && (index === -1 || (typeof index === 'number' && !isNaN(index) && Number.isInteger(index) && index >= 0))) {
         console.log(`🎨 Color selected from swatch: ${color} (index: ${index})`);
       }
     } catch (error) {

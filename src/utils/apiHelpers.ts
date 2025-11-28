@@ -1,7 +1,50 @@
 // utils/apiHelpers.ts - Typed API utility functions with request deduplication
 import Constants from 'expo-constants';
-import ApiService from '../services/safeApiService';
-import { logger } from './AppLogger';
+
+// ✅ LAZY LOADING: Avoid circular dependency with safeApiService
+let apiService: any = null;
+const getApiService = () => {
+  if (apiService) return apiService;
+  try {
+    const serviceModule = require('../services/safeApiService');
+    apiService = serviceModule.default || serviceModule;
+  } catch (error: any) {
+    console.warn('apiHelpers.ts: Failed to load safeApiService:', error.message);
+    // Create fallback service
+    apiService = {
+      get: () => Promise.reject(new Error('API service not available')),
+      post: () => Promise.reject(new Error('API service not available')),
+      delete: () => Promise.reject(new Error('API service not available')),
+      getUserProfile: () => Promise.reject(new Error('API service not available')),
+      getColorMatches: () => Promise.reject(new Error('API service not available')),
+      createColorMatch: () => Promise.reject(new Error('API service not available')),
+      updateSettings: () => Promise.reject(new Error('API service not available')),
+      checkUsername: () => Promise.reject(new Error('API service not available'))
+    };
+  }
+  return apiService;
+};
+
+// Lazy logger proxy to avoid circular import crashes
+let _loggerInstance: any = null;
+const getLogger = () => {
+  if (_loggerInstance) return _loggerInstance;
+  try {
+    const mod = require('./AppLogger');
+    _loggerInstance = mod?.logger || mod?.default || console;
+  } catch (error: any) {
+    console.warn('apiHelpers.ts: AppLogger load failed, using console', error?.message || error);
+    _loggerInstance = console;
+  }
+  return _loggerInstance;
+};
+
+const logger = {
+  debug: (...args: any[]) => getLogger()?.debug?.(...args),
+  info: (...args: any[]) => getLogger()?.info?.(...args),
+  warn: (...args: any[]) => getLogger()?.warn?.(...args),
+  error: (...args: any[]) => getLogger()?.error?.(...args),
+};
 import type {
   ApiCallOptions,
   SafeApiCallResult,
@@ -334,7 +377,7 @@ export const apiPatterns = {
     
     return deduplicatedApiCall(
       key,
-      () => ApiService.get(endpoint, options),
+      () => getApiService().get(endpoint, options),
       { errorMessage: 'Failed to load community posts', ...options }
     ) as Promise<SafeApiCallResult<PaginatedResponse<CommunityPost>>>;
   },
@@ -345,7 +388,7 @@ export const apiPatterns = {
     
     return deduplicatedApiCall(
       key,
-      () => ApiService.getUserProfile(options),
+      () => getApiService().getUserProfile(options),
       { errorMessage: 'Failed to load user profile', ...options }
     ) as Promise<SafeApiCallResult<UserProfile>>;
   },
@@ -357,7 +400,7 @@ export const apiPatterns = {
     
     return deduplicatedApiCall(
       key,
-      () => ApiService.get(endpoint, options),
+      () => getApiService().get(endpoint, options),
       { errorMessage: 'Failed to load user posts', ...options }
     ) as Promise<SafeApiCallResult<PaginatedResponse<CommunityPost>>>;
   },
@@ -368,7 +411,7 @@ export const apiPatterns = {
     
     return deduplicatedApiCall(
       key,
-      () => ApiService.get(`/users/${userId}/followers`, options),
+      () => getApiService().get(`/users/${userId}/followers`, options),
       { errorMessage: 'Failed to load followers', ...options }
     ) as Promise<SafeApiCallResult<PaginatedResponse<UserProfile>>>;
   },
@@ -379,7 +422,7 @@ export const apiPatterns = {
     
     return deduplicatedApiCall(
       key,
-      () => ApiService.getColorMatches(options),
+      () => getApiService().getColorMatches(options),
       { errorMessage: 'Failed to load color matches', ...options }
     ) as Promise<SafeApiCallResult<ColorMatch[]>>;
   },
@@ -387,14 +430,14 @@ export const apiPatterns = {
   // 🔧 Non-deduplicated operations (mutations should not be deduplicated)
   createColorMatch: async (colorMatchData: Partial<ColorMatch>, options: ApiCallOptions = {}) => {
     return safeApiCall(
-      () => ApiService.createColorMatch(colorMatchData),
+      () => getApiService().createColorMatch(colorMatchData),
       { errorMessage: 'Failed to create color match', ...options }
     );
   },
 
   updateUserSettings: async (settings: Partial<UserProfile>, options: ApiCallOptions = {}) => {
     return safeApiCall(
-      () => ApiService.updateSettings(settings),
+      () => getApiService().updateSettings(settings),
       { errorMessage: 'Failed to update settings', ...options }
     );
   },
@@ -403,8 +446,8 @@ export const apiPatterns = {
   togglePostLike: async (postId: string, isLiked: boolean, options: ApiCallOptions = {}) => {
     return safeApiCall(
       () => isLiked 
-        ? ApiService.delete(`/community/posts/${postId}/like`, options)
-        : ApiService.post(`/community/posts/${postId}/like`, {}, options),
+        ? getApiService().delete(`/community/posts/${postId}/like`, options)
+        : getApiService().post(`/community/posts/${postId}/like`, {}, options),
       { errorMessage: 'Failed to update like status', ...options }
     );
   },
@@ -412,8 +455,8 @@ export const apiPatterns = {
   toggleUserFollow: async (userId: string, isFollowing: boolean, options: ApiCallOptions = {}) => {
     return safeApiCall(
       () => isFollowing
-        ? ApiService.delete(`/community/users/${userId}/follow`, options)
-        : ApiService.post(`/community/users/${userId}/follow`, {}, options),
+        ? getApiService().delete(`/community/users/${userId}/follow`, options)
+        : getApiService().post(`/community/users/${userId}/follow`, {}, options),
       { errorMessage: 'Failed to update follow status', ...options }
     );
   },
@@ -424,7 +467,7 @@ export const apiPatterns = {
     
     const result = await deduplicatedApiCall(
       key,
-      () => ApiService.checkUsername(username, options),
+      () => getApiService().checkUsername(username, options),
       { errorMessage: 'Failed to check username availability', ...options }
     );
 

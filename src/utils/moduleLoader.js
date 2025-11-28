@@ -4,7 +4,20 @@ import { View, Text, TouchableOpacity, Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 // Production-ready configuration
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('moduleLoader: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('moduleLoader: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 // Safe module loader with fallbacks

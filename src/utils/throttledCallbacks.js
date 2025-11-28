@@ -215,15 +215,23 @@ export const throttle = (func, delay) => {
 };
 
 /**
- * Debounce function for final state updates
+ * Debounce function for final state updates with proper cleanup
  */
 export const debounce = (func, delay) => {
   let timeoutId;
   
-  return function (...args) {
+  const debouncedFunction = function (...args) {
     clearTimeout(timeoutId);
     timeoutId = setTimeout(() => func.apply(this, args), delay);
   };
+  
+  // ✅ MEMORY LEAK FIX: Add cancel method for proper cleanup
+  debouncedFunction.cancel = () => {
+    clearTimeout(timeoutId);
+    timeoutId = null;
+  };
+  
+  return debouncedFunction;
 };
 
 /**

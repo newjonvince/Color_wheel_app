@@ -1,20 +1,54 @@
 // config/app.js - Ultra-optimized app configuration with caching and validation
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
-import { logger } from '../utils/AppLogger';
 
-// 🔧 FIXED: Import navigation function at module level to prevent circular dependency
+// Lazy logger to avoid circular import crashes at module load
+let logger = null;
+const getLogger = () => {
+  if (logger) return logger;
+  try {
+    const mod = require('../utils/AppLogger');
+    logger = mod?.logger || mod?.default || console;
+  } catch (error) {
+    console.warn('config/app: failed to load AppLogger, using console', error?.message || error);
+    logger = console;
+  }
+  return logger;
+};
+
+// Import navigation function at module level to prevent circular dependency
 let getStateFromPathDefault = null;
 try {
   const navigationModule = require('@react-navigation/native');
   getStateFromPathDefault = navigationModule.getStateFromPath;
-} catch (error) {
-  logger.warn('🔧 Navigation module not available during config load:', error.message);
+  } catch (error) {
+    try {
+      if (getLogger()?.warn) {
+        getLogger().warn('Navigation module not available during config load:', error.message);
+      } else {
+        console.warn('Navigation module not available during config load:', error.message);
+      }
+    } catch (logError) {
+      console.warn('Navigation module not available during config load (fallback):', error?.message || error);
+    }
   // Will be handled gracefully in the getStateFromPath function
 }
 
 // Production-ready environment configuration
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('⚠️ config/app: expoConfig missing or malformed, using empty extra config');
+  } catch (error) {
+    console.warn('⚠️ config/app: Unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 const IS_DEV = IS_DEBUG_MODE;
 const IS_PROD = !IS_DEBUG_MODE;
@@ -41,13 +75,33 @@ const PERFORMANCE_CONFIG = {
   }
 };
 
+// Cache helpers
+const trimCacheToSize = (cache, maxSize) => {
+  if (!cache || typeof cache.size !== 'number') return 0;
+  if (cache.size <= maxSize) return 0;
+
+  let removed = 0;
+  const excess = cache.size - maxSize;
+  for (const key of cache.keys()) {
+    cache.delete(key);
+    removed += 1;
+    if (removed >= excess) break;
+  }
+  return removed;
+};
+
+// Safe navigation fallback builder to avoid crashes on invalid deep links
+const buildFallbackNavigationState = () => ({
+  routes: [{ name: 'ColorWheel' }],
+});
+
 // Memoized app configuration (created once, reused)
 const createAppConfig = (() => {
   let cachedConfig = null;
   
   return () => {
     if (cachedConfig) {
-      // 🔧 Return deep clone to prevent mutations
+      // Return deep clone to prevent mutations
       return JSON.parse(JSON.stringify(cachedConfig));
     }
     
@@ -63,28 +117,44 @@ const createAppConfig = (() => {
             Settings: 'settings' 
           } 
         },
-        // 🔧 FIXED: Safe deep linking with circular dependency prevention
+        // Safe deep linking with circular dependency prevention
         getStateFromPath: (path, options) => {
+          // Guard against invalid or empty paths
+          if (typeof path !== 'string' || path.trim().length === 0) {
+            getLogger().warn('Invalid deep link path, using safe fallback state');
+            return buildFallbackNavigationState();
+          }
+
           try {
             // Use the safely imported function (no circular dependency)
             if (getStateFromPathDefault && typeof getStateFromPathDefault === 'function') {
-              return getStateFromPathDefault(path, options);
-            } else {
-              // Fallback: Try lazy loading if not available at module load
-              logger.warn('🔧 Attempting lazy load of navigation function');
-              const navigationModule = require('@react-navigation/native');
-              if (navigationModule?.getStateFromPath) {
-                getStateFromPathDefault = navigationModule.getStateFromPath;
-                return getStateFromPathDefault(path, options);
+              const parsedState = getStateFromPathDefault(path, options);
+              if (!parsedState || !Array.isArray(parsedState.routes) || parsedState.routes.length === 0) {
+                getLogger().warn('Navigation state invalid/empty, falling back to initial route');
+                return buildFallbackNavigationState();
               }
+              return parsedState;
+            }
+
+            // Fallback: Try lazy loading if not available at module load
+            getLogger().warn('Attempting lazy load of navigation function');
+            const navigationModule = require('@react-navigation/native');
+            if (navigationModule?.getStateFromPath) {
+              getStateFromPathDefault = navigationModule.getStateFromPath;
+              const parsedState = getStateFromPathDefault(path, options);
+              if (!parsedState || !Array.isArray(parsedState.routes) || parsedState.routes.length === 0) {
+                getLogger().warn('Navigation state invalid/empty after lazy load, falling back to initial route');
+                return buildFallbackNavigationState();
+              }
+              return parsedState;
             }
             
-            // Final fallback: return undefined to go to initial route
-            logger.warn('🔧 Navigation function not available, using fallback');
-            return undefined;
+            // Final fallback: use safe initial state when navigation module is missing
+            getLogger().warn('Navigation function not available, using fallback');
+            return buildFallbackNavigationState();
           } catch (error) {
-            logger.error('🚨 Deep linking error:', error);
-            return undefined; // Return to initial route
+            getLogger().error('Deep linking error:', error);
+            return buildFallbackNavigationState(); // Return to initial route safely
           }
         },
       },
@@ -110,23 +180,23 @@ const createAppConfig = (() => {
       // Enhanced tab icons with custom images and emoji fallbacks
       tabIcons: {
         Community: { 
-          focused: '🌍', 
-          unfocused: '🌎',
+          focused: '??', 
+          unfocused: '??',
           description: 'Community tab - connects users together'
         },
         ColorWheel: { 
-          focused: '🌈', 
-          unfocused: '⭕',
+          focused: '??', 
+          unfocused: '?',
           description: 'Color Wheel tab - main color selection tool'
         },
         Profile: { 
-          focused: '👤', 
-          unfocused: '👥',
+          focused: '??', 
+          unfocused: '??',
           description: 'Profile tab - user profile and boards'
         },
         Settings: { 
-          focused: '⚙️', 
-          unfocused: '🔧',
+          focused: '??', 
+          unfocused: '??',
           description: 'Settings tab - app configuration'
         },
       },
@@ -146,8 +216,8 @@ const createAppConfig = (() => {
       validateAppConfig(cachedConfig);
     }
     
-    // 🔧 Freeze object to prevent mutations in development
-    if (__DEV__) {
+    // Freeze object to prevent mutations in development
+    if (typeof __DEV__ !== 'undefined' && __DEV__) {
       Object.freeze(cachedConfig);
       Object.freeze(cachedConfig.linking);
       Object.freeze(cachedConfig.linking.config);
@@ -166,16 +236,16 @@ const validateAppConfig = (config) => {
   
   const missingScreens = requiredScreens.filter(screen => !configuredScreens.includes(screen));
   if (missingScreens.length > 0) {
-    console.warn('⚠️ Missing screen configurations:', missingScreens);
+    getLogger().warn('Missing screen configurations:', missingScreens);
   }
   
   const iconScreens = Object.keys(config.tabIcons);
   const missingIcons = requiredScreens.filter(screen => !iconScreens.includes(screen));
   if (missingIcons.length > 0) {
-    console.warn('⚠️ Missing tab icons:', missingIcons);
+    getLogger().warn('Missing tab icons:', missingIcons);
   }
   
-  logger.debug('✅ App configuration validated successfully');
+  getLogger().debug('App configuration validated successfully');
 };
 
 // Memoized configuration getter
@@ -186,26 +256,25 @@ let isInitialized = false;
 let initializationPromise = null;
 
 export const initializeAppConfig = () => {
+  // Return immediately if already initialized
+  if (isInitialized) {
+    return Promise.resolve({ ok: true, alreadyInitialized: true });
+  }
+
   // Return existing promise if already initializing
   if (initializationPromise) {
     return initializationPromise;
   }
-  
-  // Return immediately if already initialized
-  if (isInitialized) {
-    return Promise.resolve();
-  }
-  
-  initializationPromise = new Promise((resolve, reject) => { // 🔧 Added reject
-    const startTime = Date.now();
-    
+
+  const startTime = Date.now();
+
+  const initTask = (async () => {
     try {
       // Production JS fatal handler with enhanced error reporting
       if (IS_PROD && global?.ErrorUtils?.setGlobalHandler) {
         const originalHandler = global.ErrorUtils.getGlobalHandler?.();
         
         global.ErrorUtils.setGlobalHandler((error, isFatal) => {
-          // Enhanced error logging for production
           const errorInfo = {
             message: error?.message || 'Unknown error',
             stack: error?.stack,
@@ -215,57 +284,60 @@ export const initializeAppConfig = () => {
             version: Platform.Version,
           };
           
-          console.error('🚨 JS Fatal Error:', JSON.stringify(errorInfo, null, 2));
-          
-          // Call original handler
+          console.error('JS Fatal Error:', JSON.stringify(errorInfo, null, 2));
           originalHandler?.(error, isFatal);
         });
       }
 
-      if (IS_PROD) {
-        // ✅ PRODUCTION: No debug logging at all
-        if (__DEV__) {
-          logger.debug('Production logging configured');
-        }
-      }
-      
-      // Development-specific optimizations
-      if (IS_DEV) {
-        // Enable performance monitoring
-        if (APP_CONFIG.performance.ENABLED) {
-          logger.debug('🚀 Performance monitoring enabled');
+        if (IS_PROD) {
+          if (typeof __DEV__ !== 'undefined' && __DEV__) {
+            getLogger().debug('Production logging configured');
+          }
         }
         
-        // Log configuration summary
-        logger.debug('📱 App configuration initialized:', {
-          screens: Object.keys(APP_CONFIG.linking.config.screens).length,
-          icons: Object.keys(APP_CONFIG.tabIcons).length,
-          performance: APP_CONFIG.performance.ENABLED,
-        });
-      }
+        if (IS_DEV) {
+          if (APP_CONFIG.performance.ENABLED) {
+            getLogger().debug('Performance monitoring enabled');
+          }
+          
+          getLogger().debug('App configuration initialized:', {
+            screens: Object.keys(APP_CONFIG.linking.config.screens).length,
+            icons: Object.keys(APP_CONFIG.tabIcons).length,
+            performance: APP_CONFIG.performance.ENABLED,
+          });
+        }
       
       isInitialized = true;
       
       const initTime = Date.now() - startTime;
       if (IS_DEV && initTime > 10) {
-        logger.debug(`⏱️ App config initialization took ${initTime}ms`);
+        getLogger().debug(`App config initialization took ${initTime}ms`);
       }
       
-      resolve();
+      return { ok: true };
       
     } catch (error) {
-      console.error('❌ App configuration initialization failed:', error);
+      isInitialized = false;
+      console.error('App configuration initialization failed:', error);
       
-      // 🔧 Reject on critical errors
       if (IS_PROD) {
-        // In production, fail gracefully
-        logger.error('Critical config error, using defaults');
-        resolve(); // Allow app to continue with defaults
-      } else {
-        // In development, fail loud
-        reject(error);
+        getLogger().error('Critical config error, using defaults');
+        return { ok: false, error };
       }
+      
+      throw error;
+    } finally {
+      initializationPromise = null;
     }
+  })();
+  
+  initializationPromise = initTask.catch((error) => {
+    // Attach a catch handler to avoid unhandled rejections
+    if (IS_PROD) {
+      return { ok: false, error };
+    }
+
+    return Promise.reject(error);
   });
   
   return initializationPromise;
@@ -273,7 +345,7 @@ export const initializeAppConfig = () => {
 
 // Memoized status bar style with platform optimization
 const statusBarStyleCache = new Map();
-const MAX_CACHE_SIZE = 10; // Prevent unlimited growth
+const MAX_STATUS_CACHE_SIZE = 10; // Prevent unlimited growth
 
 export const getStatusBarStyle = () => {
   const cacheKey = Platform.OS;
@@ -282,10 +354,12 @@ export const getStatusBarStyle = () => {
     return statusBarStyleCache.get(cacheKey);
   }
   
-  // 🔧 Prevent memory leak: Clear cache if it gets too large
-  if (statusBarStyleCache.size >= MAX_CACHE_SIZE) {
-    logger.warn('🧹 Clearing statusBarStyleCache to prevent memory leak');
-    statusBarStyleCache.clear();
+  // Prevent memory leak: trim oldest entries instead of clearing all
+  if (statusBarStyleCache.size >= MAX_STATUS_CACHE_SIZE) {
+    const removed = trimCacheToSize(statusBarStyleCache, MAX_STATUS_CACHE_SIZE - 1);
+      if (removed > 0 && IS_DEV) {
+        getLogger().debug(`statusBarStyleCache trimmed by ${removed} to stay within limit`);
+      }
   }
   
   const style = Platform.OS === 'ios' ? 'dark-content' : 'default';
@@ -300,15 +374,12 @@ const userCache = new WeakMap();
 export const pickUser = (userInput) => {
   if (!userInput) return null;
   
-  // Check cache first
   if (userCache.has(userInput)) {
     return userCache.get(userInput);
   }
   
-  // Process user data
   const result = userInput?.user ? userInput.user : userInput;
   
-  // Cache the result
   if (userInput && typeof userInput === 'object') {
     userCache.set(userInput, result);
   }
@@ -327,10 +398,12 @@ export const getMatchesKey = (userId) => {
     return storageKeyCache.get(cacheKey);
   }
   
-  // 🔧 Prevent memory leak: Clear cache if it gets too large
+  // Prevent memory leak: trim oldest entries instead of clearing all
   if (storageKeyCache.size >= MAX_STORAGE_CACHE_SIZE) {
-    logger.warn('🧹 Clearing storageKeyCache to prevent memory leak');
-    storageKeyCache.clear();
+    const removed = trimCacheToSize(storageKeyCache, MAX_STORAGE_CACHE_SIZE - 1);
+      if (removed > 0 && IS_DEV) {
+        getLogger().debug(`storageKeyCache trimmed by ${removed} to stay within limit`);
+      }
   }
   
   const key = `savedColorMatches:${cacheKey}`;
@@ -339,42 +412,56 @@ export const getMatchesKey = (userId) => {
   return key;
 };
 
-// 🔧 Periodic cache cleanup to prevent memory leaks
+// Periodic cache cleanup to prevent memory leaks
 const setupCacheCleanup = () => {
-  // Only set up cleanup in long-running environments
+  let intervalId = null;
+
   if (typeof setInterval !== 'undefined') {
     const CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 minutes
     
-    setInterval(() => {
+    intervalId = setInterval(() => {
       const statusCacheSize = statusBarStyleCache.size;
       const storageCacheSize = storageKeyCache.size;
       
-      // Clear caches if they're getting large
-      if (statusCacheSize > 5) {
-        logger.debug('🧹 Periodic cleanup: clearing statusBarStyleCache');
-        statusBarStyleCache.clear();
+      const removedStatus = statusCacheSize > MAX_STATUS_CACHE_SIZE
+        ? trimCacheToSize(statusBarStyleCache, MAX_STATUS_CACHE_SIZE)
+        : 0;
+      const removedStorage = storageCacheSize > MAX_STORAGE_CACHE_SIZE
+        ? trimCacheToSize(storageKeyCache, MAX_STORAGE_CACHE_SIZE)
+        : 0;
+      
+      if (IS_DEV && (removedStatus > 0 || removedStorage > 0)) {
+        getLogger().debug(`Cache cleanup trimmed - StatusBar: ${removedStatus}, Storage: ${removedStorage}`);
       }
       
-      if (storageCacheSize > 50) {
-        logger.debug('🧹 Periodic cleanup: clearing storageKeyCache');
-        storageKeyCache.clear();
-      }
-      
-      if (IS_DEV && (statusCacheSize > 0 || storageCacheSize > 0)) {
-        logger.debug(`📊 Cache sizes - StatusBar: ${statusCacheSize}, Storage: ${storageCacheSize}`);
+      if (IS_DEV && (statusBarStyleCache.size > 0 || storageKeyCache.size > 0)) {
+        getLogger().debug(`Cache sizes - StatusBar: ${statusBarStyleCache.size}, Storage: ${storageKeyCache.size}`);
       }
     }, CLEANUP_INTERVAL);
   }
+
+  return () => {
+    if (intervalId) {
+      clearInterval(intervalId);
+    }
+  };
 };
 
-// Initialize cleanup on module load
-setupCacheCleanup();
+// Initialize cleanup on module load and expose stopper
+const stopCacheCleanup = setupCacheCleanup();
 
 // Export cache cleanup utilities for manual cleanup if needed
 export const clearAllCaches = () => {
   statusBarStyleCache.clear();
   storageKeyCache.clear();
-  logger.info('🧹 All caches cleared manually');
+  getLogger().info('All caches cleared manually');
+};
+
+// Optional: allow stopping periodic cleanup if needed by consumers
+export const stopCacheCleanupInterval = () => {
+  if (typeof stopCacheCleanup === 'function') {
+    stopCacheCleanup();
+  }
 };
 
 // Performance monitoring utilities (development only)
@@ -384,7 +471,7 @@ export const performanceUtils = IS_DEV ? {
     return () => {
       const duration = Date.now() - startTime;
       if (duration > APP_CONFIG.performance.LOG_THRESHOLD) {
-        logger.debug(`⏱️ ${label}: ${duration}ms`);
+        getLogger().debug(`${label}: ${duration}ms`);
       }
       return duration;
     };
@@ -414,7 +501,7 @@ export const memoryUtils = {
     // userCache is WeakMap, so it clears automatically
     
     if (IS_DEV) {
-      logger.debug('🧹 Configuration caches cleared');
+      getLogger().debug('Configuration caches cleared');
     }
   },
   
@@ -432,7 +519,7 @@ export const cleanupAppConfig = () => {
   initializationPromise = null;
   
   if (IS_DEV) {
-    logger.debug('🧹 App configuration cleaned up');
+    getLogger().debug('App configuration cleaned up');
   }
 };
 

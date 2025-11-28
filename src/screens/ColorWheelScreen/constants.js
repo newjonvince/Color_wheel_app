@@ -17,26 +17,50 @@ export const DEFAULT_SCHEME = 'complementary';
 // HSL validation and utilities
 export const mod = (a, n) => ((a % n) + n) % n;
 
-// ✅ SAFER: Enhanced validation with stricter checks
+// ✅ EDGE CASE FIX: Comprehensive validation with all edge cases handled
 export const validateHSL = (h, s, l) => {
   const parseComponent = (value, defaultValue = 0) => {
+    // ✅ EDGE CASE FIX: Strict type checking first
     if (typeof value === 'number') {
-      return isNaN(value) || !isFinite(value) ? defaultValue : value; // ✅ Reject Infinity
+      // Handle all number edge cases
+      if (isNaN(value) || !isFinite(value) || value === Infinity || value === -Infinity) {
+        return defaultValue;
+      }
+      return value;
     }
     
-    if (typeof value === 'string' && value.trim() !== '') {
-      // Reject scientific notation
-      if (!/^-?\d*\.?\d+$/.test(value.trim())) {
+    // ✅ EDGE CASE FIX: Enhanced string validation
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      
+      // Reject empty strings and whitespace-only strings
+      if (trimmed === '' || trimmed.length === 0) {
         return defaultValue;
       }
       
-      const parsed = parseFloat(value);
-      if (isNaN(parsed) || !isFinite(parsed)) { // ✅ Reject Infinity/NaN
+      // ✅ EDGE CASE FIX: Reject scientific notation and invalid formats
+      // More comprehensive regex to catch edge cases
+      if (!/^-?\d*\.?\d+$/.test(trimmed) || 
+          /[eE]/.test(trimmed) ||           // Reject scientific notation
+          /[^\d\.\-]/.test(trimmed) ||      // Reject non-numeric characters
+          trimmed === '.' ||                // Reject lone decimal point
+          trimmed === '-' ||                // Reject lone minus sign
+          trimmed === '-.' ||               // Reject minus with lone decimal
+          /^-?\.?$/.test(trimmed)) {        // Reject incomplete numbers
         return defaultValue;
       }
+      
+      const parsed = parseFloat(trimmed);
+      
+      // ✅ EDGE CASE FIX: Comprehensive number validation after parsing
+      if (isNaN(parsed) || !isFinite(parsed) || parsed === Infinity || parsed === -Infinity) {
+        return defaultValue;
+      }
+      
       return parsed;
     }
     
+    // ✅ EDGE CASE FIX: Reject all other types (arrays, objects, booleans, null, undefined)
     return defaultValue;
   };
   
@@ -44,8 +68,16 @@ export const validateHSL = (h, s, l) => {
   const satValue = parseComponent(s, 0);
   const lightValue = parseComponent(l, 0);
   
+  // ✅ EDGE CASE FIX: Safe modulo operation with validation
+  const safeMod = (value, divisor) => {
+    if (!isFinite(value) || !isFinite(divisor) || divisor === 0) {
+      return 0;
+    }
+    return ((value % divisor) + divisor) % divisor;
+  };
+  
   return {
-    h: mod(hueValue, 360),
+    h: safeMod(hueValue, 360),
     s: Math.max(0, Math.min(100, satValue)),
     l: Math.max(0, Math.min(100, lightValue)),
   };

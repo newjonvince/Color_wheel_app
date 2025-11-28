@@ -1,12 +1,26 @@
 // screens/ColorWheelScreen/components/HSLInputs.js
 import React, { useState, useCallback, useMemo, memo, useRef, useEffect } from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Platform } from 'react-native';
+import PropTypes from 'prop-types'; // ✅ MISSING IMPORT ADDED
 import Constants from 'expo-constants';
 import { debounce } from '../../../utils/throttledCallbacks';
 import { LAYOUT } from '../../../constants/layout';
 
 // Production-ready configuration
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('HSLInputs: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('HSLInputs: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 import { styles } from '../styles';
@@ -64,20 +78,13 @@ export const HSLInputs = React.memo(({
     }
   }, [onUpdateInput, wheelRef]);
 
-  // ✅ Cleanup debounced function on unmount with safety checks
+  // ✅ MEMORY LEAK FIX: Proper debounce cleanup on unmount
   useEffect(() => {
     return () => {
       const debouncedFn = debouncedLiveUpdate.current;
-      if (debouncedFn) {
+      if (debouncedFn && typeof debouncedFn.cancel === 'function') {
         try {
-          // Try different cleanup methods that debounce libraries might use
-          if (typeof debouncedFn.cancel === 'function') {
-            debouncedFn.cancel();
-          } else if (typeof debouncedFn.clear === 'function') {
-            debouncedFn.clear();
-          } else if (typeof debouncedFn.flush === 'function') {
-            debouncedFn.flush();
-          }
+          debouncedFn.cancel(); // ✅ Use the actual cancel method
         } catch (error) {
           console.warn('❌ Failed to cleanup debounced function:', error);
         }

@@ -20,7 +20,20 @@ import ApiService from '../services/safeApiService';
 import Constants from 'expo-constants';
 
 // Production-ready configuration
-const extra = Constants.expoConfig?.extra || {};
+const getSafeExpoExtra = () => {
+  try {
+    const expoConfig = Constants?.expoConfig;
+    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
+      return expoConfig.extra;
+    }
+    console.warn('CoolorsColorExtractor: expoConfig missing or malformed, using defaults');
+  } catch (error) {
+    console.warn('CoolorsColorExtractor: unable to read expoConfig safely, using defaults', error);
+  }
+  return {};
+};
+
+const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
 // Safe wrapper to log real errors + stack traces from component layer
