@@ -11,25 +11,11 @@ import {
   Dimensions
 } from 'react-native';
 import { StyleSheet } from 'react-native';
-import Constants from 'expo-constants';
 import { safeStorage } from '../utils/safeStorage';
+// ✅ Use shared helper to avoid duplicate code
+import { isDebugMode } from '../utils/expoConfigHelper';
 
-// Production-ready configuration
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
-    }
-    console.warn('AppErrorBoundary: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('AppErrorBoundary: unable to read expoConfig safely, using defaults', error);
-  }
-  return {};
-};
-
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+const IS_DEBUG_MODE = isDebugMode();
 
 class AppErrorBoundary extends React.Component {
   static MAX_ERRORS_PER_MINUTE = 5;
@@ -402,4 +388,8 @@ const styles = StyleSheet.create({
   },
 });
 
+// Default export
 export default AppErrorBoundary;
+
+// Named export for backward compatibility
+export { AppErrorBoundary };

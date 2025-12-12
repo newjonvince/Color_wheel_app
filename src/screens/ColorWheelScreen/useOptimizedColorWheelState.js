@@ -1,7 +1,6 @@
 // screens/ColorWheelScreen/useOptimizedColorWheelState.js - Enhanced state management for FullColorWheel
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import Constants from 'expo-constants';
 import { analyzeColor, getColorScheme, getCacheStats, hexToHsl, hslToHex } from '../../utils/optimizedColor';
 import { useThrottledCallbacks } from '../../utils/throttledCallbacks';
 import { useOptimizedColorProcessing } from '../../hooks/useOptimizedColorProcessing';
@@ -10,22 +9,21 @@ import { LAYOUT } from '../../constants/layout';
 import { isValidHex6, filterValidHexColors } from '../../utils/colorValidation';
 import { reportError, ERROR_EVENTS } from '../../utils/errorTelemetry';
 
-// Production-ready configuration
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('useOptimizedColorWheelState: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
     }
-    console.warn('useOptimizedColorWheelState: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('useOptimizedColorWheelState: unable to read expoConfig safely, using defaults', error);
   }
-  return {};
+  return _isDebugModeValue;
 };
-
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 export const useOptimizedColorWheelState = (options = {}) => {
   const {
@@ -213,7 +211,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
     
     if (shouldSkipAnalysis) {
       // During drag: skip heavy analysis for performance
-      if (IS_DEBUG_MODE) {
+      if (IS_DEBUG_MODE()) {
         console.log('🎯 Skipping heavy analysis during gesture phase:', phase);
       }
       return;
@@ -242,7 +240,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
       if (typeof getCacheStats === 'function') {
           try {
             const cacheStats = getCacheStats();
-            if (IS_DEBUG_MODE) {
+            if (IS_DEBUG_MODE()) {
               console.log(' Color Processing Stats:', {
                 paletteSize: currentPalette.length,
                 cacheHits: cacheStats.hits,
@@ -426,7 +424,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
         
         forceUpdate(validColors, 0);
         
-        if (IS_DEBUG_MODE) {
+        if (IS_DEBUG_MODE()) {
           console.log('✅ Extracted colors applied:', validColors.length, 'colors');
         }
       } else {

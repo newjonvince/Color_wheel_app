@@ -1,24 +1,10 @@
 // utils/moduleLoader.js - Safe module loading with error handling
 import React from 'react';
 import { View, Text, TouchableOpacity, Platform } from 'react-native';
-import Constants from 'expo-constants';
+// ✅ Use shared helper to avoid duplicate code
+import { isDebugMode } from './expoConfigHelper';
 
-// Production-ready configuration
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
-    }
-    console.warn('moduleLoader: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('moduleLoader: unable to read expoConfig safely, using defaults', error);
-  }
-  return {};
-};
-
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+const IS_DEBUG_MODE = isDebugMode();
 
 // ✅ Safe module loading helper with validation
 const loadModule = (modulePath, exportName, fallback = null) => {

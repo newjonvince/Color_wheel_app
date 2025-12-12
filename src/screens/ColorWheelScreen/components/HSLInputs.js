@@ -1,27 +1,25 @@
 // screens/ColorWheelScreen/components/HSLInputs.js
 import React, { useState, useCallback, useMemo, memo, useRef, useEffect } from 'react';
 import { View, Text, TextInput, StyleSheet, Platform } from 'react-native';
-import PropTypes from 'prop-types'; // ✅ MISSING IMPORT ADDED
-import Constants from 'expo-constants';
+import PropTypes from 'prop-types';
 import { debounce } from '../../../utils/throttledCallbacks';
 import { LAYOUT } from '../../../constants/layout';
 
-// Production-ready configuration
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../../../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('HSLInputs: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
     }
-    console.warn('HSLInputs: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('HSLInputs: unable to read expoConfig safely, using defaults', error);
   }
-  return {};
+  return _isDebugModeValue;
 };
-
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 import { styles } from '../styles';
 
@@ -100,13 +98,13 @@ export const HSLInputs = React.memo(({
     if (wheel && typeof wheel.setGesturesEnabled === 'function') {
       try {
         wheel.setGesturesEnabled(false);
-        if (IS_DEBUG_MODE) {
+        if (IS_DEBUG_MODE()) {
           console.log(`🎯 HSL input ${component} focused - wheel gestures disabled`);
         }
       } catch (error) {
         console.warn('Failed to disable wheel gestures:', error);
       }
-    } else if (IS_DEBUG_MODE) {
+    } else if (IS_DEBUG_MODE()) {
       console.log(`🎯 HSL input ${component} focused - wheel gesture control not available`);
     }
   }, [wheelRef]);
@@ -119,7 +117,7 @@ export const HSLInputs = React.memo(({
     if (wheel && typeof wheel.setGesturesEnabled === 'function') {
       try {
         wheel.setGesturesEnabled(true);
-        if (IS_DEBUG_MODE) {
+        if (IS_DEBUG_MODE()) {
           console.log(`🎯 HSL input ${component} blurred - wheel gestures re-enabled`);
         }
       } catch (error) {
@@ -130,7 +128,7 @@ export const HSLInputs = React.memo(({
     // Apply the input changes
     onApplyInputs();
     
-    if (IS_DEBUG_MODE && !wheel?.setGesturesEnabled) {
+    if (IS_DEBUG_MODE() && !wheel?.setGesturesEnabled) {
       console.log(`🎯 HSL input ${component} blurred - wheel gestures enabled`);
     }
   }, [wheelRef, onApplyInputs]);

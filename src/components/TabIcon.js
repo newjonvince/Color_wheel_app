@@ -26,6 +26,10 @@ const TAB_ICONS = {
     focused: { name: 'color-palette', library: 'Ionicons' },
     unfocused: { name: 'color-palette-outline', library: 'Ionicons' }
   },
+  Boards: {
+    focused: { name: 'grid', library: 'Ionicons' },
+    unfocused: { name: 'grid-outline', library: 'Ionicons' }
+  },
   Profile: {
     focused: { name: 'person', library: 'MaterialIcons' },
     unfocused: { name: 'person-outline', library: 'MaterialIcons' }
@@ -40,6 +44,7 @@ const TAB_ICONS = {
 const EMOJI_FALLBACKS = {
   Community: { focused: '🌍', unfocused: '🌎' },
   ColorWheel: { focused: '🌈', unfocused: '⭕' },
+  Boards: { focused: '📋', unfocused: '📄' },
   Profile: { focused: '👤', unfocused: '👥' },
   Settings: { focused: '⚙️', unfocused: '🔧' },
 };

@@ -1,7 +1,44 @@
 ﻿// services/safeApiService.js - API service with safe dependency handling
 import axios from 'axios';
-import Constants from 'expo-constants';
-import { safeStorage } from '../utils/safeStorage';
+
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load safeStorage to prevent crash on module initialization
+let _safeStorageInstance = null;
+const getSafeStorage = () => {
+  if (_safeStorageInstance) return _safeStorageInstance;
+  try {
+    const mod = require('../utils/safeStorage');
+    _safeStorageInstance = mod?.safeStorage || mod?.default;
+  } catch (error) {
+    console.warn('safeApiService: safeStorage load failed', error?.message);
+    // Return mock storage that doesn't crash
+    _safeStorageInstance = {
+      init: async () => {},
+      getToken: async () => null,
+      setToken: async () => {},
+      clearToken: async () => {},
+      getItem: async () => null,
+      setItem: async () => {},
+      removeItem: async () => {},
+      clearAuth: async () => {},
+    };
+  }
+  return _safeStorageInstance;
+};
+
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('safeApiService: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
 
 // Lazy logger proxy to avoid circular import crashes
 let _loggerInstance = null;
@@ -24,25 +61,8 @@ const logger = {
   error: (...args) => getLogger()?.error?.(...args),
 };
 
-// Production-ready configuration
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object') {
-      const maybeExtra = expoConfig.extra;
-      if (maybeExtra && typeof maybeExtra === 'object') {
-        return maybeExtra;
-      }
-    }
-    console.warn('safeApiService: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('safeApiService: unable to read expoConfig safely, using defaults', error);
-  }
-  return {};
-};
-
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+// ✅ CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 // Request cancellation support
 const CancelToken = axios.CancelToken;
@@ -59,7 +79,9 @@ const safeStringify = (value, fallback = '') => {
 // Safe API configuration with URL validation
 const getApiBaseUrl = () => {
   try {
-    // Safe access to expo config with type validation (no top-level require)
+    // ✅ BUG FIX: Properly load expoConfigHelper to get extra config
+    const helper = require('../utils/expoConfigHelper');
+    const extra = helper.getSafeExpoExtra ? helper.getSafeExpoExtra() : {};
     const apiUrl = extra && typeof extra === 'object' ? extra.EXPO_PUBLIC_API_BASE_URL : null;
     if (apiUrl && typeof apiUrl === 'string') return apiUrl;
   } catch (error) {
@@ -217,7 +239,7 @@ class SafeApiService {
       }
 
       // Log successful response for debugging (only in debug mode)
-      if (IS_DEBUG_MODE) {
+      if (IS_DEBUG_MODE()) {
         console.log(`✅ Response validated for ${endpoint}:`, {
           status: response.status,
           contentType,
@@ -275,14 +297,14 @@ class SafeApiService {
         throw new Error('API service initialization aborted');
       }
 
-      if (IS_DEBUG_MODE) {
+      if (IS_DEBUG_MODE()) {
         console.log('Initializing SafeApiService...');
         console.log('API Root URL:', getApiRoot());
       }
 
       try {
         // FIX: Pass signal to storage initialization
-        await safeStorage.init({ signal });
+        await getSafeStorage().init({ signal });
       } catch (storageInitError) {
         if (signal?.aborted || storageInitError.message?.includes('aborted')) {
           throw new Error('API service initialization aborted during storage init');
@@ -296,25 +318,25 @@ class SafeApiService {
           throw new Error('API service initialization aborted before token loading');
         }
 
-        const token = await safeStorage.getToken();
+        const token = await getSafeStorage().getToken();
         
         // ✅ FIX: Check abort signal between operations
         if (signal?.aborted) {
           throw new Error('API service initialization aborted during token loading');
         }
         
-        const refreshToken = await safeStorage.getItem('fashion_color_wheel_refresh_token');
+        const refreshToken = await getSafeStorage().getItem('fashion_color_wheel_refresh_token');
 
         if (token && typeof token === 'string' && token.trim().length > 0) {
           this.authToken = token;
-          if (IS_DEBUG_MODE) {
+          if (IS_DEBUG_MODE()) {
             console.log('Auth token loaded from storage');
           }
         }
 
         if (refreshToken && typeof refreshToken === 'string' && refreshToken.trim().length > 0) {
           this.refreshToken = refreshToken;
-          if (IS_DEBUG_MODE) {
+          if (IS_DEBUG_MODE()) {
             console.log('Refresh token loaded from storage');
           }
         }
@@ -331,7 +353,7 @@ class SafeApiService {
       this.initializationFailed = false;
       this.initializationError = null;
       
-      if (IS_DEBUG_MODE) {
+      if (IS_DEBUG_MODE()) {
         console.log('SafeApiService initialized successfully');
       }
       
@@ -373,13 +395,13 @@ class SafeApiService {
       this.refreshToken = refreshToken;
       
       if (token) {
-        await safeStorage.setToken(token);
+        await getSafeStorage().setToken(token);
         if (refreshToken) {
-          await safeStorage.setItem('fashion_color_wheel_refresh_token', refreshToken);
+          await getSafeStorage().setItem('fashion_color_wheel_refresh_token', refreshToken);
         }
       } else {
-        await safeStorage.clearToken();
-        await safeStorage.removeItem('fashion_color_wheel_refresh_token');
+        await getSafeStorage().clearToken();
+        await getSafeStorage().removeItem('fashion_color_wheel_refresh_token');
       }
       return true;
     } catch (error) {
@@ -660,7 +682,7 @@ class SafeApiService {
   async logout() {
     try {
       await this.setToken(null);
-      await safeStorage.clearAuth();
+      await getSafeStorage().clearAuth();
       return true;
     } catch (error) {
       console.warn('Logout error:', error.message);

@@ -17,24 +17,10 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
 import ApiService from '../services/safeApiService';
-import Constants from 'expo-constants';
+// ✅ Use shared helper to avoid duplicate code
+import { isDebugMode } from '../utils/expoConfigHelper';
 
-// Production-ready configuration
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
-    }
-    console.warn('CoolorsColorExtractor: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('CoolorsColorExtractor: unable to read expoConfig safely, using defaults', error);
-  }
-  return {};
-};
-
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+const IS_DEBUG_MODE = isDebugMode();
 
 // Safe wrapper to log real errors + stack traces from component layer
 const safe = (fn, context = 'unknown') => (...args) => {

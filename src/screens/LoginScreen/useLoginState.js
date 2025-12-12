@@ -4,7 +4,7 @@ import * as Haptics from 'expo-haptics';
 import { safeStorage } from '../../utils/safeStorage';
 import { safeAsyncStorage } from '../../utils/safeAsyncStorage';
 import ApiService from '../../services/safeApiService';
-import { debounce } from '../../utils/debounce';
+import { debounce } from '../../utils/throttledCallbacks';
 import { validateForm, validateEmail, parseLoginResponse, getErrorMessage, withTimeout, createDemoUser, TIMEOUTS, sanitizeEmail, sanitizePassword } from './constants';
 import { STORAGE_KEYS } from '../../constants/storageKeys';
 

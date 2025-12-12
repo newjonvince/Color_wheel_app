@@ -1,18 +1,6 @@
 // utils/AppLogger.js - Production-safe logging with EXPO_PUBLIC flags
-import Constants from 'expo-constants';
-
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
-    }
-    console.warn('AppLogger: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('AppLogger: unable to read expoConfig safely, using defaults', error);
-  }
-  return {};
-};
+// ✅ Use shared helper to avoid duplicate code
+import { getSafeExpoExtra, isDebugMode } from './expoConfigHelper';
 
 // Lazy-load extra to avoid module-load crashes and handle late Constants
 let cachedExtra = null;
@@ -23,7 +11,7 @@ const getExtra = () => {
   return cachedExtra;
 };
 
-const IS_DEBUG_MODE = () => !!getExtra().EXPO_PUBLIC_DEBUG_MODE;
+const IS_DEBUG_MODE = isDebugMode;
 const LOG_LEVEL = () => {
   const level = getExtra().EXPO_PUBLIC_LOG_LEVEL;
   const validLevels = ['debug', 'info', 'warn', 'error'];

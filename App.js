@@ -517,11 +517,25 @@ function FashionColorWheelApp() {
       }
     };
 
+    // ✅ IMPROVEMENT: Initialization timeout to prevent hanging forever
+    const INIT_TIMEOUT_MS = 30000; // 30 seconds
+    
+    const initWithTimeout = async () => {
+      return Promise.race([
+        initializeInBackground(),
+        new Promise((_, reject) => {
+          setTimeout(() => {
+            reject(new Error(`Initialization timed out after ${INIT_TIMEOUT_MS / 1000} seconds. Please check your network connection and try again.`));
+          }, INIT_TIMEOUT_MS);
+        })
+      ]);
+    };
+    
     // ✅ SEQUENCED INITIALIZATION: Wait for background init before showing UI as ready
     const initializeSequentially = async () => {
       try {
-        // Start background initialization
-        await initializeInBackground();
+        // Start background initialization with timeout protection
+        await initWithTimeout();
         
         // ✅ PROPER SEQUENCING: Only set ready after initialization completes
         if (isMounted && initializationRef.current.state === 'success') {
@@ -650,107 +664,103 @@ function FashionColorWheelApp() {
     // The NavigationContainer will reinitialize with clean state
   }, []);
 
+  // ✅ IMPROVEMENT: Simplified priority-based restart methods
+  const RESTART_METHODS = useMemo(() => [
+    { 
+      name: 'expo-updates', 
+      available: () => !!global.Updates?.reloadAsync,
+      execute: () => global.Updates.reloadAsync()
+    },
+    { 
+      name: 'dev-settings', 
+      available: () => !!global.DevSettings?.reload,
+      execute: () => { global.DevSettings.reload(); return Promise.resolve(); }
+    },
+    { 
+      name: 'web-reload', 
+      available: () => typeof window !== 'undefined' && !!window.location?.reload,
+      execute: () => { window.location.reload(); return Promise.resolve(); }
+    },
+  ], []);
+
+  // ✅ IMPROVEMENT: State reset as fallback when no platform restart available
+  const performStateReset = useCallback(() => {
+    getLogger().warn('≡ƒöä No platform restart available, performing state reset...');
+    
+    setInitializationState('pending');
+    progressAnimatedValue.setValue(0);
+    setInitError(null);
+    setIsReady(false);
+    setLoadingStateSafe({ stage: 'initializing', progress: 0, message: 'Restarting...' });
+    
+    if (appInitializer?.reset) appInitializer.reset();
+    
+    restartTimersRef.current.restart = setTimeout(() => {
+      restartTimersRef.current.restart = null;
+      if (appInitializer?.initialize && initializationRef.current.state === 'pending') {
+        appInitializer.initialize().catch((error) => {
+          getLogger().error('≡ƒÜ¿ Restart initialization failed:', error);
+          setInitializationState('error', error);
+          setInitError(error);
+        });
+      }
+    }, 100);
+  }, [setInitializationState, setLoadingStateSafe, progressAnimatedValue]);
+
   const handleRestart = useCallback(async () => {
-    // ≡ƒöº Use ref to prevent multiple executions (properly scoped)
+    // ✅ Debounce protection
+    const now = Date.now();
+    const RESTART_DEBOUNCE_MS = 3000;
+    
     if (isProcessingRef.current) {
-      return; // Prevent multiple restart attempts
+      getLogger().warn('Restart already in progress');
+      return;
     }
     
+    if (restartTimersRef.current.lastAttempt && 
+        (now - restartTimersRef.current.lastAttempt) < RESTART_DEBOUNCE_MS) {
+      getLogger().warn('Restart attempted too quickly');
+      return;
+    }
+    restartTimersRef.current.lastAttempt = now;
     isProcessingRef.current = true;
-    setIsRestarting(true); // ✅ Update UI state
+    setIsRestarting(true);
     getLogger().info('≡ƒöä User requested app restart');
     
     try {
-      let restartSuccessful = false;
-      
-      // Method 1: Expo Updates (try first)
-      if (!restartSuccessful && global.Updates?.reloadAsync) {
-        try {
-          getLogger().info('≡ƒöä Restarting via Expo Updates...');
-          await global.Updates.reloadAsync();
-          restartSuccessful = true;
-        } catch (error) {
-          getLogger().warn('Expo Updates restart failed:', error);
-        }
-      }
-      
-      // Method 2: DevSettings (only if Method 1 failed)
-      if (!restartSuccessful && global.DevSettings?.reload) {
-        try {
-          getLogger().info('≡ƒöä Restarting via DevSettings...');
-          global.DevSettings.reload();
-          restartSuccessful = true;
-        } catch (error) {
-          getLogger().warn('DevSettings restart failed:', error);
-        }
-      }
-      
-      // Method 3: Web reload (only if previous methods failed)
-      if (!restartSuccessful && typeof window !== 'undefined' && window.location) {
-        try {
-          getLogger().info('≡ƒöä Restarting via window.location.reload...');
-          window.location.reload();
-          restartSuccessful = true;
-        } catch (error) {
-          getLogger().warn('Web restart failed:', error);
-        }
-      }
-      
-      // Method 4: State reset (only if all else failed)
-      if (!restartSuccessful) {
-        getLogger().warn('≡ƒöä No restart mechanism available, attempting state reset...');
-        
-        // ≡ƒöº Reset atomic state
-        setInitializationState('pending');
-        
-        // Atomic state reset
-        setInitError(null);
-        setIsReady(false);
-        setLoadingStateSafe({
-          stage: 'initializing',
-          progress: 0,
-          message: 'Restarting...'
-        });
-        
-        // Reset initializer
-        if (appInitializer?.reset) {
-          appInitializer.reset();
-        }
-        
-        // Restart after brief delay
-        restartTimersRef.current.restart = setTimeout(() => {
-          restartTimersRef.current.restart = null; // Clear timer reference
-          if (appInitializer?.initialize && initializationRef.current.state === 'pending') {
-            appInitializer.initialize().catch((error) => {
-              getLogger().error('≡ƒÜ¿ Restart initialization failed:', error);
-              setInitializationState('error', error);
-              setInitError(error);
-            });
+      // ✅ SIMPLIFIED: Try each restart method in priority order
+      for (const method of RESTART_METHODS) {
+        if (method.available()) {
+          try {
+            getLogger().info(`≡ƒöä Attempting restart via ${method.name}...`);
+            await method.execute();
+            return; // Success - method will reload the app
+          } catch (error) {
+            getLogger().warn(`${method.name} restart failed:`, error.message);
           }
-        }, 100);
+        }
       }
+      
+      // ✅ Fallback: State reset if no platform restart worked
+      performStateReset();
       
     } catch (error) {
       getLogger().error('≡ƒÜ¿ Restart failed:', error);
       setInitError(new Error(`Restart failed: ${error.message}`));
     } finally {
-      // ✅ MEMORY LEAK FIX: Reset processing flag after delay with proper cleanup
-      // Clear any existing flag timer first to prevent multiple timers
+      // Reset processing flag after delay
       if (restartTimersRef.current.flag) {
         clearTimeout(restartTimersRef.current.flag);
-        restartTimersRef.current.flag = null;
       }
-      
       restartTimersRef.current.flag = setTimeout(() => {
-        // ✅ Check if component is still mounted before accessing refs
-        if (isMountedRef.current && restartTimersRef.current) {
-          restartTimersRef.current.flag = null; // Clear timer reference
-          isProcessingRef.current = false; // Reset processing flag
-          setIsRestarting(false); // ✅ Reset UI state
+        if (isMountedRef.current) {
+          restartTimersRef.current.flag = null;
+          isProcessingRef.current = false;
+          setIsRestarting(false);
         }
       }, 2000);
     }
-  }, [setInitializationState, setLoadingStateSafe]); // ✅ STALE CLOSURE FIX: Add callback dependencies
+  }, [RESTART_METHODS, performStateReset]); // ✅ Simplified dependencies
 
   // ✅ RULES OF HOOKS FIX: Move nested useMemo to top level
   const loadingCalculation = useMemo(() => {
@@ -866,35 +876,22 @@ function FashionColorWheelApp() {
           >
             <Text style={styles.restartButtonText}>Run Diagnostics</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.restartButton, { backgroundColor: '#f39c12', marginTop: 10 }]}
-            onPress={() => {
-              Alert.alert(
-                '⚠️ Security Warning',
-                'Continuing offline skips security and initialization checks. Your data may not sync properly, and some features will be unavailable. Only use this if you need to access cached data urgently.',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { 
-                    text: 'I Understand, Continue', 
-                    style: 'destructive',
-                    onPress: () => {
-                      devLog('🔄 User chose to continue offline, bypassing initialization checks...');
-                      addBreadcrumb('User bypassed initialization', 'app', 'warning', {
-                        reason: 'continue_offline_selected'
-                      });
-                      // ✅ SECURITY: Log this action for debugging
-                      getLogger().warn('⚠️ User bypassed initialization - running in limited offline mode');
-                      // Skip network-dependent initialization
-                      setInitError(null);
-                      setIsReady(true);
-                    }
-                  }
-                ]
-              );
-            }}
-          >
-            <Text style={styles.restartButtonText}>Continue Offline</Text>
-          </TouchableOpacity>
+          {/* ✅ CRASH FIX #3: REMOVED dangerous 'Continue Offline' bypass
+             * This button previously allowed bypassing ALL initialization including:
+             * - Authentication validation
+             * - Storage integrity checks  
+             * - Security token validation
+             * - API credential verification
+             * 
+             * This could lead to:
+             * - Viewing wrong user's data (token corruption)
+             * - API calls with invalid credentials
+             * - Storage state corruption
+             * - Security vulnerabilities
+             * 
+             * If offline mode is truly needed, implement a proper read-only
+             * cached data mode with explicit user data isolation.
+             */}
         </SafeAreaView>
       );
     }
@@ -973,11 +970,25 @@ function FashionColorWheelApp() {
 
     // Γ£à Now we KNOW both app and auth are initialized
     // Split auth flow - prevents unnecessary re-renders
-    if (!user) {
+    
+    // ✅ CRASH FIX #4: Validate user object has required properties before passing to AuthenticatedApp
+    // This prevents crashes if user object is malformed (e.g., {} or missing id)
+    const isValidUser = user && typeof user === 'object' && user.id;
+    
+    if (!isValidUser) {
+      // User is null, undefined, or missing required properties - show login
+      if (user && !user.id) {
+        // User object exists but is malformed - log warning for debugging
+        getLogger().warn('⚠️ User object missing required properties:', { 
+          hasUser: !!user, 
+          hasId: !!user?.id,
+          userKeys: user ? Object.keys(user) : []
+        });
+      }
       return <UnauthenticatedApp handleLoginSuccess={safeHandleLoginSuccess} />;
     }
 
-    // Main authenticated app
+    // Main authenticated app - user is validated
     return <AuthenticatedApp user={user} handleLogout={safeHandleLogout} />;
   }, [
     initError,

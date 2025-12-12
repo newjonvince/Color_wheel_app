@@ -2,25 +2,23 @@
 // Canva-style multi-handle color wheel with Skia + Reanimated
 // Crash-safe: no non-serializable captures inside worklets (no Set/refs); hex conversion on JS thread
 
-// Build verification tag for crash debugging (only in debug mode)
-import Constants from 'expo-constants';
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('FullColorWheel: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
     }
-    console.warn('FullColorWheel: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('FullColorWheel: unable to read expoConfig safely, using defaults', error);
   }
-  return {};
+  return _isDebugModeValue;
 };
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
-
-if (IS_DEBUG_MODE) {
+if (IS_DEBUG_MODE()) {
   console.log('FullColorWheel build tag: 2025-08-16 worklet-patched');
 }
 
@@ -40,7 +38,7 @@ const REANIMATED_READY = (() => {
     return typeof global?.__reanimatedWorkletInit === 'function';
   } catch (e) {
     // Log Reanimated issues only in debug mode
-    if (IS_DEBUG_MODE) {
+    if (IS_DEBUG_MODE()) {
       console.log('Reanimated worklet init check failed:', e.message);
     }
     return false;
@@ -61,7 +59,7 @@ try {
   vec = Skia.vec;
 } catch (e) {
   // Log Skia loading failures only in debug mode
-  if (IS_DEBUG_MODE) {
+  if (IS_DEBUG_MODE()) {
     console.log('Skia module load failed on', Platform.OS + ':', e.message);
   }
   

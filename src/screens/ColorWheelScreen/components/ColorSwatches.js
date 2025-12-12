@@ -2,24 +2,23 @@
 import React, { memo, useCallback } from 'react';
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import PropTypes from 'prop-types';
-import Constants from 'expo-constants';
 
-// Production-ready configuration
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../../../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('ColorSwatches: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
     }
-    console.warn('ColorSwatches: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('ColorSwatches: unable to read expoConfig safely, using defaults', error);
   }
-  return {};
+  return _isDebugModeValue;
 };
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 import { styles } from '../styles';
 import { getSchemeDisplayName } from '../constants';
 
@@ -37,7 +36,7 @@ export const ColorSwatches = React.memo(({
     if (onSwatchPress && typeof onSwatchPress === 'function') {
       try {
         onSwatchPress(color, index);
-        if (IS_DEBUG_MODE) {
+        if (IS_DEBUG_MODE()) {
           console.log(`🎨 Swatch selected: ${color} at index ${index}`);
         }
       } catch (error) {

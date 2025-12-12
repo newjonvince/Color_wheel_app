@@ -4,26 +4,24 @@ import React, { useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { ScrollView, View, Text, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import PropTypes from 'prop-types';
-import Constants from 'expo-constants';
 import { AppErrorBoundary } from '../../components/AppErrorBoundary';
 import { isValidHex6 } from '../../utils/colorValidation';
 
-// Production-ready configuration
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('ColorWheelScreen: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
     }
-    console.warn('ColorWheelScreen: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('ColorWheelScreen: unable to read expoConfig safely, using defaults', error);
   }
-  return {};
+  return _isDebugModeValue;
 };
-
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 // Core components (required)
 import { SchemeSelector } from './components/SchemeSelector';
@@ -98,7 +96,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
 
       if (result.success) {
         // Log API integration status only in debug mode
-        if (IS_DEBUG_MODE) {
+        if (IS_DEBUG_MODE()) {
           console.log('✅ API Integration Status:', {
             authenticated: !!ApiService.getToken(),
             userDataLoaded: !!result.data,
@@ -149,7 +147,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     }
     
     const duration = Date.now() - startTime;
-    if (IS_DEBUG_MODE && duration > 50) {
+    if (IS_DEBUG_MODE() && duration > 50) {
       console.log(`⏱️ Scheme calculation took ${duration}ms for ${selectedScheme}`);
     }
     
@@ -186,7 +184,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
         // Valid palette index - update active handle
         handleActiveHandleChange(index);
         
-        if (IS_DEBUG_MODE) {
+        if (IS_DEBUG_MODE()) {
           console.log(`🎨 Color selected from swatch: ${color} (valid index: ${index})`);
         }
       } else if (index !== -1) { // -1 is used for selected color swatch, so it's expected
@@ -198,7 +196,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
         });
       }
       
-      if (IS_DEBUG_MODE && (index === -1 || (typeof index === 'number' && !isNaN(index) && Number.isInteger(index) && index >= 0))) {
+      if (IS_DEBUG_MODE() && (index === -1 || (typeof index === 'number' && !isNaN(index) && Number.isInteger(index) && index >= 0))) {
         console.log(`🎨 Color selected from swatch: ${color} (index: ${index})`);
       }
     } catch (error) {
@@ -222,7 +220,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     try {
       
       // Log color match saving only in debug mode
-      if (IS_DEBUG_MODE) {
+      if (IS_DEBUG_MODE()) {
         console.log('💾 Saving Color Match:', {
           baseColor: colorMatchData.base_color,
           scheme: colorMatchData.scheme,
@@ -234,7 +232,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
       const result = await onSaveColorMatch(colorMatchData);
       
       // Log successful color match saves only in debug mode
-      if (IS_DEBUG_MODE) {
+      if (IS_DEBUG_MODE()) {
         console.log('✅ Color Match Saved:', {
           success: !!result,
           matchId: result?.id,

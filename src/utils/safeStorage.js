@@ -4,6 +4,21 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { safeAsyncStorage } from './safeAsyncStorage';
 
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('./expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('safeStorage: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
+
 // ✅ IMPORT ORDER FIX: Move all imports to the top before any code execution
 // Note: STORAGE_KEYS import moved to top to follow ES6 module hoisting principles
 // This prevents potential circular dependency issues and ensures proper module loading
@@ -60,22 +75,8 @@ const logger = {
   error: (...args) => getLogger()?.error?.(...args),
 };
 
-// Production-ready configuration
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
-    }
-    console.warn('safeStorage: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('safeStorage: unable to read expoConfig safely, using defaults', error);
-  }
-  return {};
-};
-
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+// ✅ CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 // Error monitoring for critical failures
 const reportError = (error, context) => {
@@ -186,7 +187,7 @@ class OptimizedSafeStorage {
         asyncStorageAvailable = safeAsyncStorage.isAsyncStorageAvailable();
         
         // Log critical storage status only in debug mode
-        if (IS_DEBUG_MODE) {
+        if (IS_DEBUG_MODE()) {
           console.log('📱 AsyncStorage status:', asyncStorageAvailable ? '✅ Working' : '❌ Failed');
         }
       } catch (asyncError) {
@@ -272,7 +273,7 @@ class OptimizedSafeStorage {
 
           this.isSecureStoreAvailable = await secureOperation;
           // Log SecureStore status only in debug mode
-          if (IS_DEBUG_MODE) {
+          if (IS_DEBUG_MODE()) {
             console.log('🔐 SecureStore status:', this.isSecureStoreAvailable ? '✅ Available' : '❌ Not available');
           }
         } catch (secureError) {
@@ -291,7 +292,7 @@ class OptimizedSafeStorage {
       this.isInitialized = true;
       
       // Log initialization status only in debug mode
-      if (IS_DEBUG_MODE) {
+      if (IS_DEBUG_MODE()) {
         console.log('🔐 SafeStorage initialized:', {
           asyncStorage: asyncStorageAvailable,
           secureStore: this.isSecureStoreAvailable,

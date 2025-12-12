@@ -1,8 +1,40 @@
 // contexts/AuthContext.js - Split Auth Context for better performance
 // ✅ PERFORMANCE: Split state and dispatch to prevent unnecessary re-renders
 import React, { createContext, useContext, useReducer, useCallback, useEffect, useRef } from 'react';
-import { logger } from '../utils/AppLogger';
-import { safeStorage } from '../utils/safeStorage';
+
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load logger to prevent crash on module initialization
+// App.js → AuthContext.js → AppLogger.js can cause circular dependency issues
+let _loggerInstance = null;
+const getLogger = () => {
+  if (_loggerInstance) return _loggerInstance;
+  try {
+    const mod = require('../utils/AppLogger');
+    _loggerInstance = mod?.logger || mod?.default || console;
+  } catch (error) {
+    console.warn('AuthContext: AppLogger load failed, using console', error?.message || error);
+    _loggerInstance = console;
+  }
+  return _loggerInstance;
+};
+
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load safeStorage to prevent crash on module initialization
+let _safeStorageInstance = null;
+const getSafeStorage = () => {
+  if (_safeStorageInstance) return _safeStorageInstance;
+  try {
+    const mod = require('../utils/safeStorage');
+    _safeStorageInstance = mod?.safeStorage || mod?.default;
+  } catch (error) {
+    console.warn('AuthContext: safeStorage load failed', error?.message || error);
+    // Return a mock storage that does nothing but doesn't crash
+    _safeStorageInstance = {
+      getUserData: async () => null,
+      setUserData: async () => {},
+      clearAuth: async () => {},
+    };
+  }
+  return _safeStorageInstance;
+};
 
 // ✅ PRODUCTION SAFETY: Gate console.log statements
 // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
@@ -157,7 +189,7 @@ export const AuthProvider = ({ children }) => {
     try {
       devLog('🔑 Checking for stored user...');
       
-      const storedUserJson = await safeStorage.getUserData();
+      const storedUserJson = await getSafeStorage().getUserData();
       if (storedUserJson) {
         devLog('✅ Found stored user');
         return storedUserJson; // Already parsed by safeStorage
@@ -166,7 +198,7 @@ export const AuthProvider = ({ children }) => {
       devLog('ℹ️ No stored user found');
       return null;
     } catch (error) {
-      logger.error('Failed to get stored user:', error);
+      getLogger().error('Failed to get stored user:', error);
       return null;
     }
   }, []);
@@ -175,13 +207,13 @@ export const AuthProvider = ({ children }) => {
     try {
       if (user) {
         devLog('💾 Storing user...');
-        await safeStorage.setUserData(user);
+        await getSafeStorage().setUserData(user);
       } else {
         devLog('🗑️ Removing stored user...');
-        await safeStorage.clearAuth();
+        await getSafeStorage().clearAuth();
       }
     } catch (error) {
-      logger.error('Failed to store user:', error);
+      getLogger().error('Failed to store user:', error);
     }
   }, []);
 
@@ -216,7 +248,7 @@ export const AuthProvider = ({ children }) => {
         });
       }
     } catch (error) {
-      logger.error('Auth initialization failed:', error);
+      getLogger().error('Auth initialization failed:', error);
       // ✅ CRASH FIX: Only dispatch if still mounted
       if (isMountedRef.current) {
         dispatch({ 
@@ -251,10 +283,10 @@ export const AuthProvider = ({ children }) => {
           type: AUTH_ACTIONS.LOGIN_SUCCESS, 
           payload: { user } 
         });
-        logger.info('✅ Login successful');
+        getLogger().info('✅ Login successful');
       }
     } catch (error) {
-      logger.error('Login processing failed:', error);
+      getLogger().error('Login processing failed:', error);
       // ✅ CRASH FIX: Check mounted and serialize error
       if (isMountedRef.current) {
         dispatch({ 
@@ -277,10 +309,10 @@ export const AuthProvider = ({ children }) => {
       // ✅ CRASH FIX: Check mounted before dispatching after async
       if (isMountedRef.current) {
         dispatch({ type: AUTH_ACTIONS.LOGOUT });
-        logger.info('✅ Logout successful');
+        getLogger().info('✅ Logout successful');
       }
     } catch (error) {
-      logger.error('Logout failed:', error);
+      getLogger().error('Logout failed:', error);
       // Still dispatch logout even if storage clear fails
       // ✅ CRASH FIX: Check mounted before dispatching
       if (isMountedRef.current) {

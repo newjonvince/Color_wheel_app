@@ -1,6 +1,20 @@
 // Simple validation rules and constants for LoginScreen
-import Constants from 'expo-constants';
 import { STORAGE_KEYS } from '../../constants/storageKeys';
+
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('LoginScreen/constants: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
 
 export const VALIDATION_RULES = {
   email: {
@@ -276,22 +290,8 @@ export const sanitizeInput = (input, maxLength = 255) => {
     .slice(0, maxLength);
 };
 
-// ✅ PRODUCTION-READY: Error message handling with debug mode support
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
-    }
-    console.warn('LoginScreen constants: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('LoginScreen constants: unable to read expoConfig safely, using defaults', error);
-  }
-  return {};
-};
-
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+// ✅ CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 export const getErrorMessage = (error) => {
   if (!error) return 'An error occurred. Please try again.';
@@ -329,7 +329,7 @@ export const getErrorMessage = (error) => {
   }
 
   // Debug-only: show full message if you *explicitly* turn on debug mode
-  if (IS_DEBUG_MODE) {
+  if (IS_DEBUG_MODE()) {
     return error.message || String(error) || 'An error occurred. Please try again.';
   }
 

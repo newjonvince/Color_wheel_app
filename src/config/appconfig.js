@@ -1,6 +1,35 @@
 // config/appconfig.js - Ultra-optimized app configuration with caching and validation
 import { Platform, AppState } from 'react-native';
-import Constants from 'expo-constants';
+
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+let _isProductionValue = null;
+
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('appconfig: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
+
+const getIsProduction = () => {
+  if (_isProductionValue === null) {
+    try {
+      const helper = require('../utils/expoConfigHelper');
+      _isProductionValue = helper.isProduction ? helper.isProduction() : true; // Default to production for safety
+    } catch (error) {
+      console.warn('appconfig: expoConfigHelper load failed', error?.message);
+      _isProductionValue = true; // Default to production for safety
+    }
+  }
+  return _isProductionValue;
+};
 
 // ✅ CIRCULAR DEPENDENCY FIX: Simple console wrapper instead of AppLogger
 // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
@@ -25,32 +54,18 @@ try {
   // Will be handled gracefully in the getStateFromPath function
 }
 
-// Production-ready environment configuration
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
-    }
-    console.warn('⚠️ config/appconfig: expoConfig missing or malformed, using empty extra config');
-  } catch (error) {
-    console.warn('⚠️ config/appconfig: Unable to read expoConfig safely, using defaults', error);
-  }
-  return {};
-};
+// ✅ CIRCULAR DEPENDENCY FIX: Use lazy getters instead of module-load-time calls
+const IS_DEBUG_MODE = () => getIsDebugMode();
+const IS_DEV = () => getIsDebugMode();
+const IS_PROD = () => getIsProduction();
 
-const extra = getSafeExpoExtra();
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
-const IS_DEV = IS_DEBUG_MODE;
-const IS_PROD = !IS_DEBUG_MODE;
-
-// Performance constants
-const PERFORMANCE_CONFIG = {
+// Performance constants - use getter functions for lazy evaluation
+const getPerformanceConfig = () => ({
   // Timeout configurations
   TIMEOUTS: {
-    APP_INIT: IS_DEV ? 15000 : 10000, // Longer timeout in dev for debugging
-    PROFILE_LOAD: IS_DEV ? 8000 : 5000,
-    INIT_DELAY: IS_DEV ? 100 : 50, // Slightly longer delay in dev
+    APP_INIT: IS_DEV() ? 15000 : 10000, // Longer timeout in dev for debugging
+    PROFILE_LOAD: IS_DEV() ? 8000 : 5000,
+    INIT_DELAY: IS_DEV() ? 100 : 50, // Slightly longer delay in dev
   },
   
   // Memory management
@@ -61,9 +76,18 @@ const PERFORMANCE_CONFIG = {
   
   // Performance monitoring
   MONITORING: {
-    ENABLED: IS_DEV,
+    ENABLED: IS_DEV(),
     LOG_THRESHOLD: 100, // Log operations taking longer than 100ms
   }
+});
+
+// Cache the config after first access
+let _performanceConfig = null;
+const PERFORMANCE_CONFIG = () => {
+  if (!_performanceConfig) {
+    _performanceConfig = getPerformanceConfig();
+  }
+  return _performanceConfig;
 };
 
 // Cache helpers
@@ -213,17 +237,17 @@ const createAppConfig = (() => {
       },
 
       // Performance-optimized initialization settings
-      initialization: PERFORMANCE_CONFIG.TIMEOUTS,
+      initialization: PERFORMANCE_CONFIG().TIMEOUTS,
       
       // Performance monitoring configuration
-      performance: PERFORMANCE_CONFIG.MONITORING,
+      performance: PERFORMANCE_CONFIG().MONITORING,
       
       // Memory management configuration
-      memory: PERFORMANCE_CONFIG.MEMORY,
+      memory: PERFORMANCE_CONFIG().MEMORY,
     };
     
     // Validate configuration in development
-    if (IS_DEV) {
+    if (IS_DEV()) {
       validateAppConfig(cachedConfig);
     }
     
@@ -285,7 +309,7 @@ export const initializeAppConfig = () => {
   initializationPromise = (async () => {
     try {
       // Production JS fatal handler with enhanced error reporting
-      if (IS_PROD && global?.ErrorUtils?.setGlobalHandler) {
+      if (IS_PROD() && global?.ErrorUtils?.setGlobalHandler) {
         const originalHandler = global.ErrorUtils.getGlobalHandler?.();
         
         global.ErrorUtils.setGlobalHandler((error, isFatal) => {
@@ -303,11 +327,11 @@ export const initializeAppConfig = () => {
         });
       }
 
-        if (IS_PROD) {
+        if (IS_PROD()) {
           log.debug('Production logging configured');
         }
         
-        if (IS_DEV) {
+        if (IS_DEV()) {
           if (APP_CONFIG.performance.ENABLED) {
             log.debug('Performance monitoring enabled');
           }
@@ -322,7 +346,7 @@ export const initializeAppConfig = () => {
       isInitialized = true;
       
       const initTime = Date.now() - startTime;
-      if (IS_DEV && initTime > 10) {
+      if (IS_DEV() && initTime > 10) {
         log.debug(`App config initialization took ${initTime}ms`);
       }
       
@@ -361,7 +385,7 @@ export const getStatusBarStyle = () => {
   // Prevent memory leak: trim oldest entries instead of clearing all
   if (statusBarStyleCache.size >= MAX_STATUS_CACHE_SIZE) {
     const removed = trimCacheToSize(statusBarStyleCache, MAX_STATUS_CACHE_SIZE - 1);
-      if (removed > 0 && IS_DEV) {
+      if (removed > 0 && IS_DEV()) {
         log.debug(`statusBarStyleCache trimmed by ${removed} to stay within limit`);
       }
   }
@@ -405,7 +429,7 @@ export const getMatchesKey = (userId) => {
   // Prevent memory leak: trim oldest entries instead of clearing all
   if (storageKeyCache.size >= MAX_STORAGE_CACHE_SIZE) {
     const removed = trimCacheToSize(storageKeyCache, MAX_STORAGE_CACHE_SIZE - 1);
-      if (removed > 0 && IS_DEV) {
+      if (removed > 0 && IS_DEV()) {
         log.debug(`storageKeyCache trimmed by ${removed} to stay within limit`);
       }
   }
@@ -440,11 +464,11 @@ const setupCacheCleanup = () => {
         ? trimCacheToSize(storageKeyCache, MAX_STORAGE_CACHE_SIZE)
         : 0;
       
-      if (IS_DEV && (removedStatus > 0 || removedStorage > 0)) {
+      if (IS_DEV() && (removedStatus > 0 || removedStorage > 0)) {
         log.debug(`Cache cleanup trimmed - StatusBar: ${removedStatus}, Storage: ${removedStorage}`);
       }
       
-      if (IS_DEV && (statusBarStyleCache.size > 0 || storageKeyCache.size > 0)) {
+      if (IS_DEV() && (statusBarStyleCache.size > 0 || storageKeyCache.size > 0)) {
         log.debug(`Cache sizes - StatusBar: ${statusBarStyleCache.size}, Storage: ${storageKeyCache.size}`);
       }
     }, CLEANUP_INTERVAL);
@@ -456,7 +480,7 @@ export const stopCacheCleanup = () => {
   if (cacheCleanupInterval) {
     clearInterval(cacheCleanupInterval);
     cacheCleanupInterval = null;
-    if (IS_DEV) {
+    if (IS_DEV()) {
       log.debug('Cache cleanup interval stopped');
     }
   }
@@ -472,13 +496,13 @@ const handleAppStateChange = (nextAppState) => {
   if (nextAppState === 'background') {
     // Stop cleanup when app goes to background to save resources
     stopCacheCleanup();
-    if (IS_DEV) {
+    if (IS_DEV()) {
       log.debug('App backgrounded - cache cleanup stopped');
     }
   } else if (nextAppState === 'active') {
     // Restart cleanup when app becomes active
     setupCacheCleanup();
-    if (IS_DEV) {
+    if (IS_DEV()) {
       log.debug('App foregrounded - cache cleanup restarted');
     }
   }
@@ -494,7 +518,7 @@ export const cleanupAppStateListener = () => {
   if (appStateSubscription && typeof appStateSubscription.remove === 'function') {
     appStateSubscription.remove();
     appStateSubscription = null;
-    if (IS_DEV) {
+    if (IS_DEV()) {
       log.debug('AppState listener removed');
     }
   }
@@ -511,7 +535,7 @@ export const clearAllCaches = () => {
 export const stopCacheCleanupInterval = stopCacheCleanup;
 
 // Performance monitoring utilities (development only)
-export const performanceUtils = IS_DEV ? {
+export const performanceUtils = IS_DEV() ? {
   startTimer: (label) => {
     const startTime = Date.now();
     return () => {
@@ -546,7 +570,7 @@ export const memoryUtils = {
     storageKeyCache.clear();
     // userCache is WeakMap, so it clears automatically
     
-    if (IS_DEV) {
+    if (IS_DEV()) {
       log.debug('Configuration caches cleared');
     }
   },
@@ -566,15 +590,15 @@ export const cleanupAppConfig = () => {
   isInitialized = false;
   initializationPromise = null;
   
-  if (IS_DEV) {
+  if (IS_DEV()) {
     log.debug('App configuration cleaned up');
   }
 };
 
 // Export environment flags for other modules
 export const ENV = {
-  IS_DEV,
-  IS_PROD,
+  IS_DEV: IS_DEV(),
+  IS_PROD: IS_PROD(),
   PLATFORM: Platform.OS,
   VERSION: Platform.Version,
 };

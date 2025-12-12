@@ -1,28 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
 
-// Production-ready configuration
-const getSafeExpoExtra = () => {
-  try {
-    const expoConfig = Constants?.expoConfig;
-    if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
-      return expoConfig.extra;
+// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugMode = null;
+const getIsDebugMode = () => {
+  if (_isDebugMode === null) {
+    try {
+      const helper = require('./expoConfigHelper');
+      _isDebugMode = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('safeAsyncStorage: expoConfigHelper load failed', error?.message);
+      _isDebugMode = false;
     }
-    console.warn('safeAsyncStorage: expoConfig missing or malformed, using defaults');
-  } catch (error) {
-    console.warn('safeAsyncStorage: unable to read expoConfig safely, using defaults', error);
   }
-  return {};
+  return _isDebugMode;
 };
-
-let cachedExtra = null;
-const getExtra = () => {
-  if (!cachedExtra) {
-    cachedExtra = getSafeExpoExtra();
-  }
-  return cachedExtra;
-};
-const isDebugMode = () => !!getExtra().EXPO_PUBLIC_DEBUG_MODE;
 
 const FALLBACK_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const FALLBACK_MAX_ENTRIES = 100;
@@ -197,7 +188,7 @@ class SafeAsyncStorage {
         this.isAvailable = true;
         // Clear shadow fallback data on successful init to avoid stale state
         this.fallbackStorage.clear();
-        if (isDebugMode()) {
+        if (getIsDebugMode()) {
           console.log('AsyncStorage is available and working');
         }
       } else {
@@ -306,7 +297,7 @@ class SafeAsyncStorage {
     if (this.isAvailable === false && !this.retryLock && this.shouldRetryAsyncStorage()) {
       this.retryLock = true;
       try {
-        if (isDebugMode()) {
+        if (getIsDebugMode()) {
           console.log('Retrying AsyncStorage...');
         }
         await this.init();
@@ -320,7 +311,7 @@ class SafeAsyncStorage {
         const result = await this._safeTimeout(AsyncStorage.getItem(key), 5000, 'AsyncStorage.getItem');
         if (this.failureCount > 0) {
           this.failureCount = 0;
-          if (isDebugMode()) console.log('AsyncStorage recovered');
+          if (getIsDebugMode()) console.log('AsyncStorage recovered');
         }
         // Drop shadow fallback copy on success
         if (this.fallbackStorage.has(key)) {
@@ -355,7 +346,7 @@ class SafeAsyncStorage {
     if (this.isAvailable === false && !this.retryLock && this.shouldRetryAsyncStorage()) {
       this.retryLock = true;
       try {
-        if (isDebugMode()) {
+        if (getIsDebugMode()) {
           console.log('Retrying AsyncStorage...');
         }
         await this.init();
@@ -369,7 +360,7 @@ class SafeAsyncStorage {
         await this._safeTimeout(AsyncStorage.setItem(key, value), 5000, 'AsyncStorage.setItem');
         if (this.failureCount > 0) {
           this.failureCount = 0;
-          if (isDebugMode()) console.log('AsyncStorage recovered');
+          if (getIsDebugMode()) console.log('AsyncStorage recovered');
         }
         // Remove any shadow fallback value
         this.fallbackStorage.delete(key);
