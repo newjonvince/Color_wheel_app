@@ -53,14 +53,16 @@ export const reportError = (eventName, error, context = {}) => {
  * @param {Object} metrics - Performance metrics
  */
 export const reportPerformance = (eventName, metrics = {}) => {
-  if (!__DEV__ && global.Analytics && typeof global.Analytics.trackEvent === 'function') {
-    try {
-      global.Analytics.trackEvent(`performance_${eventName}`, {
-        ...metrics,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn('Failed to report performance metrics:', error);
+  if (typeof __DEV__ === 'undefined' || !__DEV__) {
+    if (global.Analytics && typeof global.Analytics.trackEvent === 'function') {
+      try {
+        global.Analytics.trackEvent(`performance_${eventName}`, {
+          ...metrics,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.warn('Failed to report performance metrics:', error);
+      }
     }
   }
 };
@@ -71,14 +73,16 @@ export const reportPerformance = (eventName, metrics = {}) => {
  * @param {Object} properties - Action properties
  */
 export const reportUserAction = (eventName, properties = {}) => {
-  if (!__DEV__ && global.Analytics && typeof global.Analytics.trackEvent === 'function') {
-    try {
-      global.Analytics.trackEvent(`user_${eventName}`, {
-        ...properties,
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      console.warn('Failed to report user action:', error);
+  if (typeof __DEV__ === 'undefined' || !__DEV__) {
+    if (global.Analytics && typeof global.Analytics.trackEvent === 'function') {
+      try {
+        global.Analytics.trackEvent(`user_${eventName}`, {
+          ...properties,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.warn('Failed to report user action:', error);
+      }
     }
   }
 };

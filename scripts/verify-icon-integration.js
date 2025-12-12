@@ -21,7 +21,7 @@ const checks = [
   },
   {
     name: 'App Configuration',
-    path: 'src/config/app.js', 
+    path: 'src/config/appconfig.js', 
     required: true,
     description: 'App config with tab icon definitions'
   },

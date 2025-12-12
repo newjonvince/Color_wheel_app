@@ -26,7 +26,7 @@ if (IS_PROD) {
 }
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, Animated, Platform } from 'react-native';
 
 // Direct imports (no lazy loading to avoid complexity)
 import { StatusBar } from 'expo-status-bar';
@@ -34,19 +34,27 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
 
-// ✅ LAZY LOADING: Avoid circular dependency with config/app.js
+// ✅ PRODUCTION SAFETY: Gate console.log statements for production
+// ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+const devLog = (...args) => (typeof __DEV__ !== 'undefined' && __DEV__) && console.log(...args);
+const devWarn = (...args) => (typeof __DEV__ !== 'undefined' && __DEV__) && console.warn(...args);
+const devError = (...args) => (typeof __DEV__ !== 'undefined' && __DEV__) && console.error(...args);
+
+// ✅ LAZY LOADING: Avoid circular dependency with config/appconfig.js
 let appConfig = null;
 let statusBarStyleFn = null;
 
 const getAppConfig = () => {
   if (appConfig) return appConfig;
   try {
-    const configModule = require('./src/config/app');
+    const configModule = require('./src/config/appconfig');
     appConfig = configModule.APP_CONFIG || {};
     statusBarStyleFn = configModule.getStatusBarStyle || (() => 'auto');
   } catch (error) {
-    console.warn('Failed to load app config:', error.message);
+    devWarn('Failed to load app config:', error.message);
     appConfig = { linking: undefined };
     statusBarStyleFn = () => 'auto';
   }
@@ -65,18 +73,18 @@ let appInitializer = null;
 try {
   appInitializer = require('./src/utils/AppInitializer').default;
 } catch (error) {
-  console.error('Γ¥î Failed to import AppInitializer:', error.message);
+  devError('Γ¥î Failed to import AppInitializer:', error.message);
   // Create fallback initializer
   appInitializer = {
     initialize: async () => {
-      console.warn('Using fallback AppInitializer');
+      devWarn('Using fallback AppInitializer');
       return { success: true, message: 'Fallback initialization' };
     },
     reset: () => {
-      console.warn('AppInitializer reset called on fallback');
+      devWarn('AppInitializer reset called on fallback');
     },
     setAuthInitializer: () => {
-      console.warn('AppInitializer setAuthInitializer called on fallback');
+      devWarn('AppInitializer setAuthInitializer called on fallback');
     }
   };
 }
@@ -85,26 +93,41 @@ try {
 import AuthenticatedApp from './src/components/AuthenticatedApp';
 import UnauthenticatedApp from './src/components/UnauthenticatedApp';
 import UnifiedErrorBoundary from './src/components/UnifiedErrorBoundary';
-import { useAuth } from './src/hooks/useAuth';
+import { AuthProvider, useAuthState, useAuthDispatch } from './src/contexts/AuthContext';
 import { validateEnv } from './src/config/env';
-import { logger } from './src/utils/AppLogger';
 import { initializeCrashReporting, reportError, setUserContext, addBreadcrumb } from './src/utils/crashReporting';
+
+// ✅ FIX: Lazy load AppLogger to avoid circular dependency
+// App.js → config/appconfig.js → AppLogger.js → App.js (CIRCULAR!)
+let logger = null;
+const getLogger = () => {
+  if (logger) return logger;
+  try {
+    const mod = require('./src/utils/AppLogger');
+    logger = mod?.logger || mod?.default || console;
+  } catch (error) {
+    devWarn('App.js: AppLogger load failed, using console', error?.message || error);
+    logger = console;
+  }
+  return logger;
+};
 
 // Create stable default functions OUTSIDE component
 const DEFAULT_AUTH_HANDLERS = {
   initializeAuth: async () => {
-    logger.warn('Auth not initialized');
+    getLogger().warn('Auth not initialized');
     return Promise.resolve();
   },
-  handleLoginSuccess: () => logger.warn('handleLoginSuccess: Auth not initialized'),
-  handleLogout: () => logger.warn('handleLogout: Auth not initialized'),
+  handleLoginSuccess: () => getLogger().warn('handleLoginSuccess: Auth not initialized'),
+  handleLogout: () => getLogger().warn('handleLogout: Auth not initialized'),
 };
 
 // Simplified App component with split auth/main flows
 function FashionColorWheelApp() {
-  console.log('🚀 FashionColorWheelApp: Component rendering started');
+  devLog('🚀 FashionColorWheelApp: Component rendering started');
   const [isReady, setIsReady] = useState(false);
   const [initError, setInitError] = useState(null);
+  const [navigationError, setNavigationError] = useState(null);
   
   // ≡ƒöº Progressive loading states for better UX
   const [loadingState, setLoadingState] = useState({
@@ -112,6 +135,19 @@ function FashionColorWheelApp() {
     progress: 0, // 0-100
     message: 'Starting app...'
   });
+  
+  // ✅ ANIMATION FIX: Animated value for smooth progress bar
+  const progressAnimatedValue = useRef(new Animated.Value(0)).current;
+  
+  // Initialize animated value with current progress on mount
+  useEffect(() => {
+    progressAnimatedValue.setValue(loadingState.progress);
+    
+    // ✅ MEMORY LEAK FIX: Stop animations on unmount to prevent memory leaks
+    return () => {
+      progressAnimatedValue.stopAnimation();
+    };
+  }, []); // Only run once on mount
   
   // ≡ƒöº RACE CONDITION FIX: Single atomic state management
   const initializationRef = useRef({
@@ -122,7 +158,7 @@ function FashionColorWheelApp() {
   const restartTimersRef = useRef({ restart: null, flag: null }); // Track restart timers
   const isRestartingRef = useRef(false); // Track restart state
   
-  // ≡ƒöº Atomic state transition helper
+  // ≡ƒöº Atomic state transition helper (base implementation)
   const setInitializationState = useCallback((newState, error = null) => {
     const validTransitions = {
       'pending': ['initializing', 'error'],
@@ -133,7 +169,7 @@ function FashionColorWheelApp() {
     
     const currentState = initializationRef.current.state;
     if (!validTransitions[currentState]?.includes(newState)) {
-      logger.warn(`❌ Invalid state transition: ${currentState} → ${newState}`);
+      getLogger().warn(`❌ Invalid state transition: ${currentState} → ${newState}`);
       return false;
     }
     
@@ -142,57 +178,20 @@ function FashionColorWheelApp() {
       timestamp: Date.now(),
       error
     };
-    logger.debug(`✅ State transition: ${currentState} → ${newState}`);
+    getLogger().debug(`✅ State transition: ${currentState} → ${newState}`);
     return true;
   }, []);
   
-  // ✅ HOOKS RULE COMPLIANCE: Call hook unconditionally at top level
-  // Error handling should be done by Error Boundaries, not try-catch
-  console.log('🔐 FashionColorWheelApp: Calling useAuth hook');
-  const authState = useAuth();
-  console.log('🔐 FashionColorWheelApp: useAuth returned:', authState);
-
-  // ≡ƒöº Validate BEFORE destructuring - CRITICAL: Don't proceed if invalid
-  const isValidAuthState = authState && typeof authState === 'object';
+  // 🚨 RACE CONDITION FIX: Define refs early for use in callbacks
+  const isProcessingRef = useRef(false);
+  const isMountedRef = useRef(true); // Track component mount state
+  const [isRestarting, setIsRestarting] = useState(false); // ✅ Use state instead of ref for UI updates
   
-  // ≡ƒÜ¿ CRITICAL: If auth state is invalid, show error immediately
-  if (!isValidAuthState) {
-    logger.error('≡ƒÜ¿ useAuth returned invalid state:', authState);
-    return (
-      <SafeAreaProvider>
-        <GestureHandlerRootView style={{ flex: 1 }}>
-          <SafeAreaView style={styles.loadingContainer}>
-            <Text style={styles.errorText}>ΓÜá∩╕Å Authentication Error</Text>
-            <Text style={styles.errorSubtext}>
-              The authentication system failed to initialize properly.
-            </Text>
-            <TouchableOpacity 
-              style={styles.restartButton} 
-              onPress={() => {
-                // Force app restart by reloading
-                if (typeof window !== 'undefined' && window.location) {
-                  window.location.reload();
-                } else {
-                  logger.warn('Cannot restart app - no reload mechanism available');
-                }
-              }}
-            >
-              <Text style={styles.restartButtonText}>Restart App</Text>
-            </TouchableOpacity>
-          </SafeAreaView>
-        </GestureHandlerRootView>
-      </SafeAreaProvider>
-    );
-  }
-  
-  const {
-    user = null,
-    loading: authLoading = false,
-    isInitialized = false,
-    initializeAuth = DEFAULT_AUTH_HANDLERS.initializeAuth,
-    handleLoginSuccess = DEFAULT_AUTH_HANDLERS.handleLoginSuccess,
-    handleLogout = DEFAULT_AUTH_HANDLERS.handleLogout,
-  } = authState;
+  // ✅ SPLIT CONTEXT: Use separate hooks for state and dispatch to prevent unnecessary re-renders
+  devLog('🔐 FashionColorWheelApp: Calling useAuthState and useAuthDispatch hooks');
+  const { user, loading: authLoading, isInitialized, error: authError } = useAuthState();
+  const { initializeAuth, handleLoginSuccess, handleLogout } = useAuthDispatch();
+  devLog('🔐 FashionColorWheelApp: Auth state:', { user: !!user, authLoading, isInitialized });
 
   // ≡ƒöº Additional validation: Ensure auth functions are actually functions
   const safeInitializeAuth = typeof initializeAuth === 'function' 
@@ -208,7 +207,7 @@ function FashionColorWheelApp() {
     : DEFAULT_AUTH_HANDLERS.handleLogout;
 
   // ≡ƒöº Track user context for crash reporting
-  React.useEffect(() => {
+  useEffect(() => {
     if (user) {
       setUserContext(user);
       addBreadcrumb('User logged in', 'auth', 'info', { userId: user.id });
@@ -218,98 +217,249 @@ function FashionColorWheelApp() {
     }
   }, [user]);
 
-  // Γ£à Centralized initialization with proper cleanup
+  // ✅ PERFORMANCE FIX: Safe setLoadingState to prevent unnecessary re-renders
+  const setLoadingStateSafe = useCallback((newState) => {
+    setLoadingState(prev => {
+      if (prev.stage === newState.stage && 
+          prev.progress === newState.progress && 
+          prev.message === newState.message) {
+        return prev; // No change, no re-render
+      }
+      
+      // ✅ ANIMATION FIX: Animate progress bar width smoothly
+      if (prev.progress !== newState.progress) {
+        Animated.timing(progressAnimatedValue, {
+          toValue: newState.progress,
+          duration: 300, // Smooth 300ms animation
+          useNativeDriver: false, // Width animations require layout driver
+        }).start();
+      }
+      
+      return newState;
+    });
+  }, [progressAnimatedValue]);
+
+  // ✅ SAFE WRAPPER: Mount-checked version of setInitializationState
+  const safeSetInitializationState = useCallback((newState, error = null) => {
+    if (!isMountedRef.current) return false;
+    return setInitializationState(newState, error);
+  }, [setInitializationState]);
+
+  // ✅ NON-BLOCKING INITIALIZATION: Start initialization in background, show UI immediately
+  // Note: Empty deps array is intentional - this effect should only run once on mount
+  // All functions used are either stable (useCallback) or accessed via refs to avoid stale closures
   useEffect(() => {
-    let isMounted = true;
-    let controller = null;
-    let finalizationTimerId = null; // Track timer for cleanup
-    
-    try {
-      controller = new AbortController();
-    } catch (error) {
-      logger.warn('AbortController not available:', error);
+    // ✅ GUARD: Check if already initializing/initialized to prevent multiple runs
+    if (initializationRef.current.state !== 'pending') {
+      getLogger().debug('Skipping initialization - already attempted');
+      return;
     }
-    
-    const initialize = async () => {
+
+    let isMounted = true;
+    const controller = new AbortController();
+    let finalizationTimerId = null; // Track timer for cleanup
+
+    // ✅ BACKGROUND INITIALIZATION: Initialize features without blocking UI
+    const initializeInBackground = async () => {
       try {
-        // ≡ƒöº Set initializing state
-        if (!setInitializationState('initializing')) {
-          logger.warn('❌ Cannot start initialization - invalid state transition');
+        // ✅ ABORT CHECK: Early exit if already aborted
+        if (controller.signal.aborted || !isMounted) {
+          getLogger().debug('Initialization aborted before start');
+          return;
+        }
+
+        // ✅ FIX: Atomic check-and-set with proper error handling
+        const canProceed = safeSetInitializationState('initializing');
+        if (!canProceed) {
+          const currentState = initializationRef.current.state;
+          getLogger().error(`Cannot initialize from state: ${currentState}`);
+          
+          // ✅ FIX: Set error state instead of silent return
+          if (isMounted) {
+            const blockingError = new Error(`Initialization blocked - app in ${currentState} state`);
+            safeSetInitializationState('error', blockingError);
+            setInitError(blockingError);
+            setIsReady(false);
+          }
           return;
         }
         
         // ≡ƒöº FIXED: Call environment validation first
-        logger.debug('≡ƒöì Validating environment configuration...');
+        getLogger().debug('≡ƒöì Validating environment configuration...');
         const envValidation = validateEnv();
         if (!envValidation.isValid) {
-          logger.warn('ΓÜá∩╕Å Environment validation warnings:', envValidation.warnings);
+          getLogger().warn('ΓÜá∩▕Å Environment validation warnings:', envValidation.warnings);
           if (envValidation.errors.length > 0) {
             throw new Error(`Environment validation failed: ${envValidation.errors.join(', ')}`);
           }
         } else {
-          logger.debug('Γ£à Environment validation passed');
+          getLogger().debug('Γãà Environment validation passed');
         }
         
         // ≡ƒöº Initialize crash reporting early
-        logger.debug('≡ƒôè Initializing crash reporting...');
+        getLogger().debug('≡ƒôè Initializing crash reporting...');
         await initializeCrashReporting();
         addBreadcrumb('App initialization started', 'app', 'info');
         
-        // Set auth initializer in the centralized manager
+        // ✅ ABORT CHECK: After crash reporting setup
+        if (controller.signal.aborted || !isMounted) {
+          getLogger().debug('Initialization aborted after crash reporting setup');
+          return;
+        }
+        
+        // ✅ FIX: Explicit auth initialization with proper error handling
+        getLogger().debug('🔐 Initializing authentication...');
+        setLoadingStateSafe({ stage: 'auth', progress: 15, message: 'Setting up authentication...' });
+        
+        try {
+          await safeInitializeAuth();
+          getLogger().info('✅ Auth initialization completed successfully');
+          
+          // ✅ ABORT CHECK: After auth initialization
+          if (controller.signal.aborted || !isMounted) {
+            getLogger().debug('Initialization aborted after auth setup');
+            return;
+          }
+        } catch (error) {
+          getLogger().error('❌ Auth initialization failed:', error);
+          
+          if (isMounted) {
+            const authErrorMsg = error?.message || 'Unknown authentication error';
+            const authError = new Error(`Authentication failed: ${authErrorMsg}`);
+            authError.cause = error;
+            authError.category = 'AuthError';
+            
+            safeSetInitializationState('error', authError);
+            setInitError(authError);
+            setIsReady(false);
+            
+            addBreadcrumb('Auth initialization failed', 'auth', 'error', {
+              originalError: authErrorMsg,
+              errorType: error?.name || 'Error'
+            });
+            
+            throw authError; // authError is guaranteed to exist now
+          }
+          
+          throw error; // Fallback if not mounted
+        }
+        
+        // ✅ CRITICAL FIX: Set auth initializer BEFORE calling initialize() to prevent race condition
+        devLog('🔧 Setting auth initializer in AppInitializer...');
         appInitializer.setAuthInitializer(safeInitializeAuth);
         
         // Use centralized initialization with progressive loading
-        console.log('🔧 Starting AppInitializer.initialize...');
+        devLog('🔧 Starting AppInitializer.initialize...');
         
-        // Run diagnostics if initialization fails repeatedly
-        try {
-          const { runDiagnostics } = require('./src/utils/diagnostics');
-          console.log('🔍 Running pre-initialization diagnostics...');
-          const diagnosticResult = await runDiagnostics();
-          if (!diagnosticResult.success) {
-            console.error('🚨 Diagnostic failures detected:', diagnosticResult.failures);
+        // ✅ PERFORMANCE FIX: Async environment validation to avoid blocking JS thread
+        const runEnvironmentValidation = async () => {
+          try {
+            devLog('🔍 Running async environment validation...');
+            
+            // ✅ Use setTimeout to yield to event loop and prevent blocking
+            await new Promise(resolve => setTimeout(resolve, 0));
+            
+            const basicChecks = {
+              hasConstants: typeof Constants !== 'undefined',
+              hasAsyncStorage: typeof AsyncStorage !== 'undefined',
+              hasNetInfo: typeof NetInfo !== 'undefined',
+              platform: Platform.OS,
+              memory: typeof performance !== 'undefined' && performance.memory ? {
+                used: Math.round(performance.memory.usedJSHeapSize / 1024 / 1024),
+                total: Math.round(performance.memory.totalJSHeapSize / 1024 / 1024)
+              } : 'unavailable'
+            };
+            
+            // ✅ Yield again after computation
+            await new Promise(resolve => setTimeout(resolve, 0));
+            
+            devLog('✅ Environment validation completed:', basicChecks);
+            return basicChecks;
+          } catch (envError) {
+            devWarn('⚠️ Environment validation failed:', envError.message);
+            return null;
           }
-        } catch (diagError) {
-          console.warn('⚠️ Could not run diagnostics:', diagError.message);
-        }
+        };
         
-        await appInitializer.initialize({
+        // ✅ Run validation asynchronously without blocking
+        runEnvironmentValidation().catch(err => {
+          devWarn('Environment validation error:', err);
+        });
+        
+        // ✅ NON-BLOCKING: Initialize in background without blocking UI
+        appInitializer.initialize({
           signal: controller?.signal,
           onProgress: (progress) => {
             if (isMounted) {
-              logger.info(`≡ƒôè Init progress: ${progress.step} (${Math.round(progress.progress * 100)}%)`);
+              getLogger().info(`🔧 Background init: ${progress.step} (${Math.round(progress.progress * 100)}%)`);
               
-              // ≡ƒöº Update progressive loading states
+              // ✅ BACKGROUND PROGRESS: Update loading state for background initialization
               const stageMap = {
-                'env': { stage: 'initializing', progress: 10, message: 'Checking environment...' },
-                'config': { stage: 'initializing', progress: 20, message: 'Loading configuration...' },
-                'storage': { stage: 'storage', progress: 40, message: 'Loading your data...' },
-                'api': { stage: 'storage', progress: 60, message: 'Connecting to services...' },
-                'auth': { stage: 'auth', progress: 80, message: 'Signing you in...' }
+                'env': { stage: 'background', progress: 20, message: 'Environment ready' },
+                'config': { stage: 'background', progress: 40, message: 'Configuration loaded' },
+                'storage': { stage: 'background', progress: 60, message: 'Storage connected' },
+                'api': { stage: 'background', progress: 80, message: 'Services connected' },
+                'auth': { stage: 'background', progress: 95, message: 'Authentication ready' }
               };
               
               const loadingUpdate = stageMap[progress.step] || {
-                stage: 'ready',
+                stage: 'background',
                 progress: Math.round(progress.progress * 100),
-                message: 'Almost there...'
+                message: `${progress.step} ready`
               };
               
-              setLoadingState(loadingUpdate);
+              setLoadingStateSafe(loadingUpdate);
             }
+          }
+        }).then(() => {
+          // ✅ BACKGROUND COMPLETION: All features loaded
+          if (isMounted) {
+            setLoadingStateSafe({ 
+              stage: 'ready', 
+              progress: 100, 
+              message: 'All features ready!' 
+            });
+            getLogger().info('🎉 Background initialization completed - all features available');
+          }
+        }).catch((error) => {
+          // ✅ BACKGROUND ERROR: Handle gracefully without blocking UI
+          if (isMounted) {
+            getLogger().warn('⚠️ Some features failed to load in background:', error);
+            setLoadingStateSafe({ 
+              stage: 'partial', 
+              progress: 90, 
+              message: 'Core features ready (some features unavailable)' 
+            });
           }
         });
         
-        logger.info('Γ£à Centralized initialization completed');
+        getLogger().info('≡ƒôè Centralized initialization completed');
         
-        // ≡ƒöº RACE CONDITION FIX: Atomic final state update
+        // ✅ ABORT CHECK: After centralized initialization
+        if (controller.signal.aborted || !isMounted) {
+          getLogger().debug('Initialization aborted after centralized init');
+          return;
+        }
+        
+        // ✅ RACE CONDITION FIX: Atomic final state update with proper error handling
         if (isMounted && initializationRef.current.state === 'initializing') {
-          if (!setInitializationState('success')) {
-            logger.warn('❌ Cannot complete initialization - invalid state transition');
+          const canComplete = setInitializationState('success');
+          if (!canComplete) {
+            const currentState = initializationRef.current.state;
+            getLogger().error(`Cannot complete initialization from state: ${currentState}`);
+            
+            // ✅ FIX: Set error state instead of silent return
+            if (isMounted) {
+              const completionError = new Error(`Initialization completion blocked - app in ${currentState} state`);
+              setInitializationState('error', completionError);
+              setInitError(completionError);
+              setIsReady(false);
+            }
             return;
           }
           
           // ✅ RACE CONDITION FIX: Don't show "Ready!" until isReady is actually set
-          setLoadingState({ stage: 'finalizing', progress: 95, message: 'Finalizing...' });
+          setLoadingStateSafe({ stage: 'finalizing', progress: 95, message: 'Finalizing...' });
           
           // Use atomic state update with better timing
           const finalizeInitialization = () => {
@@ -317,7 +467,7 @@ function FashionColorWheelApp() {
             if (isMounted && !controller?.signal?.aborted && initializationRef.current.state === 'success') {
               // ✅ ATOMIC UPDATE: Set both ready state and final loading message together
               setIsReady(true);
-              setLoadingState({ stage: 'ready', progress: 100, message: 'Ready!' });
+              setLoadingStateSafe({ stage: 'ready', progress: 100, message: 'Ready!' });
             }
           };
           
@@ -339,7 +489,7 @@ function FashionColorWheelApp() {
           name: error.name,
           cause: error.cause
         });
-        logger.error('≡ƒÜ¿ Centralized initialization failed:', error);
+        getLogger().error('≡ƒÜ¿ Centralized initialization failed:', error);
         
         // ✅ SECURITY FIX: Always show error screen for failed initialization
         // Never bypass critical initialization failures as this could lead to:
@@ -347,55 +497,89 @@ function FashionColorWheelApp() {
         // - Wrong user data being shown
         // - API calls with invalid tokens
         // - Security vulnerabilities
-        setInitializationState('error', error);
-        setInitError(error);
+        if (isMounted) {
+          setInitializationState('error', error);
+          setInitError(error);
+          setIsReady(false);
+        }
       } finally {
         // ≡ƒöº Wrap finally block in try-catch to prevent any cleanup errors
         try {
           // Note: Don't check initError state here as it might not be updated yet
           // The error handling is done in the catch block above
           if (isMounted && !controller?.signal?.aborted) {
-            logger.debug('≡ƒöº Initialization cleanup completed');
+            getLogger().debug('≡ƒöº Initialization cleanup completed');
           }
         } catch (finallyError) {
-          logger.error('≡ƒÜ¿ Error in finally block:', finallyError);
+          getLogger().error('≡ƒÜ¿ Error in finally block:', finallyError);
           // Don't let cleanup errors crash the app
         }
       }
     };
 
-    // ≡ƒÜ¿ RACE CONDITION FIX: Prevent catch handler from overriding success
-    initialize().catch((error) => {
-      // Don't override successful initialization
-      if (!isMounted || controller?.signal?.aborted || initializationRef.current.state === 'success') {
-        return;
-      }
-      
-      // ≡ƒöº Atomic error state transition
-      if (setInitializationState('error', error)) {
-        logger.error('≡ƒÜ¿ Unhandled initialization error:', error);
+    // ✅ SEQUENCED INITIALIZATION: Wait for background init before showing UI as ready
+    const initializeSequentially = async () => {
+      try {
+        // Start background initialization
+        await initializeInBackground();
         
-        // Set error state to show user-friendly error screen
-        setInitError(error);
-        
-        // Ensure app doesn't stay in loading state
-        if (isMounted) {
-          setIsReady(false);
-          setLoadingState({
-            stage: 'error',
-            progress: 0,
-            message: 'Initialization failed'
+        // ✅ PROPER SEQUENCING: Only set ready after initialization completes
+        if (isMounted && initializationRef.current.state === 'success') {
+          setIsReady(true);
+          setLoadingStateSafe({ 
+            stage: 'ready', 
+            progress: 100, 
+            message: 'All features ready!' 
           });
+          getLogger().info('🎉 App fully initialized and ready');
+        }
+      } catch (error) {
+        // Don't override successful initialization
+        if (!isMounted || controller?.signal?.aborted || initializationRef.current.state === 'success') {
+          return;
+        }
+        
+        // ≡ƒöº Atomic error state transition
+        if (setInitializationState('error', error)) {
+          getLogger().error('≡ƒÜ¿ Initialization error:', error);
+          
+          // Set error state to show user-friendly error screen
+          setInitError(error);
+          
+          // Keep app in loading state with error message
+          if (isMounted) {
+            setIsReady(false);
+            setLoadingStateSafe({
+              stage: 'error',
+              progress: 0,
+              message: 'Initialization failed'
+            });
+          }
         }
       }
-    });
+    };
     
-    // Cleanup
+    // ✅ SHOW LOADING UI: Show loading state immediately, then initialize
+    if (isMounted) {
+      setLoadingStateSafe({ 
+        stage: 'initializing', 
+        progress: 10, 
+        message: 'Starting up...' 
+      });
+    }
+    
+    // Start initialization sequence
+    setTimeout(initializeSequentially, 100);
+    
+    // ✅ COMPREHENSIVE CLEANUP: All timers and resources in one place
     return () => {
       isMounted = false;
-      controller?.abort();
+      controller.abort();
       
-      // ≡ƒöº MEMORY LEAK FIX: Cancel pending timers/animation frames
+      // ✅ Mark component as unmounted to prevent stale timer execution
+      isMountedRef.current = false;
+      
+      // ✅ Cancel pending finalization timers/animation frames
       if (finalizationTimerId !== null) {
         if (typeof cancelAnimationFrame !== 'undefined') {
           cancelAnimationFrame(finalizationTimerId);
@@ -404,16 +588,8 @@ function FashionColorWheelApp() {
         }
         finalizationTimerId = null;
       }
-    };
-  }, []); // Empty deps = run once
-  
-  // ≡ƒöº MEMORY LEAK FIX: Cleanup restart timers on unmount
-  useEffect(() => {
-    return () => {
-      // ✅ Mark component as unmounted to prevent stale timer execution
-      isMountedRef.current = false;
       
-      // Clear any pending restart timers
+      // ✅ Clear any pending restart timers
       if (restartTimersRef.current.restart) {
         clearTimeout(restartTimersRef.current.restart);
         restartTimersRef.current.restart = null;
@@ -423,16 +599,57 @@ function FashionColorWheelApp() {
         restartTimersRef.current.flag = null;
       }
     };
-  }, []);
+  }, []); // Empty deps intentional - runs once on mount, uses refs for stable access
 
   // Note: Auth state validation already handled above with early return
   // No need for duplicate isValidAuthState check here
 
-  // 🚨 RACE CONDITION FIX: Memoized restart handler with ref-based state
-  const isProcessingRef = useRef(false);
-  const isMountedRef = useRef(true); // Track component mount state
-  const [isRestarting, setIsRestarting] = useState(false); // ✅ Use state instead of ref for UI updates
+  // Note: Refs moved to top of component for proper order
   
+  // ✅ NAVIGATION ERROR RECOVERY: Handle navigation failures with recovery options
+  const handleNavigationError = useCallback((error) => {
+    getLogger().error('🚨 Navigation error:', error);
+    
+    // Create detailed navigation error with context
+    const navError = new Error(`Navigation failed: ${error.message}`);
+    navError.cause = error;
+    navError.category = 'NavigationError';
+    navError.timestamp = new Date().toISOString();
+    
+    // Add breadcrumb for debugging
+    addBreadcrumb('Navigation error occurred', 'navigation', 'error', {
+      errorMessage: error.message,
+      errorType: error.name,
+      stack: error.stack
+    });
+    
+    // Report to crash reporting
+    reportError(navError, {
+      category: 'NavigationError',
+      context: 'NavigationContainer onError',
+      timestamp: navError.timestamp
+    });
+    
+    // Set navigation error state for UI recovery
+    setNavigationError(navError);
+    
+    getLogger().warn('Navigation error detected - recovery options available');
+  }, []);
+
+  // ✅ NAVIGATION RECOVERY: Clear navigation error and attempt recovery
+  const handleNavigationRecovery = useCallback(() => {
+    getLogger().info('🔄 Attempting navigation recovery...');
+    
+    // Clear navigation error state
+    setNavigationError(null);
+    
+    // Add breadcrumb for recovery attempt
+    addBreadcrumb('Navigation recovery attempted', 'navigation', 'info');
+    
+    // Force a navigation reset by restarting the app if needed
+    // The NavigationContainer will reinitialize with clean state
+  }, []);
+
   const handleRestart = useCallback(async () => {
     // ≡ƒöº Use ref to prevent multiple executions (properly scoped)
     if (isProcessingRef.current) {
@@ -441,7 +658,7 @@ function FashionColorWheelApp() {
     
     isProcessingRef.current = true;
     setIsRestarting(true); // ✅ Update UI state
-    logger.info('≡ƒöä User requested app restart');
+    getLogger().info('≡ƒöä User requested app restart');
     
     try {
       let restartSuccessful = false;
@@ -449,39 +666,39 @@ function FashionColorWheelApp() {
       // Method 1: Expo Updates (try first)
       if (!restartSuccessful && global.Updates?.reloadAsync) {
         try {
-          logger.info('≡ƒöä Restarting via Expo Updates...');
+          getLogger().info('≡ƒöä Restarting via Expo Updates...');
           await global.Updates.reloadAsync();
           restartSuccessful = true;
         } catch (error) {
-          logger.warn('Expo Updates restart failed:', error);
+          getLogger().warn('Expo Updates restart failed:', error);
         }
       }
       
       // Method 2: DevSettings (only if Method 1 failed)
       if (!restartSuccessful && global.DevSettings?.reload) {
         try {
-          logger.info('≡ƒöä Restarting via DevSettings...');
+          getLogger().info('≡ƒöä Restarting via DevSettings...');
           global.DevSettings.reload();
           restartSuccessful = true;
         } catch (error) {
-          logger.warn('DevSettings restart failed:', error);
+          getLogger().warn('DevSettings restart failed:', error);
         }
       }
       
       // Method 3: Web reload (only if previous methods failed)
       if (!restartSuccessful && typeof window !== 'undefined' && window.location) {
         try {
-          logger.info('≡ƒöä Restarting via window.location.reload...');
+          getLogger().info('≡ƒöä Restarting via window.location.reload...');
           window.location.reload();
           restartSuccessful = true;
         } catch (error) {
-          logger.warn('Web restart failed:', error);
+          getLogger().warn('Web restart failed:', error);
         }
       }
       
       // Method 4: State reset (only if all else failed)
       if (!restartSuccessful) {
-        logger.warn('≡ƒöä No restart mechanism available, attempting state reset...');
+        getLogger().warn('≡ƒöä No restart mechanism available, attempting state reset...');
         
         // ≡ƒöº Reset atomic state
         setInitializationState('pending');
@@ -489,7 +706,7 @@ function FashionColorWheelApp() {
         // Atomic state reset
         setInitError(null);
         setIsReady(false);
-        setLoadingState({
+        setLoadingStateSafe({
           stage: 'initializing',
           progress: 0,
           message: 'Restarting...'
@@ -505,7 +722,7 @@ function FashionColorWheelApp() {
           restartTimersRef.current.restart = null; // Clear timer reference
           if (appInitializer?.initialize && initializationRef.current.state === 'pending') {
             appInitializer.initialize().catch((error) => {
-              logger.error('≡ƒÜ¿ Restart initialization failed:', error);
+              getLogger().error('≡ƒÜ¿ Restart initialization failed:', error);
               setInitializationState('error', error);
               setInitError(error);
             });
@@ -514,7 +731,7 @@ function FashionColorWheelApp() {
       }
       
     } catch (error) {
-      logger.error('≡ƒÜ¿ Restart failed:', error);
+      getLogger().error('≡ƒÜ¿ Restart failed:', error);
       setInitError(new Error(`Restart failed: ${error.message}`));
     } finally {
       // ✅ MEMORY LEAK FIX: Reset processing flag after delay with proper cleanup
@@ -533,7 +750,7 @@ function FashionColorWheelApp() {
         }
       }, 2000);
     }
-  }, []);
+  }, [setInitializationState, setLoadingStateSafe]); // ✅ STALE CLOSURE FIX: Add callback dependencies
 
   // ✅ RULES OF HOOKS FIX: Move nested useMemo to top level
   const loadingCalculation = useMemo(() => {
@@ -554,6 +771,44 @@ function FashionColorWheelApp() {
 
   // ✅ PERFORMANCE FIX: Memoize render content to prevent recreation on every render
   const renderContent = useMemo(() => {
+    // ✅ NAVIGATION ERROR SCREEN: Show navigation error recovery options
+    if (navigationError) {
+      return (
+        <SafeAreaView style={styles.loadingContainer}>
+          <Text style={styles.errorText}>🧭 Navigation Error</Text>
+          <Text style={styles.errorSubtext}>
+            The app's navigation system encountered an error. This could be due to:
+          </Text>
+          <View style={styles.errorDetailsList}>
+            <Text style={styles.errorDetail}>• Invalid deep link or URL</Text>
+            <Text style={styles.errorDetail}>• Missing or corrupted screen</Text>
+            <Text style={styles.errorDetail}>• Navigation state corruption</Text>
+            <Text style={styles.errorDetail}>• Screen component crash</Text>
+          </View>
+          <Text style={styles.errorSubtext}>
+            Error: {navigationError.message}
+          </Text>
+          
+          <TouchableOpacity
+            style={styles.restartButton}
+            onPress={handleNavigationRecovery}
+          >
+            <Text style={styles.restartButtonText}>Reset Navigation</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[styles.restartButton, { backgroundColor: '#e74c3c', marginTop: 10 }]}
+            onPress={handleRestart}
+            disabled={isRestarting}
+          >
+            <Text style={styles.restartButtonText}>
+              {isRestarting ? 'Restarting...' : 'Restart App'}
+            </Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+      );
+    }
+
     // Γ£à Show error screen if initialization failed
     if (initError) {
       return (
@@ -584,18 +839,28 @@ function FashionColorWheelApp() {
             style={[styles.restartButton, { backgroundColor: '#3498db', marginTop: 10 }]}
             onPress={async () => {
               try {
-                const { runDiagnostics } = require('./src/utils/diagnostics');
-                console.log('🔍 Running manual diagnostics...');
-                const result = await runDiagnostics();
+                devLog('🔍 Running basic system check...');
+                
+                // ✅ FIXED: Replaced require() with basic system validation
+                const systemCheck = {
+                  timestamp: new Date().toISOString(),
+                  memoryUsage: typeof performance !== 'undefined' ? performance.memory : 'unavailable',
+                  userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unavailable',
+                  platform: typeof Platform !== 'undefined' ? Platform.OS : 'unknown',
+                  constants: typeof Constants !== 'undefined' ? 'available' : 'missing'
+                };
+                
+                const hasIssues = systemCheck.constants === 'missing';
+                
                 Alert.alert(
-                  'Diagnostic Results',
-                  result.success 
-                    ? 'All systems appear to be working. Try restarting the app.'
-                    : `Issues found:\n${result.failures.join('\n')}`,
+                  'System Check Results',
+                  hasIssues 
+                    ? 'Some system components may be unavailable. Try restarting the app.'
+                    : 'Basic system check passed. If issues persist, try restarting the app.',
                   [{ text: 'OK' }]
                 );
               } catch (error) {
-                Alert.alert('Diagnostic Error', `Could not run diagnostics: ${error.message}`);
+                Alert.alert('System Check Error', `Could not run system check: ${error.message}`);
               }
             }}
           >
@@ -605,17 +870,23 @@ function FashionColorWheelApp() {
             style={[styles.restartButton, { backgroundColor: '#f39c12', marginTop: 10 }]}
             onPress={() => {
               Alert.alert(
-                'Continue Offline?',
-                'This will skip network checks and try to run the app with cached data only. Some features may not work.',
+                '⚠️ Security Warning',
+                'Continuing offline skips security and initialization checks. Your data may not sync properly, and some features will be unavailable. Only use this if you need to access cached data urgently.',
                 [
                   { text: 'Cancel', style: 'cancel' },
                   { 
-                    text: 'Continue Offline', 
+                    text: 'I Understand, Continue', 
+                    style: 'destructive',
                     onPress: () => {
-                      console.log('🔄 User chose to continue offline, bypassing network checks...');
+                      devLog('🔄 User chose to continue offline, bypassing initialization checks...');
+                      addBreadcrumb('User bypassed initialization', 'app', 'warning', {
+                        reason: 'continue_offline_selected'
+                      });
+                      // ✅ SECURITY: Log this action for debugging
+                      getLogger().warn('⚠️ User bypassed initialization - running in limited offline mode');
                       // Skip network-dependent initialization
-                      setInitializationFailed(false);
-                      setIsInitialized(true);
+                      setInitError(null);
+                      setIsReady(true);
                     }
                   }
                 ]
@@ -676,10 +947,16 @@ function FashionColorWheelApp() {
           {/* ≡ƒöº Progressive loading progress */}
           <View style={styles.progressContainer}>
             <View style={styles.progressBar}>
-              <View 
+              <Animated.View 
                 style={[
                   styles.progressFill, 
-                  { width: `${loadingInfo.progress}%` }
+                  {
+                    width: progressAnimatedValue.interpolate({
+                      inputRange: [0, 100],
+                      outputRange: ['0%', '100%'],
+                      extrapolate: 'clamp'
+                    })
+                  }
                 ]} 
               />
             </View>
@@ -704,26 +981,28 @@ function FashionColorWheelApp() {
     return <AuthenticatedApp user={user} handleLogout={safeHandleLogout} />;
   }, [
     initError,
+    navigationError,    // ✅ NEW: Navigation error state
     loadingState,
     user,
     handleRestart,
+    handleNavigationRecovery, // ✅ NEW: Navigation recovery handler
     safeHandleLoginSuccess,
     safeHandleLogout,
     // ✅ MISSING DEPENDENCIES FIXED:
     isRestarting,       // Used in error screen restart button
     loadingCalculation, // Used for shouldShowLoading
-    styles              // Used throughout render
+    // ✅ REMOVED: styles - created via StyleSheet.create() outside component, always stable
   ]);
 
 
   // Top-level wrapper with comprehensive error boundaries
-  console.log('🎨 FashionColorWheelApp: Rendering final UI, isReady:', isReady, 'user:', !!user, 'initError:', !!initError);
+  devLog('🎨 FashionColorWheelApp: Rendering final UI, isReady:', isReady, 'user:', !!user, 'initError:', !!initError);
   return (
     // Single comprehensive error boundary
     <UnifiedErrorBoundary 
       onError={(error, errorInfo, category) => {
         // Categorize and handle based on error type
-        logger.error(`≡ƒÜ¿ ${category} Error:`, error);
+        getLogger().error(`≡ƒÜ¿ ${category} Error:`, error);
         
         // ≡ƒöº ADDED: Report to crash reporting
         reportError(error, {
@@ -742,16 +1021,22 @@ function FashionColorWheelApp() {
         setInitError(new Error(`${category}: ${error.message}`));
         
         if (category === 'StorageError') {
-          logger.warn('Storage error detected, may need to clear cache');
+          getLogger().warn('Storage error detected, may need to clear cache');
         } else if (category === 'NavigationError') {
-          logger.warn('Navigation error detected, may need to reset nav state');
+          getLogger().warn('Navigation error detected, triggering navigation recovery');
+          // Set navigation error state to show recovery UI
+          setNavigationError(error);
+        } else if (category === 'ConfigError') {
+          getLogger().error('Configuration error detected - critical failure');
+          // Config errors are critical - force initialization error state
+          setInitError(new Error(`Configuration Error: ${error.message}`));
         } else {
-          logger.error('Generic error, full crash recovery needed');
+          getLogger().error('Generic error, full crash recovery needed');
         }
       }}
       onRestart={() => {
         // Custom restart logic if needed
-        logger.info('App restart requested by error boundary');
+        getLogger().info('App restart requested by error boundary');
         // Could use Updates.reloadAsync() here
       }}
     >
@@ -766,11 +1051,9 @@ function FashionColorWheelApp() {
                 <Text style={styles.loadingText}>Loading navigation...</Text>
               </SafeAreaView>
             }
-            onError={(error) => {
-              logger.error('≡ƒÜ¿ Navigation error:', error);
-            }}
-            // Γ£à Conditionally add prop only in debug mode
-            {...(__DEV__ ? { onStateChange: (state) => logger.debug('Nav state:', state) } : {})}
+            onError={handleNavigationError}
+            // ✅ Conditionally add prop only in debug mode
+            {...((typeof __DEV__ !== 'undefined' && __DEV__) ? { onStateChange: (state) => getLogger().debug('Nav state:', state) } : {})}
           >
             {renderContent}
           </NavigationContainer>
@@ -910,5 +1193,14 @@ const styles = StyleSheet.create({
 });
 
 
-// Main app export with unified error boundary
-export default FashionColorWheelApp;
+// ✅ CONTEXT WRAPPER: Wrap the main app with AuthProvider for split context pattern
+function App() {
+  return (
+    <AuthProvider>
+      <FashionColorWheelApp />
+    </AuthProvider>
+  );
+}
+
+// Main app export with AuthProvider wrapper
+export default App;

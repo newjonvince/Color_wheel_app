@@ -54,7 +54,8 @@ class AppLogger {
     try {
       this.isDebugMode = IS_DEBUG_MODE();
       this.logLevel = LOG_LEVEL();
-      if (!__DEV__ && global.Sentry) {
+      // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+      if ((typeof __DEV__ === 'undefined' || !__DEV__) && global.Sentry) {
         this.sentryEnabled = true;
       }
     } catch (e) {
@@ -120,10 +121,10 @@ class AppLogger {
     
     const now = Date.now();
     if (now > this._sentryDisabledUntil) {
-      // ✅ RECOVERY: Re-enable Sentry after disable period
+      // ✅ CIRCUIT BREAKER FIX: Re-enable Sentry but don't clear failures until actual success
       this._sentryDisabledUntil = null;
-      this._sentryFailures = []; // Clear failure history
-      console.log('[AppLogger] Sentry re-enabled after disable period');
+      // ✅ Keep failure history - only clear on actual successful operations via _recordSentrySuccess()
+      console.log('[AppLogger] Sentry re-enabled after disable period (failures preserved until success)');
       return false;
     }
     
@@ -216,7 +217,8 @@ class AppLogger {
         this._recordSentrySuccess();
       }
     } catch (err) {
-      if (__DEV__) {
+      // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+      if (typeof __DEV__ !== 'undefined' && __DEV__) {
         console.warn('[AppLogger] Sentry capture failed:', err);
       }
 

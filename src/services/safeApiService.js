@@ -114,18 +114,33 @@ class SafeApiService {
     this.authToken = null;
     this.refreshToken = null;
     this.isInitialized = false;
-    try {
-      this.readyPromise = this.initialize();
-    } catch (error) {
-      console.error('safeApiService: initialize threw at construction:', error);
-      this.readyPromise = Promise.resolve(false);
-    }
+    this.isReady = false;
+    this.initializationFailed = false;
+    this.initializationError = null;
+    
+    // ✅ FIX: Create promise that handles async errors properly
+    this.readyPromise = this._initializeAsync();
+    
     // Token refresh race condition prevention
     this.isRefreshing = false;
     this.refreshPromise = null;
     this.failedQueue = [];
+    this.MAX_QUEUE_SIZE = 50;  // ✅ Add limit to prevent unbounded queue growth
   }
-  // Expose ready promise for app bootstrap
+
+  async _initializeAsync() {
+    try {
+      await this.initialize({});
+      return true;
+    } catch (error) {
+      console.error('safeApiService: initialization failed:', error);
+      this.initializationFailed = true;
+      this.initializationError = error;
+      // ✅ Don't re-throw - let app continue with degraded service
+      return false;
+    }
+  }
+
   // Expose ready promise for app bootstrap
   get ready() {
     return this.readyPromise || Promise.resolve(false);  // safe fallback
@@ -310,7 +325,11 @@ class SafeApiService {
         console.warn('Failed to load tokens from storage:', storageError?.message || storageError);
       }
 
+      // ✅ FIX: Set both isReady and isInitialized for consistency
       this.isReady = true;
+      this.isInitialized = true;
+      this.initializationFailed = false;
+      this.initializationError = null;
       
       if (IS_DEBUG_MODE) {
         console.log('SafeApiService initialized successfully');
@@ -320,10 +339,28 @@ class SafeApiService {
     } catch (error) {
       console.error('API service initialization failed:', error?.message || error);
       this.isReady = false;
+      this.isInitialized = false;
       this.initializationFailed = true;
       this.initializationError = error;
-      return false;
+      
+      // ✅ FIX: Throw error for proper error handling in AppInitializer
+      throw error;
     }
+  }
+
+  // ✅ HELPER: Check if service is properly initialized
+  isServiceReady() {
+    return this.isInitialized && this.isReady && !this.initializationFailed;
+  }
+
+  // ✅ HELPER: Get initialization status for debugging
+  getInitializationStatus() {
+    return {
+      isInitialized: this.isInitialized,
+      isReady: this.isReady,
+      initializationFailed: this.initializationFailed,
+      initializationError: this.initializationError?.message || null
+    };
   }
 
   getToken() {
@@ -449,9 +486,12 @@ class SafeApiService {
           if (options.signal.aborted) {
             source.cancel('Request aborted');
           } else {
-            options.signal.addEventListener('abort', () => {
+            const abortHandler = () => {
               source.cancel('Request aborted');
-            });
+            };
+            
+            // ✅ MEMORY LEAK FIX: Use { once: true } to auto-remove after firing
+            options.signal.addEventListener('abort', abortHandler, { once: true });
           }
         } catch (cancelError) {
           console.warn('Failed to create cancel token from AbortSignal:', cancelError.message);
@@ -473,9 +513,12 @@ class SafeApiService {
       // ✅ SAFER: Create axios config with comprehensive validation
       const { method = 'GET', data, headers = {}, timeout = 30000, ...restOptions } = options;
       
-      // Validate request data if present
+      // Validate request data if present and cache stringified version
+      let processedData = data;
       if (data !== undefined) {
-        this.validateRequestData(data, method);
+        const validation = this.validateRequestData(data, method);
+        // Note: We could use validation.stringified here, but axios handles objects fine
+        // This optimization is mainly about avoiding double JSON.stringify in validation
       }
 
       const config = {
@@ -525,6 +568,11 @@ class SafeApiService {
           try {
             // If already refreshing, wait for it
             if (this.isRefreshing) {
+              // ✅ FIX: Prevent unbounded queue growth
+              if (this.failedQueue.length >= this.MAX_QUEUE_SIZE) {
+                throw new Error('Too many pending authentication requests');
+              }
+              
               return new Promise((resolve, reject) => {
                 this.failedQueue.push({ resolve, reject });
               }).then((token) => {
@@ -770,7 +818,7 @@ class SafeApiService {
     try {
       // Check for null or undefined (which are valid for some requests)
       if (data === null || data === undefined) {
-        return; // Valid for GET, DELETE, etc.
+        return { valid: true, stringified: null }; // Valid for GET, DELETE, etc.
       }
 
       // Validate data type
@@ -782,7 +830,7 @@ class SafeApiService {
       let dataString;
       if (typeof data === 'object') {
         try {
-          // ✅ PERFORMANCE: Compute JSON.stringify only once
+          // ✅ PERFORMANCE: Compute JSON.stringify only once and cache it
           dataString = JSON.stringify(data); // This will throw if there are circular references
         } catch (stringifyError) {
           throw new Error(`Invalid request data: ${stringifyError.message}`);
@@ -796,6 +844,7 @@ class SafeApiService {
         // For strings, use as-is
         dataString = data;
       }
+      
       // ✅ SAFER: React Native compatible size calculation (Blob API doesn't exist in RN)
       let dataSizeBytes;
       try {
@@ -815,6 +864,9 @@ class SafeApiService {
       if (dataSizeKB > 100) { // 100KB
         console.warn(`⚠️ Large request payload: ${dataSizeKB.toFixed(2)}KB for ${method} request`);
       }
+
+      // ✅ PERFORMANCE FIX: Return the stringified version to avoid double JSON.stringify
+      return { valid: true, stringified: dataString };
 
     } catch (validationError) {
       throw new Error(`Request data validation failed: ${validationError.message}`);

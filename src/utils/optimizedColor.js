@@ -20,11 +20,42 @@ const colorCache = new LRUCache({
 
 /**
  * Normalize and validate hex color input
+ * ✅ ENHANCED: Supports alpha channels and CSS color names
  */
 function normalizeHex(hex) {
   if (typeof hex !== 'string') return null;
-  const clean = hex.trim().toLowerCase().replace(/^#/, '');
+  
+  // ✅ CSS COLOR NAMES: Handle basic CSS color names
+  const cssColors = {
+    'red': '#ff0000', 'green': '#008000', 'blue': '#0000ff',
+    'white': '#ffffff', 'black': '#000000', 'yellow': '#ffff00',
+    'cyan': '#00ffff', 'magenta': '#ff00ff', 'silver': '#c0c0c0',
+    'gray': '#808080', 'maroon': '#800000', 'olive': '#808000',
+    'lime': '#00ff00', 'aqua': '#00ffff', 'teal': '#008080',
+    'navy': '#000080', 'fuchsia': '#ff00ff', 'purple': '#800080',
+    'orange': '#ffa500', 'pink': '#ffc0cb', 'brown': '#a52a2a'
+  };
+  
+  const lowerHex = hex.trim().toLowerCase();
+  if (cssColors[lowerHex]) {
+    return cssColors[lowerHex];
+  }
+  
+  const clean = lowerHex.replace(/^#/, '');
+  
+  // ✅ ALPHA SUPPORT: Handle 8-char hex with alpha (strip alpha)
+  if (/^[0-9a-f]{8}$/.test(clean)) {
+    return `#${clean.slice(0, 6)}`;
+  }
+  
+  // ✅ ALPHA SUPPORT: Handle 4-char hex with alpha (strip alpha and expand)
+  if (/^[0-9a-f]{4}$/.test(clean)) {
+    return `#${clean[0]}${clean[0]}${clean[1]}${clean[1]}${clean[2]}${clean[2]}`;
+  }
+  
+  // ✅ STANDARD: Handle 3 or 6 char hex
   if (!/^[0-9a-f]{3}$|^[0-9a-f]{6}$/.test(clean)) return null;
+  
   const full = clean.length === 3
     ? clean.split('').map(c => c + c).join('')
     : clean;
@@ -39,7 +70,8 @@ function getCachedColorData(hex) {
   const normalizedHex = normalizeHex(hex);
   if (!normalizedHex) {
     // ✅ Report invalid colors to analytics
-    if (!__DEV__ && global.Analytics) {
+    // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+    if ((typeof __DEV__ === 'undefined' || !__DEV__) && global.Analytics) {
       global.Analytics.track('invalid_color_input', {
         input: hex,
         source: 'getCachedColorData'
@@ -337,6 +369,9 @@ function getLightnessLevel(l) {
  * Optimized color analysis - computes everything once
  */
 export function analyzeColor(hex) {
+  // ✅ Run validation on first color operation
+  runValidationOnce();
+  
   const colorData = getCachedColorData(hex);
   
   return {
@@ -356,6 +391,7 @@ export function analyzeColor(hex) {
  * Optimized brightness calculation - uses cached data
  */
 export function getColorBrightness(hex) {
+  runValidationOnce();
   const colorData = getCachedColorData(hex);
   return colorData.brightnessWeighted;
 }
@@ -372,6 +408,7 @@ export function getColorLuminance(hex) {
  * Optimized contrast ratio calculation - uses cached luminance
  */
 export function getContrastRatio(color1, color2) {
+  runValidationOnce();
   const lum1 = getColorLuminance(color1);
   const lum2 = getColorLuminance(color2);
   
@@ -564,6 +601,7 @@ function analyzeColorDistribution(colors) {
  * Batch color analysis - optimized for multiple colors
  */
 export function analyzePalette(colors) {
+  runValidationOnce();
   return colors.map(color => analyzeColor(color));
 }
 
@@ -650,10 +688,12 @@ export function suggestAccessibleAlternatives(color1, color2, minContrast = 4.5)
 
 /**
  * Adjust color lightness
+ * ✅ CRITICAL FIX: colorData has flat structure, not nested .hsl property
  */
 function adjustColorLightness(hex, adjustment) {
   const colorData = getCachedColorData(hex);
-  const { h, s, l } = colorData.hsl;
+  // ✅ FIX: Access h, s, l directly from flat structure
+  const { h, s, l } = colorData;
   
   const newL = Math.max(0, Math.min(100, l + adjustment));
   return hslToHex(h, s, newL);
@@ -663,6 +703,7 @@ function adjustColorLightness(hex, adjustment) {
  * Convert HSL to Hex (optimized version)
  */
 export function hslToHex(h, s, l) {
+  runValidationOnce();
   // ✅ Validate inputs
   if (!isFinite(h) || !isFinite(s) || !isFinite(l)) {
     console.warn('Invalid HSL values:', { h, s, l });
@@ -738,7 +779,8 @@ export { hexToRgbOptimized as hexToRgb };
 // Proper hexToHsl function that takes hex input
 export function hexToHsl(hex) {
   const colorData = getCachedColorData(hex);
-  return colorData.hsl;
+  // ✅ FIX: colorData has flat structure, construct hsl object
+  return { h: colorData.h, s: colorData.s, l: colorData.l };
 }
 
 /**
@@ -747,75 +789,84 @@ export function hexToHsl(hex) {
 export function getColorScheme(baseColor, scheme) {
   const { h, s, l } = hexToHsl(baseColor);
   
+  // ✅ VALIDATION: Ensure HSL values are valid before calculations
+  // Protects against corrupted cache data or invalid input
+  const safeH = isFinite(h) ? ((h % 360) + 360) % 360 : 0;  // Normalize to 0-360
+  const safeS = isFinite(s) ? Math.max(0, Math.min(100, s)) : 50;  // Clamp to 0-100
+  const safeL = isFinite(l) ? Math.max(0, Math.min(100, l)) : 50;  // Clamp to 0-100
+  
+  // ✅ Helper function for safe hue calculations
+  const safeHue = (hueOffset) => ((safeH + hueOffset) % 360 + 360) % 360;
+  
   switch (scheme) {
     case 'analogous':
       return [
         baseColor,
-        hslToHex((h + 30) % 360, s, l),
-        hslToHex((h - 30 + 360) % 360, s, l)
+        hslToHex(safeHue(30), safeS, safeL),
+        hslToHex(safeHue(-30), safeS, safeL)
       ];
     
     case 'complementary':
       return [
         baseColor,
-        hslToHex((h + 180) % 360, s, l)
+        hslToHex(safeHue(180), safeS, safeL)
       ];
     
     case 'split-complementary':
       return [
         baseColor,
-        hslToHex((h + 150) % 360, s, l),
-        hslToHex((h + 210) % 360, s, l)
+        hslToHex(safeHue(150), safeS, safeL),
+        hslToHex(safeHue(210), safeS, safeL)
       ];
     
     case 'triadic':
       return [
         baseColor,
-        hslToHex((h + 120) % 360, s, l),
-        hslToHex((h + 240) % 360, s, l)
+        hslToHex(safeHue(120), safeS, safeL),
+        hslToHex(safeHue(240), safeS, safeL)
       ];
     
     case 'tetradic':
       return [
         baseColor,
-        hslToHex((h + 90) % 360, s, l),
-        hslToHex((h + 180) % 360, s, l),
-        hslToHex((h + 270) % 360, s, l)
+        hslToHex(safeHue(90), safeS, safeL),
+        hslToHex(safeHue(180), safeS, safeL),
+        hslToHex(safeHue(270), safeS, safeL)
       ];
     
     case 'monochromatic':
       return [
-        hslToHex(h, s, Math.max(10, l - 30)),
-        hslToHex(h, s, Math.max(10, l - 15)),
+        hslToHex(safeH, safeS, Math.max(10, safeL - 30)),
+        hslToHex(safeH, safeS, Math.max(10, safeL - 15)),
         baseColor,
-        hslToHex(h, s, Math.min(90, l + 15)),
-        hslToHex(h, s, Math.min(90, l + 30))
+        hslToHex(safeH, safeS, Math.min(90, safeL + 15)),
+        hslToHex(safeH, safeS, Math.min(90, safeL + 30))
       ];
     
     case 'compound':
       return [
         baseColor,
-        hslToHex((h + 150) % 360, s, l),
-        hslToHex((h + 180) % 360, s, l),
-        hslToHex((h + 210) % 360, s, l)
+        hslToHex(safeHue(150), safeS, safeL),
+        hslToHex(safeHue(180), safeS, safeL),
+        hslToHex(safeHue(210), safeS, safeL)
       ];
     
     case 'shades':
       return [
-        hslToHex(h, Math.min(100, s + 5), Math.max(5, l - 40)),
-        hslToHex(h, Math.min(100, s + 3), Math.max(10, l - 25)),
+        hslToHex(safeH, Math.min(100, safeS + 5), Math.max(5, safeL - 40)),
+        hslToHex(safeH, Math.min(100, safeS + 3), Math.max(10, safeL - 25)),
         baseColor,
-        hslToHex(h, Math.min(100, s + 1), Math.max(15, l - 10)),
-        hslToHex(h, s, Math.max(20, l - 5))
+        hslToHex(safeH, Math.min(100, safeS + 1), Math.max(15, safeL - 10)),
+        hslToHex(safeH, safeS, Math.max(20, safeL - 5))
       ];
     
     case 'tints':
       return [
-        hslToHex(h, Math.max(10, s - 15), Math.min(95, l + 40)),
-        hslToHex(h, Math.max(10, s - 10), Math.min(90, l + 25)),
+        hslToHex(safeH, Math.max(10, safeS - 15), Math.min(95, safeL + 40)),
+        hslToHex(safeH, Math.max(10, safeS - 10), Math.min(90, safeL + 25)),
         baseColor,
-        hslToHex(h, Math.max(10, s - 5), Math.min(85, l + 10)),
-        hslToHex(h, Math.max(10, s - 2), Math.min(80, l + 5))
+        hslToHex(safeH, Math.max(10, safeS - 5), Math.min(85, safeL + 10)),
+        hslToHex(safeH, Math.max(10, safeS - 2), Math.min(80, safeL + 5))
       ];
     
     default:
@@ -847,32 +898,42 @@ export function nearestAccessible(background, target, minRatio = 4.5) {
  */
 export { normalizeHex };
 
-// Production-safe validation tests (always run for robustness)
-try {
-  // Test critical hex validation patterns
-  const criticalTests = [
-    '#123abc',        // Valid 6-char
-    '#ABC',           // Valid 3-char
-    '#ffffff',        // Valid lowercase
-    '#FFFFFF',        // Valid uppercase
-  ];
+// ✅ MODULE LOADING FIX: Defer validation to first use to prevent import-time crashes
+let validationRun = false;
+
+const runValidationOnce = () => {
+  if (validationRun) return;
+  validationRun = true;
   
-  // Validate that critical patterns work correctly
-  const allValid = criticalTests.every(test => {
-    const result = normalizeHex(test);
-    return result && result.length === 7 && result.startsWith('#');
-  });
-  
-  if (!allValid) {
-    // ✅ Use reportError instead of console.error for production
-    reportError(ERROR_EVENTS.COLOR_VALIDATION_FAILED, 
-      new Error('Critical hex validation failed'), 
-      { context: 'hex_validation_test' }
-    );
+  try {
+    // Test critical hex validation patterns
+    const criticalTests = [
+      '#123abc',        // Valid 6-char
+      '#ABC',           // Valid 3-char
+      '#ffffff',        // Valid lowercase
+      '#FFFFFF',        // Valid uppercase
+    ];
+    
+    // Validate that critical patterns work correctly
+    const allValid = criticalTests.every(test => {
+      const result = normalizeHex(test);
+      return result && result.length === 7 && result.startsWith('#');
+    });
+    
+    if (!allValid && typeof reportError === 'function') {
+      reportError(ERROR_EVENTS.COLOR_VALIDATION_FAILED, 
+        new Error('Critical hex validation failed'), 
+        { context: 'hex_validation_test' }
+      );
+    }
+  } catch (validationError) {
+    // ✅ Safe fallback if reportError isn't available yet
+    if (typeof reportError === 'function') {
+      reportError(ERROR_EVENTS.COLOR_VALIDATION_FAILED, validationError, {
+        context: 'hex_validation_test_exception'
+      });
+    } else {
+      console.error('Color validation error:', validationError);
+    }
   }
-} catch (validationError) {
-  // ✅ Use reportError instead of console.error for production
-  reportError(ERROR_EVENTS.COLOR_VALIDATION_FAILED, validationError, {
-    context: 'hex_validation_test_exception'
-  });
-}
+};

@@ -20,53 +20,55 @@ const getSafeExpoExtra = () => {
 const extra = getSafeExpoExtra();
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
+// ✅ Safe module loading helper with validation
+const loadModule = (modulePath, exportName, fallback = null) => {
+  try {
+    const mod = require(modulePath);
+    const exported = exportName ? mod[exportName] : mod.default || mod;
+    
+    if (!exported && exportName) {
+      console.warn(`Module ${modulePath} missing export: ${exportName}`);
+      return fallback;
+    }
+    
+    return exported;
+  } catch (error) {
+    console.warn(`Failed to load ${modulePath}:`, error.message);
+    return fallback;
+  }
+};
+
 // Safe module loader with fallbacks
 export const loadModules = () => {
   const modules = {};
   const errors = [];
 
+  // ✅ Load and validate each module separately
+  modules.StatusBar = loadModule('expo-status-bar', 'StatusBar', () => null);
+  modules.NavigationContainer = loadModule('@react-navigation/native', 'NavigationContainer', ({ children }) => children);
+  modules.createBottomTabNavigator = loadModule('@react-navigation/bottom-tabs', 'createBottomTabNavigator', () => ({ Navigator: View, Screen: View }));
+  modules.GestureHandlerRootView = loadModule('react-native-gesture-handler', 'GestureHandlerRootView', View);
+  modules.AsyncStorage = loadModule('@react-native-async-storage/async-storage', null, null);
+  
+  // Handle SafeAreaContext with multiple exports
   try {
-    ({ StatusBar: modules.StatusBar } = require('expo-status-bar'));
-    ({ NavigationContainer: modules.NavigationContainer } = require('@react-navigation/native'));
-    ({ createBottomTabNavigator: modules.createBottomTabNavigator } = require('@react-navigation/bottom-tabs'));
-    ({ GestureHandlerRootView: modules.GestureHandlerRootView } = require('react-native-gesture-handler'));
-    modules.AsyncStorage = require('@react-native-async-storage/async-storage').default;
-    ({ SafeAreaProvider: modules.SafeAreaProvider, SafeAreaView: modules.SafeAreaView } = require('react-native-safe-area-context'));
-    try {
-      modules.SecureStore = require('expo-secure-store');
-    } catch (e) {
-      console.warn('SecureStore not available:', e.message);
-      modules.SecureStore = null;
-    }
-    
-    try {
-      modules.Updates = require('expo-updates');
-    } catch (e) {
-      console.warn('Updates not available:', e.message);
-      modules.Updates = null;
-    }
-    
-    modules.ApiService = require('../services/safeApiService').default;
-    
-    // Log successful module loading only in debug mode
-    if (IS_DEBUG_MODE) {
-      console.log('✅ App modules loaded successfully');
-    }
-  } catch (e) {
-    console.error('FATAL: Module import failed at launch:', e?.message);
-    console.error('Stack:', e?.stack);
-    errors.push(e);
-    
-    // Provide minimal fallbacks to prevent RCTFatal
-    modules.StatusBar = () => null;
-    modules.NavigationContainer = ({ children }) => children;
-    modules.createBottomTabNavigator = () => ({ Navigator: View, Screen: View });
-    modules.GestureHandlerRootView = View;
+    const safeAreaModule = require('react-native-safe-area-context');
+    modules.SafeAreaProvider = safeAreaModule.SafeAreaProvider || View;
+    modules.SafeAreaView = safeAreaModule.SafeAreaView || View;
+  } catch (error) {
+    console.warn('Failed to load react-native-safe-area-context:', error.message);
     modules.SafeAreaProvider = View;
     modules.SafeAreaView = View;
-    modules.SecureStore = null;
-    modules.Updates = null;
-    modules.ApiService = null;
+    errors.push(error);
+  }
+  
+  modules.SecureStore = loadModule('expo-secure-store', null, null);
+  modules.Updates = loadModule('expo-updates', null, null);
+  modules.ApiService = loadModule('../services/safeApiService', null, null);
+  
+  // Log successful module loading only in debug mode
+  if (IS_DEBUG_MODE) {
+    console.log('✅ App modules loaded successfully');
   }
 
   return { modules, errors };

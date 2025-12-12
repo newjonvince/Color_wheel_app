@@ -82,10 +82,119 @@ const isNetworkError = (error) => {
   );
 };
 
-// 🔧 Request deduplication to prevent duplicate API calls
+// ✅ MEMORY LEAK FIX: Request deduplication with proper cleanup
 const inflightRequests = new Map();
-const retryPromises = new Map(); // 🔧 Store retry promises for concurrent calls
+const retryPromises = new Map();
 const REQUEST_TIMEOUT = 30000; // 30 seconds
+const CLEANUP_INTERVAL = 60000; // 1 minute
+const MAX_CACHE_SIZE = 1000; // Prevent unbounded growth
+
+// ✅ SMART CLEANUP: On-demand cleanup that only runs when needed
+let cleanupTimeout = null;
+let lastCleanupTime = 0;
+let isCleanupScheduled = false;
+let nestedTimeoutId = null; // ✅ Track nested timeout to prevent infinite creation
+
+const scheduleCleanup = () => {
+  // Don't schedule if already scheduled or if no requests to clean
+  if (isCleanupScheduled || (inflightRequests.size === 0 && retryPromises.size === 0)) {
+    return;
+  }
+
+  // Don't cleanup too frequently (minimum 30 seconds between cleanups)
+  const timeSinceLastCleanup = Date.now() - lastCleanupTime;
+  if (timeSinceLastCleanup < 30000) {
+    return;
+  }
+
+  isCleanupScheduled = true;
+
+  // Schedule cleanup to run after a delay (not immediately to batch cleanups)
+  cleanupTimeout = setTimeout(() => {
+    try {
+      const now = Date.now();
+      let cleaned = 0;
+      
+      // Clean up stale inflight requests
+      for (const [key, entry] of inflightRequests.entries()) {
+        if (now - entry.timestamp > REQUEST_TIMEOUT * 2) {
+          // Call cleanup function if available
+          if (entry.cleanup && typeof entry.cleanup === 'function') {
+            try {
+              entry.cleanup();
+            } catch (cleanupError) {
+              logger.warn(`Failed to cleanup request ${key}:`, cleanupError);
+            }
+          }
+          inflightRequests.delete(key);
+          cleaned++;
+        }
+      }
+      
+      // Clean up old retry promises (safety net)
+      if (retryPromises.size > MAX_CACHE_SIZE) {
+        const entries = Array.from(retryPromises.entries());
+        const toDelete = entries.slice(0, entries.length - MAX_CACHE_SIZE);
+        toDelete.forEach(([key]) => retryPromises.delete(key));
+        cleaned += toDelete.length;
+      }
+      
+      if (cleaned > 0) {
+        logger.debug(`🧹 Smart cleanup removed ${cleaned} stale API cache entries`);
+      }
+
+      lastCleanupTime = now;
+      
+      // Schedule next cleanup if there are still entries
+      if (inflightRequests.size > 0 || retryPromises.size > 0) {
+        // ✅ FIX: Clear existing nested timeout before creating new one
+        if (nestedTimeoutId) {
+          clearTimeout(nestedTimeoutId);
+          nestedTimeoutId = null;
+        }
+        
+        // Schedule another cleanup in the future
+        nestedTimeoutId = setTimeout(() => {
+          nestedTimeoutId = null; // Clear the timeout ID
+          isCleanupScheduled = false;
+          scheduleCleanup();
+        }, CLEANUP_INTERVAL);
+      } else {
+        isCleanupScheduled = false;
+        // Clear nested timeout if no more entries to clean
+        if (nestedTimeoutId) {
+          clearTimeout(nestedTimeoutId);
+          nestedTimeoutId = null;
+        }
+      }
+      
+    } catch (error) {
+      logger.error('❌ Error during smart cleanup:', error);
+      isCleanupScheduled = false;
+    }
+  }, 5000); // 5 second delay to batch multiple requests
+};
+
+const stopCleanup = () => {
+  if (cleanupTimeout) {
+    clearTimeout(cleanupTimeout);
+    cleanupTimeout = null;
+  }
+  // ✅ FIX: Also clear nested timeout when stopping cleanup
+  if (nestedTimeoutId) {
+    clearTimeout(nestedTimeoutId);
+    nestedTimeoutId = null;
+  }
+  isCleanupScheduled = false;
+};
+
+// ✅ SMART CLEANUP: Only start cleanup when requests are added
+const triggerCleanupIfNeeded = () => {
+  // Only schedule cleanup if we have requests and cleanup isn't already scheduled
+  if ((inflightRequests.size > 0 || retryPromises.size > 0) && !isCleanupScheduled) {
+    scheduleCleanup();
+  }
+};
 
 /**
  * Deduplicated API call wrapper - prevents duplicate requests
@@ -95,7 +204,7 @@ const REQUEST_TIMEOUT = 30000; // 30 seconds
  */
 const deduplicatedApiCall = async (key, apiCall, options = {}) => {
   const { signal, maxAge = REQUEST_TIMEOUT } = options; // Accept cancellation signal and configurable max age
-  // 🔧 Check if already cancelled
+  // Check if already cancelled
   if (signal?.aborted) {
     throw new Error(`Request cancelled: ${key}`);
   }
@@ -115,81 +224,77 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
     }
   }
 
-  // ✅ CRITICAL FIX: Manual timeout/cancellation management to prevent uncaught promise rejections
+  // ✅ MEMORY LEAK FIX: Comprehensive cleanup management
+  let timeoutId = null;
+  let abortHandler = null;
+  let settled = false;
+
+  const cleanup = () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+    if (abortHandler && signal?.removeEventListener) {
+      signal.removeEventListener('abort', abortHandler);
+      abortHandler = null;
+    }
+    // ✅ ALWAYS clean up inflight request
+    inflightRequests.delete(key);
+  };
+
   const apiPromise = safeApiCall(apiCall, options);
   
   const requestPromise = new Promise((resolve, reject) => {
-    let settled = false;
-    let timeoutId = null;
-    let abortHandler = null;
-    
-    const cleanup = () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-        timeoutId = null;
-      }
-      if (abortHandler && signal) {
-        signal.removeEventListener('abort', abortHandler);
-        abortHandler = null;
-      }
-    };
-    
     // Set up timeout
     timeoutId = setTimeout(() => {
       if (!settled) {
         settled = true;
         cleanup();
-        inflightRequests.delete(key);
         reject(new Error(`Request timeout: ${key}`));
       }
     }, REQUEST_TIMEOUT);
     
     // Set up cancellation
-    if (signal) {
+    if (signal?.addEventListener) {
       abortHandler = () => {
         if (!settled) {
           settled = true;
           cleanup();
-          inflightRequests.delete(key);
           reject(new Error(`Request cancelled: ${key}`));
         }
       };
       signal.addEventListener('abort', abortHandler, { once: true });
     }
     
-    // Handle API promise
-    apiPromise.then(
-      (result) => {
+    // Handle API promise with comprehensive cleanup
+    apiPromise
+      .then((result) => {
         if (!settled) {
           settled = true;
           cleanup();
           resolve(result);
         }
-      },
-      (error) => {
+      })
+      .catch((error) => {
         if (!settled) {
           settled = true;
           cleanup();
-          inflightRequests.delete(key);
           reject(error);
         }
-      }
-    ).catch((error) => {
-      // ✅ SAFETY: Catch any remaining promise rejections
-      if (!settled) {
-        settled = true;
-        cleanup();
-        inflightRequests.delete(key);
-        reject(error);
-      }
-    });
+      });
   });
 
-  // 🔧 Store promise with timestamp
-  inflightRequests.set(key, {
+  // ✅ MEMORY LEAK FIX: Store promise with metadata and cleanup
+  const cacheEntry = {
     promise: requestPromise,
-    timestamp: Date.now()
-  });
+    timestamp: Date.now(),
+    cleanup: cleanup // Store cleanup function for emergency cleanup
+  };
+  
+  inflightRequests.set(key, cacheEntry);
+
+  // ✅ SMART CLEANUP: Trigger cleanup when requests are added
+  triggerCleanupIfNeeded();
 
   try {
     const result = await requestPromise;
@@ -198,21 +303,18 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
     }
     return unwrapSafeApiResult(result, key);
   } catch (error) {
-    // 🔧 Don't throw cancellation errors to unmounted components
+    // Handle cancellation gracefully
     if (signal?.aborted && error.message?.includes('cancelled')) {
       logger.debug(`📋 Request cancelled gracefully: ${key}`);
-      return { cancelled: true }; // Return safe object instead of throwing
+      return { cancelled: true };
     }
-    // 🔧 Always clean up on error
     throw error;
   } finally {
-    // 🔧 Clean up timeout to prevent memory leak
-    if (timeoutId) {
-      clearTimeout(timeoutId);
-      timeoutId = null;
+    // ✅ GUARANTEED CLEANUP: Always clean up, even if promise is still pending
+    if (!settled) {
+      settled = true;
+      cleanup();
     }
-    // 🔧 Clean up on completion
-    inflightRequests.delete(key);
   }
 };
 
@@ -240,12 +342,36 @@ export const safeApiCall = async (apiCall, options = {}) => {
   const { 
     errorMessage = 'An error occurred',
     retryCount = 0,
-    showAlert, // ✅ CONSISTENCY FIX: Accept showAlert option
-    signal
+    showAlert,
+    signal,
+    retryDelay = 1000, // ✅ Base delay in ms
+    retryMultiplier = 2, // ✅ Exponential multiplier
+    maxRetryDelay = 30000, // ✅ Maximum delay (30 seconds)
+    jitterFactor = 0.3 // ✅ Jitter factor (0-30%)
   } = options;
 
-  // 🔧 Generate retry key for this specific API call
-  const retryKey = `${apiCall.toString().slice(0, 100)}-${JSON.stringify(options).slice(0, 50)}`;
+  // 🔧 Generate retry key for this specific API call using explicit properties
+  const generateRetryKey = (apiCall, options) => {
+    // Extract function name safely
+    const functionName = apiCall.name || 'anonymous';
+    
+    // Create deterministic key from relevant options only
+    const keyOptions = {
+      errorMessage: options.errorMessage,
+      retryCount: options.retryCount,
+      retryDelay: options.retryDelay,
+      retryMultiplier: options.retryMultiplier,
+      maxRetryDelay: options.maxRetryDelay,
+      jitterFactor: options.jitterFactor
+    };
+    
+    // Use explicit serialization instead of fragile toString()
+    const optionsHash = JSON.stringify(keyOptions, Object.keys(keyOptions).sort());
+    
+    return `${functionName}-${optionsHash.slice(0, 100)}`;
+  };
+  
+  const retryKey = generateRetryKey(apiCall, options);
   
   // 🔧 Check if there's already a retry in progress for this call
   if (retryPromises.has(retryKey)) {
@@ -260,37 +386,83 @@ export const safeApiCall = async (apiCall, options = {}) => {
 
   // 🔧 Create retry promise for concurrent calls to await
   const retryPromise = (async () => {
-    let lastError;
+    let lastError = null;
     
-    // Try the API call with retries
+    // ✅ IMPROVED RETRY LOGIC: Exponential backoff with jitter and better error handling
     for (let attempt = 0; attempt <= retryCount; attempt++) {
       try {
-        // Check if cancelled before each attempt
+        // Check if cancelled before attempt
         if (signal?.aborted) {
           throw new Error('Request cancelled');
         }
-        
-        // Execute the API call (safeApiService already handles ready state)
+
+        // Execute the API call
         const result = await apiCall();
         return { success: true, data: result };
-      
+        
       } catch (error) {
         lastError = error;
         
-        // Don't retry authentication errors - they won't succeed on retry
-        if (error.message?.includes('Authentication required')) {
-          break;
+        // ✅ DON'T RETRY: Certain errors that won't succeed on retry
+        if (
+          error.response?.status === 401 || // Unauthorized
+          error.response?.status === 403 || // Forbidden  
+          error.response?.status === 404 || // Not found
+          error.response?.status === 422 || // Validation error
+          error.status === 401 ||
+          error.status === 403 ||
+          error.status === 404 ||
+          error.status === 422 ||
+          error.message?.includes('Authentication required') ||
+          error.message?.includes('Unauthorized') ||
+          signal?.aborted // Cancelled
+        ) {
+          logger.debug(`🚫 Not retrying error (${error.status || error.message}): Won't succeed on retry`);
+          throw error; // Don't retry these
         }
-        
-        // If this isn't the last attempt, wait briefly before retrying
+
+        // If not last attempt, wait before retry
         if (attempt < retryCount) {
-          const delay = Math.min(1000 * Math.pow(2, attempt), 3000); // Exponential backoff, max 3s
-          await new Promise(resolve => setTimeout(resolve, delay));
+          // ✅ EXPONENTIAL BACKOFF WITH JITTER
+          const baseDelay = retryDelay * Math.pow(retryMultiplier, attempt);
+          const cappedDelay = Math.min(baseDelay, maxRetryDelay);
+          const jitter = Math.random() * jitterFactor * cappedDelay; // 0-30% jitter
+          const delayMs = cappedDelay + jitter;
           
-          // Log retry attempts only in debug mode
-          if (IS_DEBUG_MODE) {
-            console.log(`🔄 Retrying API call (attempt ${attempt + 2}/${retryCount + 1}) after ${delay}ms`);
-          }
+          logger.warn(
+            `🔄 Retry attempt ${attempt + 1}/${retryCount} after ${delayMs.toFixed(0)}ms:`,
+            error.message || error
+          );
+
+          // ✅ CANCELLABLE DELAY: Respect abort signals during delay
+          await new Promise((resolve, reject) => {
+            let timeoutId = null;
+            let abortHandler = null;
+            
+            const cleanup = () => {
+              if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+              }
+              if (abortHandler && signal?.removeEventListener) {
+                signal.removeEventListener('abort', abortHandler);
+                abortHandler = null;
+              }
+            };
+
+            timeoutId = setTimeout(() => {
+              cleanup();
+              resolve();
+            }, delayMs);
+
+            if (signal?.addEventListener) {
+              abortHandler = () => {
+                cleanup();
+                reject(new Error('Retry cancelled during delay'));
+              };
+              signal.addEventListener('abort', abortHandler, { once: true });
+            }
+          });
         }
       }
     }
@@ -353,6 +525,9 @@ export const safeApiCall = async (apiCall, options = {}) => {
   // 🔧 Store retry promise for concurrent calls
   if (retryCount > 0) {
     retryPromises.set(retryKey, retryPromise);
+    
+    // ✅ SMART CLEANUP: Trigger cleanup when retry promises are added
+    triggerCleanupIfNeeded();
     
     // 🔧 Clean up retry promise when done with error handling
     retryPromise.finally(() => {
@@ -564,42 +739,83 @@ export const apiPatterns = {
   }
 };
 
-// dY"? Add periodic cleanup of stale requests with error handling
-let cleanupIntervalId = null;
+// ✅ REMOVED: Old setInterval-based cleanup replaced with smart on-demand cleanup
+// The smart cleanup system only runs when there are requests to clean and stops
+// automatically when the cache is empty, eliminating unnecessary background processing.
 
-export const startCleanupInterval = () => {
-  if (cleanupIntervalId) {
-    return; // Already running
-  }
-
+// ✅ MEMORY LEAK FIX: Manual cleanup utilities for emergency cleanup
+export const clearAllApiCaches = () => {
   try {
-    cleanupIntervalId = setInterval(() => {
-      try {
-        const now = Date.now();
-        for (const [key, cached] of inflightRequests.entries()) {
-          if (now - cached.timestamp > REQUEST_TIMEOUT) {
-            logger.warn(`dY1 Cleaning up stale request: ${key}`);
-            inflightRequests.delete(key);
-          }
+    // Clean up all inflight requests with their cleanup functions
+    for (const [key, entry] of inflightRequests.entries()) {
+      if (entry.cleanup && typeof entry.cleanup === 'function') {
+        try {
+          entry.cleanup();
+        } catch (cleanupError) {
+          logger.warn(`Failed to cleanup request ${key}:`, cleanupError);
         }
-      } catch (error) {
-        logger.error('dYs" Error during request cleanup:', error);
       }
-    }, 60000); // Clean up every minute
-    logger.info('dY>` Started API cleanup interval');
+    }
+    inflightRequests.clear();
+    
+    // Clear retry promises
+    retryPromises.clear();
+    
+    logger.info('🧹 Manually cleared all API caches');
   } catch (error) {
-    logger.error('dYs" Failed to start cleanup interval:', error);
+    logger.error('❌ Error during manual cache cleanup:', error);
   }
 };
 
-// Export cleanup function to stop the interval if needed
-export const stopCleanupInterval = () => {
-  if (cleanupIntervalId) {
-    clearInterval(cleanupIntervalId);
-    cleanupIntervalId = null;
-    logger.info('dY>` Stopped API cleanup interval');
-  }
+export const getApiCacheStats = () => {
+  return {
+    inflightRequests: inflightRequests.size,
+    retryPromises: retryPromises.size,
+    oldestInflightRequest: inflightRequests.size > 0 
+      ? Math.min(...Array.from(inflightRequests.values()).map(entry => entry.timestamp))
+      : null,
+    cleanupScheduled: isCleanupScheduled,
+    lastCleanupTime: lastCleanupTime,
+    timeSinceLastCleanup: Date.now() - lastCleanupTime
+  };
 };
 
-// Start automatically on module load
-startCleanupInterval();
+// ✅ MEMORY LEAK FIX: Force cleanup of specific request
+export const forceCleanupRequest = (key) => {
+  const entry = inflightRequests.get(key);
+  if (entry) {
+    if (entry.cleanup && typeof entry.cleanup === 'function') {
+      try {
+        entry.cleanup();
+        logger.debug(`🧹 Force cleaned up request: ${key}`);
+      } catch (error) {
+        logger.warn(`Failed to force cleanup request ${key}:`, error);
+      }
+    }
+    inflightRequests.delete(key);
+    return true;
+  }
+  return false;
+};
+
+// ✅ SMART CLEANUP CONTROL: Enhanced cleanup control for the new system
+export const stopApiCleanup = () => {
+  stopCleanup();
+  logger.info('🛑 Smart API cleanup stopped');
+};
+
+export const startApiCleanup = () => {
+  // Smart cleanup starts automatically when requests are added
+  triggerCleanupIfNeeded();
+  logger.info('▶️ Smart API cleanup triggered');
+};
+
+// ✅ FORCE IMMEDIATE CLEANUP: Trigger cleanup immediately regardless of schedule
+export const forceImmediateCleanup = () => {
+  stopCleanup(); // Stop any scheduled cleanup
+  isCleanupScheduled = false;
+  scheduleCleanup(); // Force immediate schedule
+  logger.info('🧹 Forced immediate API cleanup');
+};
+
+export { deduplicatedApiCall, safeApiCall, batchApiCalls };

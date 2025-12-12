@@ -121,7 +121,8 @@ try {
 }
 
 // Import constants from shared location
-export { SCHEME_OFFSETS, SCHEME_COUNTS } from '../constants/colorWheelConstants';
+import { SCHEME_OFFSETS, SCHEME_COUNTS } from '../constants/colorWheelConstants';
+export { SCHEME_OFFSETS, SCHEME_COUNTS };
 
 // JS helper functions for worklet callbacks (defined at top-level for performance)
 // ✅ Don't pass ref to worklet - use callback instead
@@ -288,12 +289,24 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
         const idx = (selectedFollowsActive ? Math.max(0, Math.min(activePref, out.length - 1)) : 0);
         onHexChange(out[idx]);
       }
-    } catch {}
+    } catch (error) {
+      console.warn('FullColorWheel: jsEmitPalette failed:', error.message);
+      console.error('FullColorWheel: jsEmitPalette error details:', error);
+    }
   };
 
   const emitPalette = (phase = 'change') => {
     'worklet';
     try {
+      // ✅ THROTTLING: Prevent excessive emissions for worklet memory leak prevention
+      const now = Date.now();
+      const THROTTLE_MS = 16; // ~60fps throttling
+      
+      if (now - lastEmitTime.value < THROTTLE_MS) {
+        return; // Skip emission if too frequent
+      }
+      lastEmitTime.value = now;
+      
       const c = schemeCount.value;
       const triples = [];
       for (let i=0;i<c;i++) {
@@ -301,7 +314,10 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       }
       const idxPref = followActive.value ? Math.max(0, Math.min(activeIdx.value, c - 1)) : 0;
       callJS(jsEmitPalette, triples, idxPref, phase);
-    } catch(e) {}
+    } catch(error) {
+      console.warn('FullColorWheel: emitPalette worklet failed:', error.message);
+      console.error('FullColorWheel: emitPalette worklet error details:', error);
+    }
   };
 
   // ===== Marker visuals (Canva look) =====
@@ -336,8 +352,8 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   // Choose nearest handle
   const nearestHandle = (x, y) => {
     'worklet';
-    // ✅ Add extra safety for worklet context
-    const c = (SCHEME_COUNTS && SCHEME_COUNTS[scheme]) ? SCHEME_COUNTS[scheme] : 1;
+    // ✅ WORKLET FIX: Safe access to constants in worklet context
+    const c = (typeof SCHEME_COUNTS !== 'undefined' && SCHEME_COUNTS && SCHEME_COUNTS[scheme]) ? SCHEME_COUNTS[scheme] : 1;
     let best = 0, bestDist = 1e9;
     for (let i=0;i<c;i++) {
       const ang = ((handleAngles[i].value - 90) * Math.PI)/180;
@@ -386,8 +402,9 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       } else if (linked && (scheme === 'analogous' || scheme === 'triadic' || scheme === 'tetradic' || scheme === 'split-complementary')) {
         // Synchronized movement for multi-handle schemes
         const baseAngle = deg;
-        const schemeOffsets = SCHEME_OFFSETS[scheme] || [0];
-        const handleCount = SCHEME_COUNTS[scheme] || 1;
+        // ✅ WORKLET FIX: Capture constants in worklet-safe way
+        const schemeOffsets = (typeof SCHEME_OFFSETS !== 'undefined' && SCHEME_OFFSETS && SCHEME_OFFSETS[scheme]) ? SCHEME_OFFSETS[scheme] : [0];
+        const handleCount = (typeof SCHEME_COUNTS !== 'undefined' && SCHEME_COUNTS && SCHEME_COUNTS[scheme]) ? SCHEME_COUNTS[scheme] : 1;
         
         for (let k = 0; k < handleCount; k++) {
           if (k !== idx) { // Don't update the handle being dragged
@@ -468,14 +485,23 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   useImperativeHandle(ref, () => ({
     setActiveHandleHSL: (h,s,l) => {
       try {
-        const idx = Math.min(Math.max(activeIdx.value, 0), (SCHEME_COUNTS[scheme]||1)-1);
+        // ✅ FIX: Safe access to constants and shared values
+        const currentScheme = scheme; // Capture scheme prop
+        const schemeCount = (typeof SCHEME_COUNTS !== 'undefined' && SCHEME_COUNTS && SCHEME_COUNTS[currentScheme]) ? SCHEME_COUNTS[currentScheme] : 1;
+        const idx = Math.min(Math.max(activeIdx.value, 0), schemeCount - 1);
         setHandleHSL(idx, h, s, l);
-      } catch {}
+      } catch (error) {
+        console.warn('FullColorWheel: setActiveHandleHSL failed:', error.message);
+        console.error('FullColorWheel: setActiveHandleHSL error details:', error);
+      }
     },
     setHandleHSL: (i,h,s,l) => {
-      try { setHandleHSL(i,h,s,l); } catch {}
+      try { setHandleHSL(i,h,s,l); } catch (error) {
+        console.warn('FullColorWheel: setHandleHSL failed:', error.message);
+        console.error('FullColorWheel: setHandleHSL error details:', error);
+      }
     }
-  }), [scheme, linked]);
+  }), [scheme, linked, setHandleHSL, activeIdx]);
 
   // ===== Render: Canva look =====
   const innerSpacer = Math.max(6, radius * 0.06); // white spacer ring
