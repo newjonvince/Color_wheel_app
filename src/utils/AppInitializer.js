@@ -789,6 +789,7 @@ class AppInitializer {
     // PROPER CANCELLATION: Use manual timeout with AbortController instead of Promise.race
     let timeoutId = null;
     let isTimedOut = false;
+    let settled = false;
     
     try {
       // Note: isInitializing already set in initialize() method
@@ -801,6 +802,7 @@ class AppInitializer {
       
       // Set up timeout that properly cancels operations
       timeoutId = setTimeout(() => {
+        if (settled) return;
         isTimedOut = true;
         globalAbortController.abort();
         getLogger().error(`Global initialization timeout after ${GLOBAL_TIMEOUT}ms - operations cancelled`);
@@ -955,6 +957,7 @@ class AppInitializer {
 
       // SAFE EXECUTION: Run initialization with proper cancellation handling
       await initializationLogic();
+      settled = true;
       
       // SUCCESS: Clear timeout if we completed before timeout
       if (timeoutId) {
@@ -968,6 +971,7 @@ class AppInitializer {
       }
 
     } catch (error) {
+      settled = true;
       // CLEANUP: Always clear timeout on error
       if (timeoutId) {
         clearTimeout(timeoutId);

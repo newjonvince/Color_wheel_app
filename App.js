@@ -386,8 +386,8 @@ function FashionColorWheelApp() {
           devWarn('Environment validation error:', err);
         });
         
-        // NON-BLOCKING: Initialize in background without blocking UI
-        appInitializer.initialize({
+        // CORE READY: Treat appInitializer.initialize() as the awaited core-ready gate
+        await appInitializer.initialize({
           signal: controller?.signal,
           onProgress: (progress) => {
             if (isMounted) {
@@ -411,26 +411,6 @@ function FashionColorWheelApp() {
               setLoadingStateSafe(loadingUpdate);
             }
           }
-        }).then(() => {
-          // BACKGROUND COMPLETION: All features loaded
-          if (isMounted) {
-            setLoadingStateSafe({ 
-              stage: 'ready', 
-              progress: 100, 
-              message: 'All features ready!' 
-            });
-            getLogger().info('Background initialization completed - all features available');
-          }
-        }).catch((error) => {
-          // BACKGROUND ERROR: Handle gracefully without blocking UI
-          if (isMounted) {
-            getLogger().warn('Some features failed to load in background:', error);
-            setLoadingStateSafe({ 
-              stage: 'partial', 
-              progress: 90, 
-              message: 'Core features ready (some features unavailable)' 
-            });
-          }
         });
         
         getLogger().info('Centralized initialization completed');
@@ -441,43 +421,7 @@ function FashionColorWheelApp() {
           return;
         }
         
-        // RACE CONDITION FIX: Atomic final state update with proper error handling
-        if (isMounted && initializationRef.current.state === 'initializing') {
-          const canComplete = setInitializationState('success');
-          if (!canComplete) {
-            const currentState = initializationRef.current.state;
-            getLogger().error(`Cannot complete initialization from state: ${currentState}`);
-            
-            // FIX: Set error state instead of silent return
-            if (isMounted) {
-              const completionError = new Error(`Initialization completion blocked - app in ${currentState} state`);
-              setInitializationState('error', completionError);
-              setInitError(completionError);
-              setIsReady(false);
-            }
-            return;
-          }
-          
-          // RACE CONDITION FIX: Don't show "Ready!" until isReady is actually set
-          setLoadingStateSafe({ stage: 'finalizing', progress: 95, message: 'Finalizing...' });
-          
-          // Use atomic state update with better timing
-          const finalizeInitialization = () => {
-            finalizationTimerId = null; // Clear timer reference
-            if (isMounted && !controller?.signal?.aborted && initializationRef.current.state === 'success') {
-              // ATOMIC UPDATE: Set both ready state and final loading message together
-              setIsReady(true);
-              setLoadingStateSafe({ stage: 'ready', progress: 100, message: 'Ready!' });
-            }
-          };
-          
-          // Use requestAnimationFrame for better timing, fallback to setTimeout
-          if (typeof requestAnimationFrame !== 'undefined') {
-            finalizationTimerId = requestAnimationFrame(finalizeInitialization);
-          } else {
-            finalizationTimerId = setTimeout(finalizeInitialization, 100); // Shorter delay
-          }
-        }
+        // NOTE: Success/isReady state transition is handled by the sequenced initializer
         
       } catch (error) {
         if (!isMounted || controller?.signal?.aborted) return;
@@ -521,17 +465,29 @@ function FashionColorWheelApp() {
     const INIT_TIMEOUT_MS = 30000; // 30 seconds
     
     const initWithTimeout = async () => {
-      return Promise.race([
-        initializeInBackground(),
-        new Promise((_, reject) => {
-          setTimeout(() => {
-            // CRASH FIX: Abort the inner promise when timeout fires
-            // Without this, initializeInBackground() continues running in background
-            controller.abort();
-            reject(new Error(`Initialization timed out after ${INIT_TIMEOUT_MS / 1000} seconds. Please check your network connection and try again.`));
-          }, INIT_TIMEOUT_MS);
-        })
-      ]);
+      let timeoutId;
+      let settled = false;
+
+      const initPromise = initializeInBackground().finally(() => {
+        settled = true;
+      });
+
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          // CRASH FIX: Abort the inner promise when timeout fires
+          // Without this, initializeInBackground() continues running in background
+          controller.abort();
+          reject(new Error(`Initialization timed out after ${INIT_TIMEOUT_MS / 1000} seconds. Please check your network connection and try again.`));
+        }, INIT_TIMEOUT_MS);
+      });
+
+      try {
+        return await Promise.race([initPromise, timeoutPromise]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
     };
     
     // SEQUENCED INITIALIZATION: Wait for background init before showing UI as ready
@@ -539,16 +495,29 @@ function FashionColorWheelApp() {
       try {
         // Start background initialization with timeout protection
         await initWithTimeout();
-        
-        // PROPER SEQUENCING: Only set ready after initialization completes
-        if (isMounted && initializationRef.current.state === 'success') {
-          setIsReady(true);
-          setLoadingStateSafe({ 
-            stage: 'ready', 
-            progress: 100, 
-            message: 'All features ready!' 
-          });
-          getLogger().info('App fully initialized and ready');
+
+        // CORE READY: Only transition to success/isReady after core initialization has completed
+        if (isMounted && !controller?.signal?.aborted && initializationRef.current.state === 'initializing') {
+          const canComplete = setInitializationState('success');
+          if (canComplete) {
+            setIsReady(true);
+            setLoadingStateSafe({
+              stage: 'ready',
+              progress: 100,
+              message: 'All features ready!'
+            });
+            getLogger().info('App fully initialized and ready');
+          } else {
+            const currentState = initializationRef.current.state;
+            getLogger().error(`Cannot complete initialization from state: ${currentState}`);
+
+            if (isMounted) {
+              const completionError = new Error(`Initialization completion blocked - app in ${currentState} state`);
+              setInitializationState('error', completionError);
+              setInitError(completionError);
+              setIsReady(false);
+            }
+          }
         }
       } catch (error) {
         // Don't override successful initialization
