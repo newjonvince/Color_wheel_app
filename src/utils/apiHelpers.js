@@ -1,6 +1,6 @@
 // utils/apiHelpers.js - Shared API utility functions with request deduplication
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
   if (_isDebugModeValue === null) {
@@ -15,7 +15,7 @@ const getIsDebugMode = () => {
   return _isDebugModeValue;
 };
 
-// ✅ LAZY LOADING: Avoid circular dependency with safeApiService
+// LAZY LOADING: Avoid circular dependency with safeApiService
 let apiService = null;
 const getApiService = () => {
   if (apiService) return apiService;
@@ -60,10 +60,10 @@ const logger = {
   error: (...args) => getLogger()?.error?.(...args),
 };
 
-// ✅ CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
+// CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
 const IS_DEBUG_MODE = () => getIsDebugMode();
 
-// 🔧 React Native compatible network error detection
+// React Native compatible network error detection
 const isNetworkError = (error) => {
   if (!error) return false;
   
@@ -82,18 +82,18 @@ const isNetworkError = (error) => {
   );
 };
 
-// ✅ MEMORY LEAK FIX: Request deduplication with proper cleanup
+// MEMORY LEAK FIX: Request deduplication with proper cleanup
 const inflightRequests = new Map();
 const retryPromises = new Map();
 const REQUEST_TIMEOUT = 30000; // 30 seconds
 const CLEANUP_INTERVAL = 60000; // 1 minute
 const MAX_CACHE_SIZE = 1000; // Prevent unbounded growth
 
-// ✅ SMART CLEANUP: On-demand cleanup that only runs when needed
+// SMART CLEANUP: On-demand cleanup that only runs when needed
 let cleanupTimeout = null;
 let lastCleanupTime = 0;
 let isCleanupScheduled = false;
-let nestedTimeoutId = null; // ✅ Track nested timeout to prevent infinite creation
+let nestedTimeoutId = null; // Track nested timeout to prevent infinite creation
 
 const scheduleCleanup = () => {
   // Don't schedule if already scheduled or if no requests to clean
@@ -140,14 +140,14 @@ const scheduleCleanup = () => {
       }
       
       if (cleaned > 0) {
-        logger.debug(`🧹 Smart cleanup removed ${cleaned} stale API cache entries`);
+        logger.debug(`Smart cleanup removed ${cleaned} stale API cache entries`);
       }
 
       lastCleanupTime = now;
       
       // Schedule next cleanup if there are still entries
       if (inflightRequests.size > 0 || retryPromises.size > 0) {
-        // ✅ FIX: Clear existing nested timeout before creating new one
+        // FIX: Clear existing nested timeout before creating new one
         if (nestedTimeoutId) {
           clearTimeout(nestedTimeoutId);
           nestedTimeoutId = null;
@@ -169,7 +169,7 @@ const scheduleCleanup = () => {
       }
       
     } catch (error) {
-      logger.error('❌ Error during smart cleanup:', error);
+      logger.error('Error during smart cleanup:', error);
       isCleanupScheduled = false;
     }
   }, 5000); // 5 second delay to batch multiple requests
@@ -180,7 +180,7 @@ const stopCleanup = () => {
     clearTimeout(cleanupTimeout);
     cleanupTimeout = null;
   }
-  // ✅ FIX: Also clear nested timeout when stopping cleanup
+  // FIX: Also clear nested timeout when stopping cleanup
   if (nestedTimeoutId) {
     clearTimeout(nestedTimeoutId);
     nestedTimeoutId = null;
@@ -188,7 +188,7 @@ const stopCleanup = () => {
   isCleanupScheduled = false;
 };
 
-// ✅ SMART CLEANUP: Only start cleanup when requests are added
+// SMART CLEANUP: Only start cleanup when requests are added
 const triggerCleanupIfNeeded = () => {
   // Only schedule cleanup if we have requests and cleanup isn't already scheduled
   if ((inflightRequests.size > 0 || retryPromises.size > 0) && !isCleanupScheduled) {
@@ -213,18 +213,18 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
   if (inflightRequests.has(key)) {
     const cached = inflightRequests.get(key);
     
-    // 🔧 Check if cached promise is stale
+    // Check if cached promise is stale
     if (Date.now() - cached.timestamp < maxAge) {
-      logger.debug(`🔄 Reusing in-flight request: ${key}`);
+      logger.debug(`Reusing in-flight request: ${key}`);
       return cached.promise;
     } else {
-      // 🔧 Stale promise - remove and make new request
-      logger.warn(`⏰ Cached request expired: ${key}`);
+      // Stale promise - remove and make new request
+      logger.warn(`Cached request expired: ${key}`);
       inflightRequests.delete(key);
     }
   }
 
-  // ✅ MEMORY LEAK FIX: Comprehensive cleanup management
+  // MEMORY LEAK FIX: Comprehensive cleanup management
   let timeoutId = null;
   let abortHandler = null;
   let settled = false;
@@ -238,7 +238,7 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
       signal.removeEventListener('abort', abortHandler);
       abortHandler = null;
     }
-    // ✅ ALWAYS clean up inflight request
+    // ALWAYS clean up inflight request
     inflightRequests.delete(key);
   };
 
@@ -284,7 +284,7 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
       });
   });
 
-  // ✅ MEMORY LEAK FIX: Store promise with metadata and cleanup
+  // MEMORY LEAK FIX: Store promise with metadata and cleanup
   const cacheEntry = {
     promise: requestPromise,
     timestamp: Date.now(),
@@ -293,7 +293,7 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
   
   inflightRequests.set(key, cacheEntry);
 
-  // ✅ SMART CLEANUP: Trigger cleanup when requests are added
+  // SMART CLEANUP: Trigger cleanup when requests are added
   triggerCleanupIfNeeded();
 
   try {
@@ -305,12 +305,12 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
   } catch (error) {
     // Handle cancellation gracefully
     if (signal?.aborted && error.message?.includes('cancelled')) {
-      logger.debug(`📋 Request cancelled gracefully: ${key}`);
+      logger.debug(`Request cancelled gracefully: ${key}`);
       return { cancelled: true };
     }
     throw error;
   } finally {
-    // ✅ GUARANTEED CLEANUP: Always clean up, even if promise is still pending
+    // GUARANTEED CLEANUP: Always clean up, even if promise is still pending
     if (!settled) {
       settled = true;
       cleanup();
@@ -344,13 +344,13 @@ export const safeApiCall = async (apiCall, options = {}) => {
     retryCount = 0,
     showAlert,
     signal,
-    retryDelay = 1000, // ✅ Base delay in ms
-    retryMultiplier = 2, // ✅ Exponential multiplier
-    maxRetryDelay = 30000, // ✅ Maximum delay (30 seconds)
-    jitterFactor = 0.3 // ✅ Jitter factor (0-30%)
+    retryDelay = 1000, // Base delay in ms
+    retryMultiplier = 2, // Exponential multiplier
+    maxRetryDelay = 30000, // Maximum delay (30 seconds)
+    jitterFactor = 0.3 // Jitter factor (0-30%)
   } = options;
 
-  // 🔧 Generate retry key for this specific API call using explicit properties
+  // Generate retry key for this specific API call using explicit properties
   const generateRetryKey = (apiCall, options) => {
     // Extract function name safely
     const functionName = apiCall.name || 'anonymous';
@@ -373,22 +373,22 @@ export const safeApiCall = async (apiCall, options = {}) => {
   
   const retryKey = generateRetryKey(apiCall, options);
   
-  // 🔧 Check if there's already a retry in progress for this call
+  // Check if there's already a retry in progress for this call
   if (retryPromises.has(retryKey)) {
-    logger.debug(`⏳ Waiting for existing retry: ${retryKey}`);
+    logger.debug(`Waiting for existing retry: ${retryKey}`);
     try {
       return await retryPromises.get(retryKey);
     } catch (error) {
       // If the retry failed, we'll start our own retry below
-      logger.warn(`🔄 Existing retry failed, starting new attempt: ${retryKey}`);
+      logger.warn(`Existing retry failed, starting new attempt: ${retryKey}`);
     }
   }
 
-  // 🔧 Create retry promise for concurrent calls to await
+  // Create retry promise for concurrent calls to await
   const retryPromise = (async () => {
     let lastError = null;
     
-    // ✅ IMPROVED RETRY LOGIC: Exponential backoff with jitter and better error handling
+    // IMPROVED RETRY LOGIC: Exponential backoff with jitter and better error handling
     for (let attempt = 0; attempt <= retryCount; attempt++) {
       try {
         // Check if cancelled before attempt
@@ -403,7 +403,7 @@ export const safeApiCall = async (apiCall, options = {}) => {
       } catch (error) {
         lastError = error;
         
-        // ✅ DON'T RETRY: Certain errors that won't succeed on retry
+        // DON'T RETRY: Certain errors that won't succeed on retry
         if (
           error.response?.status === 401 || // Unauthorized
           error.response?.status === 403 || // Forbidden  
@@ -417,24 +417,24 @@ export const safeApiCall = async (apiCall, options = {}) => {
           error.message?.includes('Unauthorized') ||
           signal?.aborted // Cancelled
         ) {
-          logger.debug(`🚫 Not retrying error (${error.status || error.message}): Won't succeed on retry`);
+          logger.debug(`Not retrying error (${error.status || error.message}): Won't succeed on retry`);
           throw error; // Don't retry these
         }
 
         // If not last attempt, wait before retry
         if (attempt < retryCount) {
-          // ✅ EXPONENTIAL BACKOFF WITH JITTER
+          // EXPONENTIAL BACKOFF WITH JITTER
           const baseDelay = retryDelay * Math.pow(retryMultiplier, attempt);
           const cappedDelay = Math.min(baseDelay, maxRetryDelay);
           const jitter = Math.random() * jitterFactor * cappedDelay; // 0-30% jitter
           const delayMs = cappedDelay + jitter;
           
           logger.warn(
-            `🔄 Retry attempt ${attempt + 1}/${retryCount} after ${delayMs.toFixed(0)}ms:`,
+            `Retry attempt ${attempt + 1}/${retryCount} after ${delayMs.toFixed(0)}ms:`,
             error.message || error
           );
 
-          // ✅ CANCELLABLE DELAY: Respect abort signals during delay
+          // CANCELLABLE DELAY: Respect abort signals during delay
           await new Promise((resolve, reject) => {
             let timeoutId = null;
             let abortHandler = null;
@@ -470,72 +470,72 @@ export const safeApiCall = async (apiCall, options = {}) => {
     // All attempts failed
     console.error(`API call failed after ${retryCount + 1} attempts:`, lastError);
   
-  // ✅ More nuanced alert logic - Return structured error information for caller to handle UI
+  // More nuanced alert logic - Return structured error information for caller to handle UI
   const errorInfo = {
     success: false,
     error: lastError,
     errorType: 'unknown',
     userMessage: errorMessage,
-    shouldShowAlert: showAlert !== undefined ? showAlert : true, // ✅ Use showAlert option if provided
+    shouldShowAlert: showAlert !== undefined ? showAlert : true, // Use showAlert option if provided
     attemptCount: retryCount + 1
   };
 
-  // 🔧 Classify errors using proper error properties instead of string matching
+  // Classify errors using proper error properties instead of string matching
   if (lastError.status === 401 || lastError.code === 'UNAUTHORIZED' || lastError.name === 'AuthenticationError') {
     errorInfo.errorType = 'authentication';
     errorInfo.userMessage = 'Please log in again';
-    if (showAlert === undefined) errorInfo.shouldShowAlert = true; // ✅ Always show for auth - user needs to take action
+    if (showAlert === undefined) errorInfo.shouldShowAlert = true; // Always show for auth - user needs to take action
   } else if (lastError.code === 'NETWORK_ERROR' || lastError.name === 'NetworkError' || isNetworkError(lastError)) {
     errorInfo.errorType = 'network';
     errorInfo.userMessage = 'Network connection failed. Please check your internet connection.';
-    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Don't show alert, show network indicator instead
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // Don't show alert, show network indicator instead
   } else if (lastError.code === 'TIMEOUT' || lastError.name === 'TimeoutError' || lastError.message?.includes('timeout')) {
     errorInfo.errorType = 'timeout';
     errorInfo.userMessage = 'Request timed out. Please try again.';
-    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Silent retry or show toast instead
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // Silent retry or show toast instead
   } else if (lastError.status === 429 || lastError.code === 'RATE_LIMIT' || lastError.name === 'RateLimitError') {
     errorInfo.errorType = 'rate_limit';
     errorInfo.userMessage = 'Too many requests. Please wait a moment and try again.';
-    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Show toast, not blocking alert
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // Show toast, not blocking alert
   } else if (lastError.status >= 500 || lastError.code === 'SERVER_ERROR' || lastError.name === 'ServerError') {
     errorInfo.errorType = 'server_error';
     errorInfo.userMessage = 'Server is temporarily unavailable. Please try again later.';
-    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Show status indicator, not alert
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // Show status indicator, not alert
   } else if (lastError.status >= 400 && lastError.status < 500 || lastError.code === 'VALIDATION_ERROR' || lastError.name === 'ValidationError') {
     errorInfo.errorType = 'validation';
     errorInfo.userMessage = lastError.message || 'Please check your input and try again.';
-    if (showAlert === undefined) errorInfo.shouldShowAlert = true; // ✅ Show alert - user needs to fix input
+    if (showAlert === undefined) errorInfo.shouldShowAlert = true; // Show alert - user needs to fix input
   } else if (lastError.status === 404 || lastError.code === 'NOT_FOUND' || lastError.name === 'NotFoundError') {
     errorInfo.errorType = 'not_found';
     errorInfo.userMessage = 'The requested resource was not found.';
-    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Handle gracefully in UI
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // Handle gracefully in UI
   } else if (lastError.message?.includes('cancelled') || lastError.code === 'CANCELLED') {
     errorInfo.errorType = 'cancelled';
     errorInfo.userMessage = 'Request was cancelled.';
-    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // ✅ Don't show alert for cancellations
+    if (showAlert === undefined) errorInfo.shouldShowAlert = false; // Don't show alert for cancellations
   } else {
     // Unknown errors - be conservative and show alert
     errorInfo.errorType = 'unknown';
-    if (showAlert === undefined) errorInfo.shouldShowAlert = true; // ✅ Show alert for unknown errors
+    if (showAlert === undefined) errorInfo.shouldShowAlert = true; // Show alert for unknown errors
   }
     
     return errorInfo;
   })();
 
-  // 🔧 Store retry promise for concurrent calls
+  // Store retry promise for concurrent calls
   if (retryCount > 0) {
     retryPromises.set(retryKey, retryPromise);
     
-    // ✅ SMART CLEANUP: Trigger cleanup when retry promises are added
+    // SMART CLEANUP: Trigger cleanup when retry promises are added
     triggerCleanupIfNeeded();
     
-    // 🔧 Clean up retry promise when done with error handling
+    // Clean up retry promise when done with error handling
     retryPromise.finally(() => {
       try {
         retryPromises.delete(retryKey);
-        logger.debug(`🧹 Cleaned up retry promise: ${retryKey}`);
+        logger.debug(`Cleaned up retry promise: ${retryKey}`);
       } catch (error) {
-        logger.error('🚨 Error during retry cleanup:', error);
+        logger.error('Error during retry cleanup:', error);
       }
     });
   }
@@ -552,18 +552,18 @@ export const batchApiCalls = async (apiCalls, options = {}) => {
   const { 
     failFast = false,
     errorMessage = 'Some operations failed',
-    signal // 🔧 Accept cancellation signal
+    signal // Accept cancellation signal
   } = options;
 
   try {
     if (failFast) {
-      // 🔧 Cancel remaining on first error
+      // Cancel remaining on first error
       const controller = new AbortController();
       const results = [];
       
       try {
         for (const call of apiCalls) {
-          // 🔧 Check if cancelled
+          // Check if cancelled
           if (signal?.aborted || controller.signal.aborted) {
             throw new Error('Batch cancelled');
           }
@@ -573,7 +573,7 @@ export const batchApiCalls = async (apiCalls, options = {}) => {
         }
         return { success: true, data: results };
       } catch (error) {
-        // 🔧 Cancel all pending operations
+        // Cancel all pending operations
         controller.abort();
         throw error;
       }
@@ -605,7 +605,7 @@ export const batchApiCalls = async (apiCalls, options = {}) => {
 };
 
 /**
- * 🔧 Request cancellation utilities
+ * Request cancellation utilities
  */
 export const createCancellableRequest = () => {
   const controller = new AbortController();
@@ -619,15 +619,15 @@ export const createCancellableRequest = () => {
 export const cancelAllInflightRequests = () => {
   const count = inflightRequests.size;
   inflightRequests.clear();
-  logger.warn(`🚫 Cancelled ${count} in-flight requests`);
+  logger.warn(`Cancelled ${count} in-flight requests`);
 };
 
 /**
- * 🔧 Deduplicated API patterns for different operations
+ * Deduplicated API patterns for different operations
  * All read operations use deduplication, mutations do not
  */
 export const apiPatterns = {
-  // 🔧 Deduplicated load community posts
+  // Deduplicated load community posts
   loadCommunityPosts: async (cursor = null, options = {}) => {
     const key = `community-posts-${cursor || 'initial'}`;
     
@@ -643,7 +643,7 @@ export const apiPatterns = {
     );
   },
 
-  // 🔧 Deduplicated user profile load
+  // Deduplicated user profile load
   loadUserData: async (options = {}) => {
     return deduplicatedApiCall(
       'user-profile',
@@ -652,7 +652,7 @@ export const apiPatterns = {
     );
   },
 
-  // 🔧 Deduplicated color matches load
+  // Deduplicated color matches load
   loadColorMatches: async (options = {}) => {
     const { limit = 20, offset = 0 } = options;
     const key = `color-matches-${limit}-${offset}`;
@@ -664,7 +664,7 @@ export const apiPatterns = {
     );
   },
 
-  // 🔧 Deduplicated user settings load
+  // Deduplicated user settings load
   loadUserSettings: async (options = {}) => {
     return deduplicatedApiCall(
       'user-settings',
@@ -673,7 +673,7 @@ export const apiPatterns = {
     );
   },
 
-  // 🔧 Non-deduplicated operations (mutations should not be deduplicated)
+  // Non-deduplicated operations (mutations should not be deduplicated)
   createColorMatch: async (colorMatchData, options = {}) => {
     return safeApiCall(
       () => getApiService().createColorMatch(colorMatchData, options),
@@ -688,7 +688,7 @@ export const apiPatterns = {
     );
   },
 
-  // 🔧 Non-deduplicated toggle operations (mutations)
+  // Non-deduplicated toggle operations (mutations)
   togglePostLike: async (postId, isLiked, options = {}) => {
     return safeApiCall(
       () => isLiked 
@@ -707,7 +707,7 @@ export const apiPatterns = {
     );
   },
 
-  // 🔧 Username availability with smart caching (deduplicated)
+  // Username availability with smart caching (deduplicated)
   checkUsernameAvailability: async (username, options = {}) => {
     const key = `username-check-${username}`;
     
@@ -725,25 +725,25 @@ export const apiPatterns = {
     return result;
   },
 
-  // 🔧 Utility to clear specific request from cache
+  // Utility to clear specific request from cache
   clearRequestCache: (key) => {
     inflightRequests.delete(key);
-    logger.debug(`🧹 Cleared request cache for: ${key}`);
+    logger.debug(`Cleared request cache for: ${key}`);
   },
 
-  // 🔧 Utility to clear all cached requests
+  // Utility to clear all cached requests
   clearAllRequestCache: () => {
     const count = inflightRequests.size;
     inflightRequests.clear();
-    logger.debug(`🧹 Cleared ${count} cached requests`);
+    logger.debug(`Cleared ${count} cached requests`);
   }
 };
 
-// ✅ REMOVED: Old setInterval-based cleanup replaced with smart on-demand cleanup
+// REMOVED: Old setInterval-based cleanup replaced with smart on-demand cleanup
 // The smart cleanup system only runs when there are requests to clean and stops
 // automatically when the cache is empty, eliminating unnecessary background processing.
 
-// ✅ MEMORY LEAK FIX: Manual cleanup utilities for emergency cleanup
+// MEMORY LEAK FIX: Manual cleanup utilities for emergency cleanup
 export const clearAllApiCaches = () => {
   try {
     // Clean up all inflight requests with their cleanup functions
@@ -761,9 +761,9 @@ export const clearAllApiCaches = () => {
     // Clear retry promises
     retryPromises.clear();
     
-    logger.info('🧹 Manually cleared all API caches');
+    logger.info('Manually cleared all API caches');
   } catch (error) {
-    logger.error('❌ Error during manual cache cleanup:', error);
+    logger.error('Error during manual cache cleanup:', error);
   }
 };
 
@@ -780,14 +780,14 @@ export const getApiCacheStats = () => {
   };
 };
 
-// ✅ MEMORY LEAK FIX: Force cleanup of specific request
+// MEMORY LEAK FIX: Force cleanup of specific request
 export const forceCleanupRequest = (key) => {
   const entry = inflightRequests.get(key);
   if (entry) {
     if (entry.cleanup && typeof entry.cleanup === 'function') {
       try {
         entry.cleanup();
-        logger.debug(`🧹 Force cleaned up request: ${key}`);
+        logger.debug(`Force cleaned up request: ${key}`);
       } catch (error) {
         logger.warn(`Failed to force cleanup request ${key}:`, error);
       }
@@ -798,24 +798,24 @@ export const forceCleanupRequest = (key) => {
   return false;
 };
 
-// ✅ SMART CLEANUP CONTROL: Enhanced cleanup control for the new system
+// SMART CLEANUP CONTROL: Enhanced cleanup control for the new system
 export const stopApiCleanup = () => {
   stopCleanup();
-  logger.info('🛑 Smart API cleanup stopped');
+  logger.info('Smart API cleanup stopped');
 };
 
 export const startApiCleanup = () => {
   // Smart cleanup starts automatically when requests are added
   triggerCleanupIfNeeded();
-  logger.info('▶️ Smart API cleanup triggered');
+  logger.info('Smart API cleanup triggered');
 };
 
-// ✅ FORCE IMMEDIATE CLEANUP: Trigger cleanup immediately regardless of schedule
+// FORCE IMMEDIATE CLEANUP: Trigger cleanup immediately regardless of schedule
 export const forceImmediateCleanup = () => {
   stopCleanup(); // Stop any scheduled cleanup
   isCleanupScheduled = false;
   scheduleCleanup(); // Force immediate schedule
-  logger.info('🧹 Forced immediate API cleanup');
+  logger.info('Forced immediate API cleanup');
 };
 
 export { deduplicatedApiCall, safeApiCall, batchApiCalls };

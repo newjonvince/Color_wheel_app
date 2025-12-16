@@ -4,7 +4,7 @@ import { View, Text, TouchableOpacity } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { optimizedStyles as styles, optimizedColors } from '../styles';
 
-// ✅ PROPER FIX: Check MaterialIcons availability once at module level
+// PROPER FIX: Check MaterialIcons availability once at module level
 const ICONS_AVAILABLE = (() => {
   try {
     return MaterialIcons && typeof MaterialIcons === 'object';
@@ -28,7 +28,7 @@ const getLogger = () => {
   return _loggerInstance;
 };
 
-// ✅ Optimized with custom comparison to prevent unnecessary re-renders
+// Optimized with custom comparison to prevent unnecessary re-renders
 const ErrorBanner = React.memo(
   ({ message, onDismiss }) => {
     if (!message) return null;

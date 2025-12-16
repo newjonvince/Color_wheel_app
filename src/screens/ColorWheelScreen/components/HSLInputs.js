@@ -5,7 +5,7 @@ import PropTypes from 'prop-types';
 import { debounce } from '../../../utils/throttledCallbacks';
 import { LAYOUT } from '../../../constants/layout';
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
   if (_isDebugModeValue === null) {
@@ -30,14 +30,14 @@ export const HSLInputs = React.memo(({
   onApplyInputs,
   wheelRef,
 }) => {
-  // ✅ Gesture conflict handling - disable wheel gestures when input is focused
+  // Gesture conflict handling - disable wheel gestures when input is focused
   const inputRefs = useRef({ h: null, s: null, l: null });
   const isInputFocused = useRef(false);
 
-  // ✅ Debounced live update to prevent excessive updates on every keypress
+  // Debounced live update to prevent excessive updates on every keypress
   const debouncedLiveUpdate = useRef(null);
   
-  // ✅ Initialize debounce with safety checks
+  // Initialize debounce with safety checks
   if (!debouncedLiveUpdate.current) {
     try {
       const debouncedFn = debounce((component, value, wheelRef) => {
@@ -45,21 +45,21 @@ export const HSLInputs = React.memo(({
           try {
             onLiveUpdate(component, value, wheelRef);
           } catch (error) {
-            console.error('❌ Error in debounced live update:', error);
+            console.error('Error in debounced live update:', error);
           }
         }
       }, LAYOUT.DEBOUNCE_MS); // Configurable debounce - balance between responsiveness and performance
       
       debouncedLiveUpdate.current = debouncedFn;
     } catch (error) {
-      console.error('❌ Failed to create debounced function:', error);
+      console.error('Failed to create debounced function:', error);
       // Fallback to direct call without debounce
       debouncedLiveUpdate.current = (component, value, wheelRef) => {
         if (onLiveUpdate && typeof onLiveUpdate === 'function') {
           try {
             onLiveUpdate(component, value, wheelRef);
           } catch (error) {
-            console.error('❌ Error in fallback live update:', error);
+            console.error('Error in fallback live update:', error);
           }
         }
       };
@@ -76,15 +76,15 @@ export const HSLInputs = React.memo(({
     }
   }, [onUpdateInput, wheelRef]);
 
-  // ✅ MEMORY LEAK FIX: Proper debounce cleanup on unmount
+  // MEMORY LEAK FIX: Proper debounce cleanup on unmount
   useEffect(() => {
     return () => {
       const debouncedFn = debouncedLiveUpdate.current;
       if (debouncedFn && typeof debouncedFn.cancel === 'function') {
         try {
-          debouncedFn.cancel(); // ✅ Use the actual cancel method
+          debouncedFn.cancel(); // Use the actual cancel method
         } catch (error) {
-          console.warn('❌ Failed to cleanup debounced function:', error);
+          console.warn('Failed to cleanup debounced function:', error);
         }
       }
     };
@@ -93,32 +93,32 @@ export const HSLInputs = React.memo(({
   const handleInputFocus = useCallback((component) => {
     isInputFocused.current = true;
     
-    // ✅ SAFER: Check if wheel has gesture control methods
+    // SAFER: Check if wheel has gesture control methods
     const wheel = wheelRef?.current;
     if (wheel && typeof wheel.setGesturesEnabled === 'function') {
       try {
         wheel.setGesturesEnabled(false);
         if (IS_DEBUG_MODE()) {
-          console.log(`🎯 HSL input ${component} focused - wheel gestures disabled`);
+          console.log(`HSL input ${component} focused - wheel gestures disabled`);
         }
       } catch (error) {
         console.warn('Failed to disable wheel gestures:', error);
       }
     } else if (IS_DEBUG_MODE()) {
-      console.log(`🎯 HSL input ${component} focused - wheel gesture control not available`);
+      console.log(`HSL input ${component} focused - wheel gesture control not available`);
     }
   }, [wheelRef]);
 
   const handleInputBlur = useCallback((component) => {
     isInputFocused.current = false;
     
-    // ✅ SAFER: Check if wheel has gesture control methods
+    // SAFER: Check if wheel has gesture control methods
     const wheel = wheelRef?.current;
     if (wheel && typeof wheel.setGesturesEnabled === 'function') {
       try {
         wheel.setGesturesEnabled(true);
         if (IS_DEBUG_MODE()) {
-          console.log(`🎯 HSL input ${component} blurred - wheel gestures re-enabled`);
+          console.log(`HSL input ${component} blurred - wheel gestures re-enabled`);
         }
       } catch (error) {
         console.warn('Failed to re-enable wheel gestures:', error);
@@ -129,7 +129,7 @@ export const HSLInputs = React.memo(({
     onApplyInputs();
     
     if (IS_DEBUG_MODE() && !wheel?.setGesturesEnabled) {
-      console.log(`🎯 HSL input ${component} blurred - wheel gestures enabled`);
+      console.log(`HSL input ${component} blurred - wheel gestures enabled`);
     }
   }, [wheelRef, onApplyInputs]);
 
@@ -186,7 +186,7 @@ export const HSLInputs = React.memo(({
   );
 });
 
-// ✅ PropTypes validation for development safety
+// PropTypes validation for development safety
 HSLInputs.propTypes = {
   hslInputs: PropTypes.shape({
     h: PropTypes.string.isRequired,

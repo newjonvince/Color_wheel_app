@@ -26,7 +26,7 @@ export const ColorWheelContainer = React.memo(({
     initialHex: baseHex,
     selectedFollowsActive: selectedFollowsActive,
     linked,
-    onToggleLinked, // ✅ PROP FIX: Pass onToggleLinked to FullColorWheel
+    onToggleLinked, // PROP FIX: Pass onToggleLinked to FullColorWheel
     onColorsChange,
     onHexChange,
     onActiveHandleChange,

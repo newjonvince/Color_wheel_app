@@ -91,21 +91,21 @@ const ApiIntegrationStatus = () => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>🔌 API Integration Status</Text>
+      <Text style={styles.title}>API Integration Status</Text>
       
       {/* Current Status */}
       <View style={styles.statusContainer}>
         <View style={styles.statusRow}>
           <Text style={styles.label}>API Ready:</Text>
           <Text style={[styles.value, status.apiReady ? styles.success : styles.error]}>
-            {status.apiReady ? '✅ Yes' : '❌ No'}
+            {status.apiReady ? 'Yes' : 'No'}
           </Text>
         </View>
         
         <View style={styles.statusRow}>
           <Text style={styles.label}>Authenticated:</Text>
           <Text style={[styles.value, status.authenticated ? styles.success : styles.error]}>
-            {status.authenticated ? '✅ Yes' : '❌ No'}
+            {status.authenticated ? 'Yes' : 'No'}
           </Text>
         </View>
         
@@ -134,7 +134,7 @@ const ApiIntegrationStatus = () => {
       {/* Action Buttons */}
       <View style={styles.buttonContainer}>
         <TouchableOpacity style={styles.button} onPress={checkApiStatus}>
-          <Text style={styles.buttonText}>🔄 Refresh Status</Text>
+          <Text style={styles.buttonText}>Refresh Status</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
@@ -143,7 +143,7 @@ const ApiIntegrationStatus = () => {
           disabled={isRunningTest}
         >
           <Text style={styles.buttonText}>
-            {isRunningTest ? '🧪 Running Test...' : '🧪 Run Full API Test'}
+            {isRunningTest ? 'Running Test...' : 'Run Full API Test'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -151,7 +151,7 @@ const ApiIntegrationStatus = () => {
       {/* Test Results */}
       {testResults && (
         <View style={styles.resultsContainer}>
-          <Text style={styles.resultsTitle}>📊 Test Results</Text>
+          <Text style={styles.resultsTitle}>Test Results</Text>
           
           {testResults.error ? (
             <Text style={[styles.value, styles.error]}>
@@ -170,7 +170,7 @@ const ApiIntegrationStatus = () => {
               {testResults.tests && Object.entries(testResults.tests).map(([testName, result]) => (
                 <View key={testName} style={styles.testResult}>
                   <Text style={[styles.testName, result.passed ? styles.success : styles.error]}>
-                    {result.passed ? '✅' : '❌'} {testName}
+                    {result.passed ? 'Pass' : 'Fail'} {testName}
                   </Text>
                   {!result.passed && result.details?.error && (
                     <Text style={styles.testError}>{result.details.error}</Text>

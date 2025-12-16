@@ -1,7 +1,7 @@
 // utils/apiHelpers.ts - Typed API utility functions with request deduplication
 import Constants from 'expo-constants';
 
-// ✅ LAZY LOADING: Avoid circular dependency with safeApiService
+// LAZY LOADING: Avoid circular dependency with safeApiService
 let apiService: any = null;
 const getApiService = () => {
   if (apiService) return apiService;
@@ -65,9 +65,9 @@ import type {
 const extra = Constants.expoConfig?.extra || {};
 const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
 
-// 🔧 Request deduplication to prevent duplicate API calls
+// Request deduplication to prevent duplicate API calls
 const inflightRequests = new Map<string, InflightRequest>();
-const retryPromises = new Map<string, Promise<any>>(); // 🔧 Store retry promises for concurrent calls
+const retryPromises = new Map<string, Promise<any>>(); // Store retry promises for concurrent calls
 const REQUEST_TIMEOUT = 30000; // 30 seconds
 
 /**
@@ -83,7 +83,7 @@ const deduplicatedApiCall = async <T>(
 ): Promise<T | { cancelled: true }> => {
   const { signal } = options;
   
-  // 🔧 Check if already cancelled
+  // Check if already cancelled
   if (signal?.aborted) {
     throw new Error(`Request cancelled: ${key}`);
   }
@@ -92,18 +92,18 @@ const deduplicatedApiCall = async <T>(
   if (inflightRequests.has(key)) {
     const cached = inflightRequests.get(key)!;
     
-    // 🔧 Check if cached promise is stale
+    // Check if cached promise is stale
     if (Date.now() - cached.timestamp < REQUEST_TIMEOUT) {
-      logger.debug(`🔄 Reusing in-flight request: ${key}`);
+      logger.debug(`Reusing in-flight request: ${key}`);
       return cached.promise;
     } else {
-      // 🔧 Stale promise - remove and make new request
-      logger.warn(`⏰ Cached request expired: ${key}`);
+      // Stale promise - remove and make new request
+      logger.warn(`Cached request expired: ${key}`);
       inflightRequests.delete(key);
     }
   }
 
-  // 🔧 Create timeout wrapper
+  // Create timeout wrapper
   const timeoutPromise = new Promise<never>((_, reject) => {
     setTimeout(() => {
       reject(new Error(`Request timeout: ${key}`));
@@ -111,7 +111,7 @@ const deduplicatedApiCall = async <T>(
     }, REQUEST_TIMEOUT);
   });
 
-  // 🔧 Create cancellation wrapper
+  // Create cancellation wrapper
   const cancellationPromise = signal ? new Promise<never>((_, reject) => {
     signal.addEventListener('abort', () => {
       reject(new Error(`Request cancelled: ${key}`));
@@ -119,14 +119,14 @@ const deduplicatedApiCall = async <T>(
     });
   }) : null;
 
-  // 🔧 Race between API call, timeout, and cancellation
+  // Race between API call, timeout, and cancellation
   const apiPromise = safeApiCall(apiCall, options);
   const promises: Promise<any>[] = [apiPromise, timeoutPromise];
   if (cancellationPromise) promises.push(cancellationPromise);
   
   const requestPromise = Promise.race(promises);
 
-  // 🔧 Store promise with timestamp
+  // Store promise with timestamp
   inflightRequests.set(key, {
     promise: requestPromise,
     timestamp: Date.now()
@@ -136,14 +136,14 @@ const deduplicatedApiCall = async <T>(
     const result = await requestPromise;
     return result;
   } catch (error) {
-    // 🔧 Don't throw cancellation errors to unmounted components
+    // Don't throw cancellation errors to unmounted components
     if (signal?.aborted && (error as Error).message?.includes('cancelled')) {
-      logger.debug(`📋 Request cancelled gracefully: ${key}`);
+      logger.debug(`Request cancelled gracefully: ${key}`);
       return { cancelled: true };
     }
     throw error;
   } finally {
-    // 🔧 Clean up on completion
+    // Clean up on completion
     inflightRequests.delete(key);
   }
 };
@@ -164,21 +164,21 @@ export const safeApiCall = async <T>(
     signal
   } = options;
 
-  // 🔧 Generate retry key for this specific API call
+  // Generate retry key for this specific API call
   const retryKey = `${apiCall.toString().slice(0, 100)}-${JSON.stringify(options).slice(0, 50)}`;
   
-  // 🔧 Check if there's already a retry in progress for this call
+  // Check if there's already a retry in progress for this call
   if (retryPromises.has(retryKey)) {
-    logger.debug(`⏳ Waiting for existing retry: ${retryKey}`);
+    logger.debug(`Waiting for existing retry: ${retryKey}`);
     try {
       return await retryPromises.get(retryKey)!;
     } catch (error) {
       // If the retry failed, we'll start our own retry below
-      logger.warn(`🔄 Existing retry failed, starting new attempt: ${retryKey}`);
+      logger.warn(`Existing retry failed, starting new attempt: ${retryKey}`);
     }
   }
 
-  // 🔧 Create retry promise for concurrent calls to await
+  // Create retry promise for concurrent calls to await
   const retryPromise = (async (): Promise<SafeApiCallResult<T>> => {
     let lastError: ApiError | undefined;
     
@@ -206,7 +206,7 @@ export const safeApiCall = async <T>(
           await new Promise(resolve => setTimeout(resolve, delay));
           
           if (IS_DEBUG_MODE) {
-            console.log(`🔄 Retrying API call (attempt ${attempt + 2}/${retryCount + 1}) after ${delay}ms`);
+            console.log(`Retrying API call (attempt ${attempt + 2}/${retryCount + 1}) after ${delay}ms`);
           }
         }
       }
@@ -228,7 +228,7 @@ export const safeApiCall = async <T>(
       attemptCount: retryCount + 1
     };
 
-    // 🔧 Classify errors using proper error properties instead of string matching
+    // Classify errors using proper error properties instead of string matching
     if (lastError?.status === 401 || lastError?.code === 'UNAUTHORIZED' || lastError?.name === 'AuthenticationError') {
       errorInfo.errorType = 'authentication';
       errorInfo.userMessage = 'Please log in again';
@@ -269,14 +269,14 @@ export const safeApiCall = async <T>(
     return errorInfo;
   })();
 
-  // 🔧 Store retry promise for concurrent calls
+  // Store retry promise for concurrent calls
   if (retryCount > 0) {
     retryPromises.set(retryKey, retryPromise);
     
-    // 🔧 Clean up retry promise when done
+    // Clean up retry promise when done
     retryPromise.finally(() => {
       retryPromises.delete(retryKey);
-      logger.debug(`🧹 Cleaned up retry promise: ${retryKey}`);
+      logger.debug(`Cleaned up retry promise: ${retryKey}`);
     });
   }
 
@@ -300,13 +300,13 @@ export const batchApiCalls = async <T>(
 
   try {
     if (failFast) {
-      // 🔧 Cancel remaining on first error
+      // Cancel remaining on first error
       const controller = new AbortController();
       const results: T[] = [];
       
       try {
         for (const call of apiCalls) {
-          // 🔧 Check if cancelled
+          // Check if cancelled
           if (signal?.aborted || controller.signal.aborted) {
             throw new Error('Batch cancelled');
           }
@@ -316,7 +316,7 @@ export const batchApiCalls = async <T>(
         }
         return { success: true, data: results };
       } catch (error) {
-        // 🔧 Cancel all pending operations
+        // Cancel all pending operations
         controller.abort();
         throw error;
       }
@@ -348,7 +348,7 @@ export const batchApiCalls = async <T>(
 };
 
 /**
- * 🔧 Request cancellation utilities
+ * Request cancellation utilities
  */
 export const createCancellableRequest = (): CancellableRequest => {
   const controller = new AbortController();
@@ -362,15 +362,15 @@ export const createCancellableRequest = (): CancellableRequest => {
 export const cancelAllInflightRequests = (): void => {
   const count = inflightRequests.size;
   inflightRequests.clear();
-  logger.warn(`🚫 Cancelled ${count} in-flight requests`);
+  logger.warn(`Cancelled ${count} in-flight requests`);
 };
 
 /**
- * 🔧 Typed API patterns for different operations
+ * Typed API patterns for different operations
  * All read operations use deduplication, mutations do not
  */
 export const apiPatterns = {
-  // 🔧 Deduplicated load community posts (using generic get method)
+  // Deduplicated load community posts (using generic get method)
   loadCommunityPosts: async (cursor: string | null = null, options: ApiCallOptions = {}) => {
     const key = `community-posts-${cursor || 'initial'}`;
     const endpoint = cursor ? `/community/posts?cursor=${cursor}` : '/community/posts';
@@ -382,7 +382,7 @@ export const apiPatterns = {
     ) as Promise<SafeApiCallResult<PaginatedResponse<CommunityPost>>>;
   },
 
-  // 🔧 Deduplicated user profile loading
+  // Deduplicated user profile loading
   loadUserProfile: async (userId: string, options: ApiCallOptions = {}) => {
     const key = `user-profile-${userId}`;
     
@@ -393,7 +393,7 @@ export const apiPatterns = {
     ) as Promise<SafeApiCallResult<UserProfile>>;
   },
 
-  // 🔧 Deduplicated user posts loading
+  // Deduplicated user posts loading
   loadUserPosts: async (userId: string, cursor: string | null = null, options: ApiCallOptions = {}) => {
     const key = `user-posts-${userId}-${cursor || 'initial'}`;
     const endpoint = cursor ? `/users/${userId}/posts?cursor=${cursor}` : `/users/${userId}/posts`;
@@ -405,7 +405,7 @@ export const apiPatterns = {
     ) as Promise<SafeApiCallResult<PaginatedResponse<CommunityPost>>>;
   },
 
-  // 🔧 Deduplicated followers loading
+  // Deduplicated followers loading
   loadUserFollowers: async (userId: string, options: ApiCallOptions = {}) => {
     const key = `user-followers-${userId}`;
     
@@ -416,7 +416,7 @@ export const apiPatterns = {
     ) as Promise<SafeApiCallResult<PaginatedResponse<UserProfile>>>;
   },
 
-  // 🔧 Deduplicated color matches loading
+  // Deduplicated color matches loading
   loadColorMatches: async (options: ApiCallOptions = {}) => {
     const key = 'color-matches';
     
@@ -427,7 +427,7 @@ export const apiPatterns = {
     ) as Promise<SafeApiCallResult<ColorMatch[]>>;
   },
 
-  // 🔧 Non-deduplicated operations (mutations should not be deduplicated)
+  // Non-deduplicated operations (mutations should not be deduplicated)
   createColorMatch: async (colorMatchData: Partial<ColorMatch>, options: ApiCallOptions = {}) => {
     return safeApiCall(
       () => getApiService().createColorMatch(colorMatchData),
@@ -442,7 +442,7 @@ export const apiPatterns = {
     );
   },
 
-  // 🔧 Non-deduplicated toggle operations (mutations)
+  // Non-deduplicated toggle operations (mutations)
   togglePostLike: async (postId: string, isLiked: boolean, options: ApiCallOptions = {}) => {
     return safeApiCall(
       () => isLiked 
@@ -461,7 +461,7 @@ export const apiPatterns = {
     );
   },
 
-  // 🔧 Username availability with smart caching (deduplicated)
+  // Username availability with smart caching (deduplicated)
   checkUsernameAvailability: async (username: string, options: ApiCallOptions = {}) => {
     const key = `username-check-${username}`;
     
@@ -474,26 +474,26 @@ export const apiPatterns = {
     return result as SafeApiCallResult<{ available: boolean }>;
   },
 
-  // 🔧 Utility to clear specific request from cache
+  // Utility to clear specific request from cache
   clearRequestCache: (key: string): void => {
     inflightRequests.delete(key);
-    logger.debug(`🧹 Cleared request cache for: ${key}`);
+    logger.debug(`Cleared request cache for: ${key}`);
   },
 
-  // 🔧 Utility to clear all cached requests
+  // Utility to clear all cached requests
   clearAllRequestCache: (): void => {
     const count = inflightRequests.size;
     inflightRequests.clear();
-    logger.debug(`🧹 Cleared ${count} cached requests`);
+    logger.debug(`Cleared ${count} cached requests`);
   }
 };
 
-// 🔧 Add periodic cleanup of stale requests
+// Add periodic cleanup of stale requests
 setInterval(() => {
   const now = Date.now();
   for (const [key, cached] of inflightRequests.entries()) {
     if (now - cached.timestamp > REQUEST_TIMEOUT) {
-      logger.warn(`🧹 Cleaning up stale request: ${key}`);
+      logger.warn(`Cleaning up stale request: ${key}`);
       inflightRequests.delete(key);
     }
   }

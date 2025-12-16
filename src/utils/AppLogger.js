@@ -1,5 +1,5 @@
 // utils/AppLogger.js - Production-safe logging with EXPO_PUBLIC flags
-// ✅ Use shared helper to avoid duplicate code
+// Use shared helper to avoid duplicate code
 import { getSafeExpoExtra, isDebugMode } from './expoConfigHelper';
 
 // Lazy-load extra to avoid module-load crashes and handle late Constants
@@ -25,7 +25,7 @@ class AppLogger {
     this.sentryEnabled = false; // Flag
     this._initialized = false;
     
-    // ✅ SENTRY FAILURE TRACKING WITH RECOVERY
+    // SENTRY FAILURE TRACKING WITH RECOVERY
     this._sentryFailures = [];
     this._sentryDisabledUntil = null;
     this._maxFailuresInWindow = 10;
@@ -42,7 +42,7 @@ class AppLogger {
     try {
       this.isDebugMode = IS_DEBUG_MODE();
       this.logLevel = LOG_LEVEL();
-      // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+      // CRASH FIX: Use typeof check to prevent ReferenceError in production
       if ((typeof __DEV__ === 'undefined' || !__DEV__) && global.Sentry) {
         this.sentryEnabled = true;
       }
@@ -96,7 +96,7 @@ class AppLogger {
     );
   }
 
-  // ✅ SENTRY FAILURE MANAGEMENT WITH RECOVERY
+  // SENTRY FAILURE MANAGEMENT WITH RECOVERY
   _cleanOldFailures() {
     const now = Date.now();
     this._sentryFailures = this._sentryFailures.filter(
@@ -109,9 +109,9 @@ class AppLogger {
     
     const now = Date.now();
     if (now > this._sentryDisabledUntil) {
-      // ✅ CIRCUIT BREAKER FIX: Re-enable Sentry but don't clear failures until actual success
+      // CIRCUIT BREAKER FIX: Re-enable Sentry but don't clear failures until actual success
       this._sentryDisabledUntil = null;
-      // ✅ Keep failure history - only clear on actual successful operations via _recordSentrySuccess()
+      // Keep failure history - only clear on actual successful operations via _recordSentrySuccess()
       console.log('[AppLogger] Sentry re-enabled after disable period (failures preserved until success)');
       return false;
     }
@@ -131,7 +131,7 @@ class AppLogger {
   }
 
   _recordSentrySuccess() {
-    // ✅ SUCCESS RESETS: Clear recent failures on successful report
+    // SUCCESS RESETS: Clear recent failures on successful report
     if (this._sentryFailures.length > 0) {
       this._sentryFailures = [];
       console.log('[AppLogger] Sentry failure count reset after successful report');
@@ -177,7 +177,7 @@ class AppLogger {
         return;
       }
 
-      // ✅ CHECK TEMPORARY DISABLE STATUS
+      // CHECK TEMPORARY DISABLE STATUS
       if (this._isSentryTemporarilyDisabled()) {
         return; // Skip reporting during disable period
       }
@@ -201,16 +201,16 @@ class AppLogger {
           global.Sentry.captureException(new Error(errorMessage));
         }
         
-        // ✅ RECORD SUCCESS: Reset failure count on successful report
+        // RECORD SUCCESS: Reset failure count on successful report
         this._recordSentrySuccess();
       }
     } catch (err) {
-      // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+      // CRASH FIX: Use typeof check to prevent ReferenceError in production
       if (typeof __DEV__ !== 'undefined' && __DEV__) {
         console.warn('[AppLogger] Sentry capture failed:', err);
       }
 
-      // ✅ SMART FAILURE TRACKING: Time-based with recovery
+      // SMART FAILURE TRACKING: Time-based with recovery
       this._recordSentryFailure();
     }
   }

@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { StyleSheet } from 'react-native';
 import { safeStorage } from '../utils/safeStorage';
-// ✅ Use shared helper to avoid duplicate code
+// Use shared helper to avoid duplicate code
 import { isDebugMode } from '../utils/expoConfigHelper';
 
 const IS_DEBUG_MODE = isDebugMode();
@@ -21,28 +21,28 @@ class AppErrorBoundary extends React.Component {
   static MAX_ERRORS_PER_MINUTE = 5;
   errorTimestamps = [];
 
-  // ✅ Define action configs as static class properties
+  // Define action configs as static class properties
   static ERROR_CONFIGS = {
     network: {
-      emoji: '📡',
+      emoji: '',
       title: 'Connection Problem',
       message: 'Unable to connect to our servers. Please check your internet connection and try again.',
       actions: ['retry', 'offline'] // Reference action names, not functions
     },
     storage: {
-      emoji: '💾',
+      emoji: '',
       title: 'Storage Issue',
       message: 'There was a problem accessing your saved data.',
       actions: ['retry', 'clearCache']
     },
     navigation: {
-      emoji: '🧭',
+      emoji: '',
       title: 'Navigation Error',
       message: 'There was a problem loading the screen. Let\'s get you back on track.',
       actions: ['goHome', 'restart']
     },
     unknown: {
-      emoji: '⚠️',
+      emoji: '',
       title: 'Something went wrong',
       message: 'An unexpected error occurred. We\'re working to fix it.',
       actions: ['retry', 'restart']
@@ -59,7 +59,7 @@ class AppErrorBoundary extends React.Component {
       retryCount: 0
     };
     
-    // ✅ Action map bound in constructor
+    // Action map bound in constructor
     this.actionMap = {
       retry: { text: 'Retry', action: this.handleRetry, primary: true },
       offline: { text: 'Go Offline', action: this.handleOfflineMode },
@@ -72,7 +72,7 @@ class AppErrorBoundary extends React.Component {
   static classifyError(error) {
     const message = error?.message?.toLowerCase() || '';
     
-    // ✅ Add error codes for tracking
+    // Add error codes for tracking
     if (message.includes('network')) {
       return { type: 'network', code: 'ERR_NETWORK_001' };
     }
@@ -97,21 +97,21 @@ class AppErrorBoundary extends React.Component {
   }
 
   componentDidCatch(error, errorInfo) {
-    // ✅ Only log detailed error info in debug mode
+    // Only log detailed error info in debug mode
     if (IS_DEBUG_MODE) {
-      console.error('🚨 AppErrorBoundary caught error:', error);
+      console.error('AppErrorBoundary caught error:', error);
       console.error('Error info:', errorInfo);
     } else {
-      console.error('🚨 App error occurred:', this.state.errorType || 'unknown');
+      console.error('App error occurred:', this.state.errorType || 'unknown');
     }
     
-    // ✅ Error rate limiting to prevent infinite loops
+    // Error rate limiting to prevent infinite loops
     const now = Date.now();
     this.errorTimestamps = this.errorTimestamps.filter(t => now - t < 60000); // Last minute
     this.errorTimestamps.push(now);
 
     if (this.errorTimestamps.length > AppErrorBoundary.MAX_ERRORS_PER_MINUTE) {
-      // ✅ Too many errors - force app restart
+      // Too many errors - force app restart
       Alert.alert(
         'Critical Error',
         'The app is experiencing critical issues. Please restart.',

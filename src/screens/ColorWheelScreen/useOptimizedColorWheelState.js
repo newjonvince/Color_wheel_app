@@ -9,7 +9,7 @@ import { LAYOUT } from '../../constants/layout';
 import { isValidHex6, filterValidHexColors } from '../../utils/colorValidation';
 import { reportError, ERROR_EVENTS } from '../../utils/errorTelemetry';
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
   if (_isDebugModeValue === null) {
@@ -53,7 +53,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
     l: String(Math.round(hsl.l)),
   });
 
-  // ✅ SAFER: Create fallback functions to prevent crashes
+  // SAFER: Create fallback functions to prevent crashes
   const createSafeFallbacks = () => ({
     analyzeColor: (color) => ({ 
       dominantColors: [], 
@@ -89,10 +89,10 @@ export const useOptimizedColorWheelState = (options = {}) => {
     })
   });
 
-  // ✅ RULES OF HOOKS COMPLIANCE: Call hook unconditionally at top level
+  // RULES OF HOOKS COMPLIANCE: Call hook unconditionally at top level
   const colorProcessing = useOptimizedColorProcessing();
 
-  // ✅ SAFE: Validate hook result and use fallbacks if needed
+  // SAFE: Validate hook result and use fallbacks if needed
   const safeFallbacks = createSafeFallbacks();
   const safeColorProcessing = colorProcessing && typeof colorProcessing === 'object' 
     ? colorProcessing 
@@ -106,11 +106,11 @@ export const useOptimizedColorWheelState = (options = {}) => {
     getCacheStats = safeFallbacks.getCacheStats
   } = safeColorProcessing;
 
-  // ✅ SAFER: Use refs to track latest values and prevent race conditions
+  // SAFER: Use refs to track latest values and prevent race conditions
   const latestPaletteRef = useRef([]);
   const latestActiveIdxRef = useRef(0);
   
-  // ✅ Cleanup refs on unmount to prevent GC issues
+  // Cleanup refs on unmount to prevent GC issues
   useEffect(() => {
     return () => {
       // Clear large array refs to help GC
@@ -121,7 +121,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
     };
   }, []);
 
-  // ✅ SAFER: Set up throttled callbacks with error handling
+  // SAFER: Set up throttled callbacks with error handling
   const {
     onGestureStart,
     onGestureChange,
@@ -132,13 +132,13 @@ export const useOptimizedColorWheelState = (options = {}) => {
     onColorsChange: useCallback((colors) => {
       try {
         if (!Array.isArray(colors)) {
-          console.warn('⚠️ onColorsChange received non-array:', colors);
+          console.warn('onColorsChange received non-array:', colors);
           return;
         }
         setPalette(colors);
         externalOnColorsChange?.(colors);
       } catch (error) {
-        console.error('❌ Error in onColorsChange:', error);
+        console.error('Error in onColorsChange:', error);
         reportError(ERROR_EVENTS.COLOR_WHEEL_GESTURE_FAILED, error, {
           colorsCount: colors?.length || 0,
           context: 'onColorsChange_callback',
@@ -149,14 +149,14 @@ export const useOptimizedColorWheelState = (options = {}) => {
     onHexChange: useCallback((hex) => {
       try {
         if (!isValidHex6(hex)) {
-          console.warn('⚠️ onHexChange received invalid hex:', hex);
+          console.warn('onHexChange received invalid hex:', hex);
           return;
         }
         setSelectedColor(hex);
         setBaseHex(hex);
         externalOnHexChange?.(hex);
       } catch (error) {
-        console.error('❌ Error in onHexChange:', error);
+        console.error('Error in onHexChange:', error);
         reportError(ERROR_EVENTS.COLOR_WHEEL_GESTURE_FAILED, error, {
           hex: hex,
           context: 'onHexChange_callback',
@@ -187,13 +187,13 @@ export const useOptimizedColorWheelState = (options = {}) => {
     });
   }, [selectedColor]);
 
-  // ✅ RACE CONDITION FIX: Enhanced color wheel callbacks with consistent data flow
+  // RACE CONDITION FIX: Enhanced color wheel callbacks with consistent data flow
   const handleColorsChange = useCallback((colors, phase = 'change') => {
     // Ensure colors is an array and filter to valid hex strings
     const list = Array.isArray(colors) ? colors : [];
     const hexColors = filterValidHexColors(list);
 
-    // ✅ RACE CONDITION FIX: Use current call's data consistently throughout
+    // RACE CONDITION FIX: Use current call's data consistently throughout
     const currentActiveIdx = latestActiveIdxRef.current;
 
     // Update refs immediately (synchronous) - but use current call's data
@@ -202,28 +202,28 @@ export const useOptimizedColorWheelState = (options = {}) => {
     // Update state (async)
     setPalette(hexColors);
     
-    // ✅ CONSISTENT: Use current call's data, not potentially stale ref
+    // CONSISTENT: Use current call's data, not potentially stale ref
     onGestureChange(hexColors, currentActiveIdx);
 
-    // ✅ IMPROVED: Smart phase detection for components that don't pass phase
+    // IMPROVED: Smart phase detection for components that don't pass phase
     // If no explicit phase and colors haven't changed much, assume it's during gesture
     const shouldSkipAnalysis = phase !== 'end' && phase !== 'complete';
     
     if (shouldSkipAnalysis) {
       // During drag: skip heavy analysis for performance
       if (IS_DEBUG_MODE()) {
-        console.log('🎯 Skipping heavy analysis during gesture phase:', phase);
+        console.log('Skipping heavy analysis during gesture phase:', phase);
       }
       return;
     }
 
-    // ✅ RACE CONDITION FIX: Use current call's data for analysis consistency
+    // RACE CONDITION FIX: Use current call's data for analysis consistency
     const currentPalette = hexColors; // Use current call's data, not ref
     // currentActiveIdx already captured above
 
     // Enhanced optimization with caching and analysis - only at gesture end
     try {
-      // ✅ SAFER: Always call functions since we have fallbacks
+      // SAFER: Always call functions since we have fallbacks
       const paletteAnalysis = typeof analyzePalette === 'function' 
         ? analyzePalette(currentPalette) 
         : safeFallbacks.analyzePalette(currentPalette);
@@ -254,11 +254,11 @@ export const useOptimizedColorWheelState = (options = {}) => {
         }
     } catch (error) {
       // Always log optimization errors for production debugging
-      console.warn('⚠️ Optimization error (fallback to basic mode):', error);
+      console.warn('Optimization error (fallback to basic mode):', error);
     }
   }, [onGestureChange, analyzePalette, analyzePaletteContrast, validateColorScheme, selectedScheme, getCacheStats]);
 
-  // ✅ Also update activeIdx ref when it changes
+  // Also update activeIdx ref when it changes
   useEffect(() => {
     latestActiveIdxRef.current = activeIdx;
   }, [activeIdx]);
@@ -267,7 +267,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
     // Validate hex string format
     if (!isValidHex6(hex)) {
       // Always log invalid hex colors for production debugging
-      console.warn('⚠️ Invalid hex color provided to handleHexChange:', hex);
+      console.warn('Invalid hex color provided to handleHexChange:', hex);
       return;
     }
     
@@ -331,7 +331,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
     }
   }, [hslInputs, palette, activeIdx, forceUpdate, wheelRef]);
 
-  // ✅ SAFER: Enhanced updateColorWheelLive with validation and error handling
+  // SAFER: Enhanced updateColorWheelLive with validation and error handling
   const updateColorWheelLive = useCallback((component, value) => {
     const newInputs = { ...hslInputs, [component]: value };
     const { h, s, l } = validateHSL(newInputs.h, newInputs.s, newInputs.l);
@@ -342,7 +342,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
       
       // Validate hex output
       if (!isValidHex6(newHex)) {
-        console.error('❌ Invalid hex from hslToHex:', { h, s, l, newHex });
+        console.error('Invalid hex from hslToHex:', { h, s, l, newHex });
         return; // Don't update with invalid color
       }
       
@@ -355,7 +355,7 @@ export const useOptimizedColorWheelState = (options = {}) => {
         wheel.setHandleHSL(activeIdx, h, s, l);
       }
     } catch (error) {
-      console.error('❌ Color conversion failed:', error, { h, s, l });
+      console.error('Color conversion failed:', error, { h, s, l });
     }
   }, [hslInputs, activeIdx, wheelRef]);
 
@@ -396,16 +396,16 @@ export const useOptimizedColorWheelState = (options = {}) => {
     setShowExtractor(false);
   }, []);
 
-  // ✅ SAFER: Enhanced handleExtractorComplete with better validation
+  // SAFER: Enhanced handleExtractorComplete with better validation
   const handleExtractorComplete = useCallback((extractedColors) => {
     try {
       if (!Array.isArray(extractedColors)) {
-        console.warn('⚠️ handleExtractorComplete received non-array:', extractedColors);
+        console.warn('handleExtractorComplete received non-array:', extractedColors);
         return;
       }
       
       if (extractedColors.length === 0) {
-        console.warn('⚠️ handleExtractorComplete received empty array');
+        console.warn('handleExtractorComplete received empty array');
         return;
       }
       
@@ -425,16 +425,16 @@ export const useOptimizedColorWheelState = (options = {}) => {
         forceUpdate(validColors, 0);
         
         if (IS_DEBUG_MODE()) {
-          console.log('✅ Extracted colors applied:', validColors.length, 'colors');
+          console.log('Extracted colors applied:', validColors.length, 'colors');
         }
       } else {
         // Always log extraction issues for production debugging
-        console.warn('⚠️ No valid hex colors extracted from:', extractedColors.slice(0, 3), '...');
+        console.warn('No valid hex colors extracted from:', extractedColors.slice(0, 3), '...');
       }
     } catch (error) {
-      console.error('❌ Error in handleExtractorComplete:', error);
+      console.error('Error in handleExtractorComplete:', error);
       
-      // ✅ Report to analytics
+      // Report to analytics
       reportError(ERROR_EVENTS.COLOR_EXTRACTION_FAILED, error, {
         colorsCount: extractedColors?.length || 0,
         context: 'handleExtractorComplete',

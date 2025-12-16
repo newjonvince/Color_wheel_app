@@ -42,7 +42,7 @@ const getInitializeAppConfig = () => {
     return require('../config/appconfig').initializeAppConfig;
   } catch (error) {
     getLogger().error?.('AppInitializer: initializeAppConfig load failed', error?.message || error);
-    // ✅ CRITICAL FIX: Throw on config load failure instead of silent success
+    // CRITICAL FIX: Throw on config load failure instead of silent success
     return async () => {
       const configError = new Error(`Failed to load app configuration module: ${error?.message || error}`);
       configError.cause = error;
@@ -66,28 +66,28 @@ const getSafeApiService = () => {
     return require('../services/safeApiService').default;
   } catch (error) {
     getLogger().warn?.('AppInitializer: safeApiService load failed', error?.message || error);
-    // ✅ CONSISTENCY FIX: Fallback service should be honest but not break initialization
+    // CONSISTENCY FIX: Fallback service should be honest but not break initialization
     return { 
-      ready: Promise.resolve(false), // ✅ Honest: Not actually ready for real work
+      ready: Promise.resolve(false), // Honest: Not actually ready for real work
       initialize: async ({ signal } = {}) => {
         if (signal?.aborted) {
           throw new Error('API service initialization aborted (fallback)');
         }
         getLogger().warn('Using fallback API service - no real API functionality available');
-        // ✅ FALLBACK SUCCESS: Return success to allow app to continue in degraded mode
+        // FALLBACK SUCCESS: Return success to allow app to continue in degraded mode
         return { 
           success: true, 
           fallbackMode: true,
           message: 'API service running in fallback mode - limited functionality'
         };
       },
-      isServiceReady: () => false, // ✅ Consistent: Not ready for real API work
+      isServiceReady: () => false, // Consistent: Not ready for real API work
       getInitializationStatus: () => ({
-        isInitialized: true,  // ✅ It did initialize (as a fallback)
-        isReady: false,       // ✅ But it's not ready for real work
-        initializationFailed: false, // ✅ Initialization didn't fail, it's just a fallback
+        isInitialized: true,  // It did initialize (as a fallback)
+        isReady: false,       // But it's not ready for real work
+        initializationFailed: false, // Initialization didn't fail, it's just a fallback
         initializationError: null,
-        fallbackMode: true,   // ✅ Clear indication this is a fallback
+        fallbackMode: true,   // Clear indication this is a fallback
         fallbackReason: 'Failed to load safeApiService module'
       })
     };
@@ -97,10 +97,10 @@ const getSafeApiService = () => {
 /**
  * Initialization step interface
  * 
- * ⚠️  CRITICAL: Step functions MUST check signal.aborted for proper timeout handling!
+ * CRITICAL: Step functions MUST check signal.aborted for proper timeout handling!
  * 
  * @example
- * // ✅ CORRECT: Step function respects abort signal
+ * // CORRECT: Step function respects abort signal
  * new InitializationStep('storage', async ({ signal }) => {
  *   if (signal?.aborted) throw new Error('Aborted');
  *   await AsyncStorage.getItem('key');
@@ -108,7 +108,7 @@ const getSafeApiService = () => {
  *   await AsyncStorage.setItem('key', 'value');
  * }, { timeout: 5000, critical: true });
  * 
- * // ❌ WRONG: Step function ignores abort signal (will not respect timeout)
+ * // WRONG: Step function ignores abort signal (will not respect timeout)
  * new InitializationStep('storage', async ({ signal }) => {
  *   await AsyncStorage.getItem('key');     // No abort check - bad!
  *   await AsyncStorage.setItem('key', 'value'); // No abort check - bad!
@@ -155,9 +155,9 @@ class InitializationStateMachine {
    */
   static TRANSITIONS = {
     'IDLE': ['INITIALIZING'],
-    'INITIALIZING': ['SUCCESS', 'FAILED', 'RESET'], // ✅ Allow abort during initialization
+    'INITIALIZING': ['SUCCESS', 'FAILED', 'RESET'], // Allow abort during initialization
     'SUCCESS': ['RESET'],
-    'FAILED': ['RESET', 'FAILED'], // ✅ Allow FAILED → FAILED for repeated failures
+    'FAILED': ['RESET', 'FAILED'], // Allow FAILED → FAILED for repeated failures
     'RESET': ['IDLE']
   };
 
@@ -171,10 +171,10 @@ class InitializationStateMachine {
     const validTransitions = InitializationStateMachine.TRANSITIONS[this.state] || [];
     
     if (!validTransitions.includes(newState)) {
-      // ✅ CRITICAL FIX: Log warning but don't throw - especially for error states
+      // CRITICAL FIX: Log warning but don't throw - especially for error states
       getLogger().warn(`Invalid transition from ${this.state} to ${newState}, current state retained`);
       
-      // ✅ Store the attempted transition for debugging
+      // Store the attempted transition for debugging
       this.stateHistory.push({
         from: this.state,
         to: newState,
@@ -208,7 +208,7 @@ class InitializationStateMachine {
    * Add state change listener
    */
   onStateChange(callback) {
-    // ✅ FIX: Replace deprecated substr with substring
+    // FIX: Replace deprecated substr with substring
     const id = Math.random().toString(36).substring(2, 11);
     this.listeners.set(id, callback);
     return () => this.listeners.delete(id);
@@ -258,20 +258,20 @@ class InitializationStateMachine {
 // Centralized initialization manager with State Machine
 class AppInitializer {
   constructor() {
-    // ✅ STATE MACHINE: Replace boolean flags with proper state machine
+    // STATE MACHINE: Replace boolean flags with proper state machine
     this.stateMachine = new InitializationStateMachine();
     this.initializationPromise = null;
     this.completedSteps = new Set();
     this.failedSteps = new Set();
     this.startTime = null;
     
-    // ✅ AUTH INITIALIZER FIX: Track auth initializer state
+    // AUTH INITIALIZER FIX: Track auth initializer state
     this.authInitializer = null;
     
     // Define initialization steps with dependencies
     this.steps = [
       new InitializationStep('env', async ({ signal }) => {
-        // ✅ FIX: Check signal before environment validation
+        // FIX: Check signal before environment validation
         if (signal?.aborted) throw new Error('Environment validation aborted');
         return getValidateEnv()();
       }, {
@@ -281,7 +281,7 @@ class AppInitializer {
       }),
       
       new InitializationStep('config', async ({ signal }) => {
-        // ✅ FIX: Check signal before expensive config initialization
+        // FIX: Check signal before expensive config initialization
         if (signal?.aborted) throw new Error('Config initialization aborted');
         return await getInitializeAppConfig()();
       }, {
@@ -306,7 +306,7 @@ class AppInitializer {
       }),
       
       new InitializationStep('auth', async ({ signal }) => {
-        // ✅ CRITICAL FIX: Fail explicitly if auth initializer wasn't set
+        // CRITICAL FIX: Fail explicitly if auth initializer wasn't set
         if (!this.authInitializer) {
           throw new Error('Auth initializer not set - call setAuthInitializer() before initialize()');
         }
@@ -320,7 +320,7 @@ class AppInitializer {
     ];
   }
 
-  // ✅ AUTH INITIALIZER FIX: Set auth initializer with proper validation
+  // AUTH INITIALIZER FIX: Set auth initializer with proper validation
   setAuthInitializer(initializeAuth) {
     if (typeof initializeAuth !== 'function') {
       getLogger().error('setAuthInitializer called with non-function:', typeof initializeAuth);
@@ -345,17 +345,17 @@ class AppInitializer {
     });
   }
 
-  // ✅ DEPENDENCY TIMEOUT FIX: Safer approach with non-critical dependency handling
+  // DEPENDENCY TIMEOUT FIX: Safer approach with non-critical dependency handling
   async waitForDependencies(step, signal) {
     if (!step.dependencies || step.dependencies.length === 0) {
       return;
     }
 
-    // ✅ PERFORMANCE FIX: Circular dependency check moved to initialization time
+    // PERFORMANCE FIX: Circular dependency check moved to initialization time
 
     const DEPENDENCY_TIMEOUT = 10000;
     const CHECK_INTERVAL = 100;
-    // ✅ Add a "give up on non-critical" fallback
+    // Add a "give up on non-critical" fallback
     const MAX_WAIT_FOR_NON_CRITICAL = 5000; // 5 seconds
     const startTime = Date.now();
     
@@ -364,7 +364,7 @@ class AppInitializer {
     while (!this.areDependenciesSatisfied(step)) {
       const elapsed = Date.now() - startTime;
       
-      // ✅ Check: Are we only waiting on non-critical dependencies?
+      // Check: Are we only waiting on non-critical dependencies?
       const pendingDeps = step.dependencies.filter(dep => {
         return !this.completedSteps.has(dep) && !this.failedSteps.has(dep);
       });
@@ -381,7 +381,7 @@ class AppInitializer {
         getLogger().info(
           `Step '${step.name}' will proceed without non-critical dependencies: ${pendingDeps.join(', ')}`
         );
-        // ✅ Mark them as "skipped" instead of waiting forever
+        // Mark them as "skipped" instead of waiting forever
         pendingDeps.forEach(dep => {
           this.failedSteps.add(dep);
           getLogger().debug(`Marked non-critical dependency '${dep}' as skipped due to timeout`);
@@ -443,7 +443,7 @@ class AppInitializer {
         const timeoutId = setTimeout(() => {
           if (!settled) {
             settled = true;
-            // ✅ CRITICAL: Remove listener!
+            // CRITICAL: Remove listener!
             if (signal?.removeEventListener) {
               signal.removeEventListener('abort', abortHandler);
             }
@@ -486,7 +486,7 @@ class AppInitializer {
     return null;
   }
 
-  // ✅ PERFORMANCE FIX: Validate all dependencies once at initialization time
+  // PERFORMANCE FIX: Validate all dependencies once at initialization time
   validateAllDependencies() {
     const startTime = Date.now();
     
@@ -513,20 +513,20 @@ class AppInitializer {
     }
     
     const validationTime = Date.now() - startTime;
-    getLogger().debug(`✅ Dependency validation completed in ${validationTime}ms for ${this.steps.length} steps`);
+    getLogger().debug(`Dependency validation completed in ${validationTime}ms for ${this.steps.length} steps`);
   }
 
   /**
    * Execute a single step with timeout and retry logic
    * 
-   * ⚠️  CRITICAL: Step functions MUST check signal.aborted to respect timeouts!
+   * CRITICAL: Step functions MUST check signal.aborted to respect timeouts!
    * 
    * @param {InitializationStep} step - The step to execute
    * @param {AbortSignal} signal - Abort signal for cancellation (MUST be checked by step function)
    * @param {Function} onProgress - Progress callback
    * 
    * @example
-   * // ✅ CORRECT: Step function checks signal.aborted
+   * // CORRECT: Step function checks signal.aborted
    * new InitializationStep('storage', async ({ signal }) => {
    *   if (signal?.aborted) throw new Error('Aborted');
    *   await AsyncStorage.getItem('key');
@@ -534,7 +534,7 @@ class AppInitializer {
    *   await AsyncStorage.setItem('key', 'value');
    * });
    * 
-   * // ❌ WRONG: Step function ignores signal
+   * // WRONG: Step function ignores signal
    * new InitializationStep('storage', async ({ signal }) => {
    *   await AsyncStorage.getItem('key');     // No signal check
    *   await AsyncStorage.setItem('key', 'value'); // No signal check
@@ -550,22 +550,22 @@ class AppInitializer {
       }
       
       try {
-        // ✅ CRASH FIX: Use logger instead of direct console.log
-        getLogger().info(`🔧 Executing initialization step '${step.name}' (attempt ${attempt}/${step.retries + 1})`);
+        // CRASH FIX: Use logger instead of direct console.log
+        getLogger().info(`Executing initialization step '${step.name}' (attempt ${attempt}/${step.retries + 1})`);
         getLogger().debug(`Executing step '${step.name}' (attempt ${attempt}/${step.retries + 1})`);
         
-        // ✅ ENHANCED: Pass signal to step function with validation
+        // ENHANCED: Pass signal to step function with validation
         const stepPromise = typeof step.fn === 'function' 
           ? step.fn({ signal }) 
           : Promise.resolve(step.fn);
           
-        // ✅ CRITICAL: Warn if step function doesn't seem to handle signal properly
+        // CRITICAL: Warn if step function doesn't seem to handle signal properly
         if (typeof step.fn === 'function' && step.timeout > 1000) {
           // For longer-running steps, log a reminder about signal handling
           getLogger().debug(`Step '${step.name}' timeout: ${step.timeout}ms - ensure it checks signal.aborted`);
         }
         
-        // ✅ CRITICAL FIX: Manual timeout/cancellation management to prevent uncaught promise rejections
+        // CRITICAL FIX: Manual timeout/cancellation management to prevent uncaught promise rejections
         const result = await new Promise((resolve, reject) => {
           let settled = false;
           let timeoutId = null;
@@ -620,7 +620,7 @@ class AppInitializer {
               }
             }
           ).catch((error) => {
-            // ✅ SAFETY: Catch any remaining promise rejections
+            // SAFETY: Catch any remaining promise rejections
             if (!settled) {
               settled = true;
               cleanup();
@@ -632,7 +632,7 @@ class AppInitializer {
         const duration = Date.now() - startTime;
         getLogger().debug(`Step '${step.name}' completed in ${duration}ms`);
         
-        // ✅ CRITICAL FIX: Mark step as completed
+        // CRITICAL FIX: Mark step as completed
         this.completedSteps.add(step.name);
         
         onProgress?.({
@@ -652,9 +652,9 @@ class AppInitializer {
           throw new Error(`Initialization aborted during step '${step.name}'`);
         }
         
-        // ✅ CRASH FIX: Use logger instead of direct console.error
-        getLogger().error(`❌ Step '${step.name}' failed (attempt ${attempt}/${step.retries + 1}):`, error.message);
-        getLogger().error(`🔍 Step '${step.name}' error details:`, {
+        // CRASH FIX: Use logger instead of direct console.error
+        getLogger().error(`Step '${step.name}' failed (attempt ${attempt}/${step.retries + 1}):`, error.message);
+        getLogger().error(`Step '${step.name}' error details:`, {
           message: error.message,
           stack: error.stack,
           name: error.name,
@@ -681,7 +681,7 @@ class AppInitializer {
             const delayId = setTimeout(() => {
               if (!settled) {
                 settled = true;
-                // ✅ CRITICAL: Remove listener!
+                // CRITICAL: Remove listener!
                 if (signal?.removeEventListener) {
                   signal.removeEventListener('abort', abortHandler);
                 }
@@ -697,7 +697,7 @@ class AppInitializer {
       }
     }
     
-    // ✅ CRITICAL FIX: Mark step as failed
+    // CRITICAL FIX: Mark step as failed
     this.failedSteps.add(step.name);
     
     const error = new Error(`Step '${step.name}' failed after ${step.retries + 1} attempts: ${lastError?.message || 'Unknown error'}`);
@@ -705,19 +705,19 @@ class AppInitializer {
     throw error;
   }
 
-  // ✅ STATE MACHINE: Main initialization method with state machine management
+  // STATE MACHINE: Main initialization method with state machine management
   async initialize(options = {}) {
-    // ✅ IDEMPOTENCY: If already successfully initialized, just return
+    // IDEMPOTENCY: If already successfully initialized, just return
     if (this.stateMachine.is('SUCCESS')) {
       return Promise.resolve({ success: true, message: 'Already initialized' });
     }
 
-    // ✅ DEBOUNCE: If currently initializing, wait for that attempt
+    // DEBOUNCE: If currently initializing, wait for that attempt
     if (this.stateMachine.is('INITIALIZING') && this.initializationPromise) {
       return this.initializationPromise;
     }
 
-    // ✅ FAILURE RECOVERY: Check if we're in a failed state
+    // FAILURE RECOVERY: Check if we're in a failed state
     if (this.stateMachine.is('FAILED')) {
       const failedStepNames = Array.from(this.failedSteps).join(', ');
       getLogger().warn(`Previous initialization failed at: ${failedStepNames}`);
@@ -729,7 +729,7 @@ class AppInitializer {
       );
     }
 
-    // ✅ STATE TRANSITION: Move to INITIALIZING state
+    // STATE TRANSITION: Move to INITIALIZING state
     if (!this.stateMachine.canTransitionTo('INITIALIZING')) {
       throw new Error(`Cannot initialize from current state: ${this.stateMachine.state}`);
     }
@@ -742,7 +742,7 @@ class AppInitializer {
     this.initializationPromise = this._performInitialization(options)
       .then(
         (result) => {
-          // ✅ SUCCESS: Transition to SUCCESS state
+          // SUCCESS: Transition to SUCCESS state
           this.stateMachine.transition('SUCCESS', {
             completedAt: Date.now(),
             result
@@ -750,7 +750,7 @@ class AppInitializer {
           return result;
         },
         (error) => {
-          // ✅ FAILURE: Attempt to transition to FAILED state (safe - won't throw)
+          // FAILURE: Attempt to transition to FAILED state (safe - won't throw)
           const transitionSucceeded = this.stateMachine.transition('FAILED', {
             failedAt: Date.now(),
             error: error.message,
@@ -758,7 +758,7 @@ class AppInitializer {
           });
           
           if (!transitionSucceeded) {
-            // ✅ ALREADY IN FAILED STATE: Update state data without transition
+            // ALREADY IN FAILED STATE: Update state data without transition
             this.stateMachine.stateData = {
               ...this.stateMachine.stateData,
               lastFailedAt: Date.now(),
@@ -769,7 +769,7 @@ class AppInitializer {
           }
           
           this.initializationPromise = null;
-          throw error; // ✅ CRITICAL: Always throw the original error
+          throw error; // CRITICAL: Always throw the original error
         }
       );
 
@@ -782,11 +782,11 @@ class AppInitializer {
     const GLOBAL_TIMEOUT = 15000;
     let globalTimeoutId = null;
     
-    // ✅ FIX: Create AbortController for global timeout that actually aborts operations
+    // FIX: Create AbortController for global timeout that actually aborts operations
     const globalAbortController = new AbortController();
     const combinedSignal = signal ? this._combineAbortSignals(signal, globalAbortController.signal) : globalAbortController.signal;
     
-    // ✅ PROPER CANCELLATION: Use manual timeout with AbortController instead of Promise.race
+    // PROPER CANCELLATION: Use manual timeout with AbortController instead of Promise.race
     let timeoutId = null;
     let isTimedOut = false;
     
@@ -796,7 +796,7 @@ class AppInitializer {
       
       getLogger().info('Starting centralized app initialization with 15s global timeout...');
       
-      // ✅ PERFORMANCE FIX: Validate all dependencies once upfront (O(n²) but only once)
+      // PERFORMANCE FIX: Validate all dependencies once upfront (O(n²) but only once)
       this.validateAllDependencies();
       
       // Set up timeout that properly cancels operations
@@ -813,7 +813,7 @@ class AppInitializer {
         const totalSteps = this.steps.length;
         let completedCount = 0;
 
-        // ✅ PARALLEL INITIALIZATION: Group steps by dependency levels for parallel execution
+        // PARALLEL INITIALIZATION: Group steps by dependency levels for parallel execution
         const stepsByLevel = this._groupStepsByDependencyLevel();
         getLogger().info(`Parallel initialization: ${stepsByLevel.length} levels`, 
           stepsByLevel.map((level, i) => `Level ${i}: [${level.map(s => s.name).join(', ')}]`));
@@ -828,11 +828,11 @@ class AppInitializer {
 
           getLogger().debug(`Executing level ${levelIndex} with ${currentLevel.length} parallel steps: [${currentLevel.map(s => s.name).join(', ')}]`);
 
-          // ✅ PARALLEL EXECUTION: Run all steps in current level simultaneously
+          // PARALLEL EXECUTION: Run all steps in current level simultaneously
           const levelPromises = currentLevel.map(async (step) => {
             try {
               await this.executeStep(step, combinedSignal, (stepProgress) => {
-                // ✅ CANCELLATION CHECK: Don't update progress if cancelled or timed out
+                // CANCELLATION CHECK: Don't update progress if cancelled or timed out
                 if (isTimedOut || combinedSignal?.aborted) {
                   return; // Silently ignore progress updates after cancellation
                 }
@@ -852,11 +852,11 @@ class AppInitializer {
               });
               
               completedCount++;
-              getLogger().debug(`✅ Step '${step.name}' completed (${completedCount}/${totalSteps})`);
+              getLogger().debug(`Step '${step.name}' completed (${completedCount}/${totalSteps})`);
               
               return { step: step.name, success: true };
             } catch (error) {
-              getLogger().error(`❌ Step '${step.name}' failed:`, error);
+              getLogger().error(`Step '${step.name}' failed:`, error);
               return { step: step.name, success: false, error };
             }
           });
@@ -864,12 +864,12 @@ class AppInitializer {
           // Wait for all steps in current level to complete
           const levelResults = await Promise.allSettled(levelPromises);
           
-          // ✅ CANCELLATION CHECK: Stop processing if cancelled or timed out
+          // CANCELLATION CHECK: Stop processing if cancelled or timed out
           if (isTimedOut || combinedSignal?.aborted) {
             throw new Error('Initialization cancelled during level execution');
           }
           
-          // ✅ DEBUGGING FIX: Check for critical failures with full error context preservation
+          // DEBUGGING FIX: Check for critical failures with full error context preservation
           const failures = levelResults
             .map((result, i) => ({ result, step: currentLevel[i] }))
             .filter(({ result }) => result.status === 'rejected' || !result.value?.success)
@@ -879,18 +879,18 @@ class AppInitializer {
                 step: step.name, 
                 critical: step.critical,
                 error,
-                // ✅ PRESERVE FULL ERROR CONTEXT: Keep original error object with stack trace
+                // PRESERVE FULL ERROR CONTEXT: Keep original error object with stack trace
                 originalError: error,
                 errorMessage: error?.message || String(error),
                 errorStack: error?.stack,
                 errorName: error?.name,
                 resultStatus: result.status,
-                fullResult: result // ✅ Keep complete result for debugging
+                fullResult: result // Keep complete result for debugging
               };
             });
 
           if (failures.length > 0) {
-            // ✅ LOG DETAILED ERROR INFORMATION: Log full context for all failures
+            // LOG DETAILED ERROR INFORMATION: Log full context for all failures
             failures.forEach(failure => {
               const logLevel = failure.critical ? 'error' : 'warn';
               getLogger()[logLevel](`Step '${failure.step}' failed:`, {
@@ -901,8 +901,8 @@ class AppInitializer {
                 resultStatus: failure.resultStatus
               });
               
-              // ✅ STACK TRACE PRESERVATION: Log full stack trace for debugging
-              // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+              // STACK TRACE PRESERVATION: Log full stack trace for debugging
+              // CRASH FIX: Use typeof check to prevent ReferenceError in production
               if (failure.errorStack && typeof __DEV__ !== 'undefined' && __DEV__) {
                 getLogger().debug(`Full stack trace for '${failure.step}':`, failure.errorStack);
               }
@@ -913,7 +913,7 @@ class AppInitializer {
             if (criticalFailures.length > 0) {
               const criticalSteps = criticalFailures.map(f => f.step).join(', ');
               
-              // ✅ ENHANCED ERROR: Include first critical error details in thrown error
+              // ENHANCED ERROR: Include first critical error details in thrown error
               const firstCriticalError = criticalFailures[0];
               const enhancedError = new Error(
                 `Critical steps failed in level ${levelIndex}: ${criticalSteps}. ` +
@@ -925,7 +925,7 @@ class AppInitializer {
               
               throw enhancedError;
             } else {
-              // ✅ NON-CRITICAL FAILURES: Enhanced logging with error details
+              // NON-CRITICAL FAILURES: Enhanced logging with error details
               const nonCriticalSteps = failures.map(f => f.step).join(', ');
               const errorSummary = failures.map(f => `${f.step}: ${f.errorMessage}`).join('; ');
               getLogger().warn(
@@ -935,15 +935,15 @@ class AppInitializer {
             }
           }
 
-          getLogger().info(`✅ Level ${levelIndex} completed (${completedCount}/${totalSteps} total steps done)`);
+          getLogger().info(`Level ${levelIndex} completed (${completedCount}/${totalSteps} total steps done)`);
         }
 
         const initTime = Date.now() - this.startTime;
         getLogger().info(`App initialization completed in ${initTime}ms`);
         
-        // ✅ STATE MACHINE: Success state will be set by the calling initialize() method
+        // STATE MACHINE: Success state will be set by the calling initialize() method
 
-        // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+        // CRASH FIX: Use typeof check to prevent ReferenceError in production
         if ((typeof __DEV__ === 'undefined' || !__DEV__) && global.Analytics) {
           global.Analytics.track('app_initialization_success', {
             duration: initTime,
@@ -953,36 +953,36 @@ class AppInitializer {
         }
       };
 
-      // ✅ SAFE EXECUTION: Run initialization with proper cancellation handling
+      // SAFE EXECUTION: Run initialization with proper cancellation handling
       await initializationLogic();
       
-      // ✅ SUCCESS: Clear timeout if we completed before timeout
+      // SUCCESS: Clear timeout if we completed before timeout
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
       }
       
-      // ✅ CANCELLATION CHECK: Ensure we didn't complete after being cancelled
+      // CANCELLATION CHECK: Ensure we didn't complete after being cancelled
       if (isTimedOut || combinedSignal?.aborted) {
         throw new Error('Initialization was cancelled or timed out');
       }
 
     } catch (error) {
-      // ✅ CLEANUP: Always clear timeout on error
+      // CLEANUP: Always clear timeout on error
       if (timeoutId) {
         clearTimeout(timeoutId);
         timeoutId = null;
       }
       
-      // ✅ STATE MACHINE: Failure state will be set by the calling initialize() method
+      // STATE MACHINE: Failure state will be set by the calling initialize() method
       // Clear promise to allow retry (will be set to null in initialize() method)
       
-      // ✅ Abort any ongoing operations
+      // Abort any ongoing operations
       if (!globalAbortController.signal.aborted) {
         globalAbortController.abort();
       }
       
-      // ✅ TIMEOUT HANDLING: Provide specific error for timeout cases
+      // TIMEOUT HANDLING: Provide specific error for timeout cases
       if (isTimedOut) {
         const timeoutError = new Error(`Initialization timed out after ${GLOBAL_TIMEOUT}ms`);
         timeoutError.code = 'INITIALIZATION_TIMEOUT';
@@ -992,7 +992,7 @@ class AppInitializer {
       const initTime = this.startTime ? Date.now() - this.startTime : 0;
       getLogger().error('App initialization failed:', error);
       
-      // ✅ Log partial state for debugging
+      // Log partial state for debugging
       getLogger().warn('Partial initialization state:', {
         completedSteps: Array.from(this.completedSteps),
         failedSteps: Array.from(this.failedSteps),
@@ -1009,13 +1009,13 @@ class AppInitializer {
 
       throw error;
     } finally {
-      // ✅ CRASH FIX: Reference correct variable (timeoutId, not globalTimeoutId)
+      // CRASH FIX: Reference correct variable (timeoutId, not globalTimeoutId)
       // Note: timeoutId cleanup is already handled in try/catch blocks above
       // This finally block is kept for safety but the timeout should already be cleared
     }
   }
 
-  // ✅ STATE MACHINE: Get initialization status with state machine info
+  // STATE MACHINE: Get initialization status with state machine info
   getStatus() {
     const stateInfo = this.stateMachine.getStateInfo();
     return {
@@ -1040,7 +1040,7 @@ class AppInitializer {
     };
   }
 
-  // ✅ Helper method to combine multiple abort signals
+  // Helper method to combine multiple abort signals
   _combineAbortSignals(signal1, signal2) {
     if (!signal1 && !signal2) return null;
     if (!signal1) return signal2;
@@ -1048,7 +1048,7 @@ class AppInitializer {
     
     const controller = new AbortController();
     
-    // ✅ MEMORY LEAK FIX: Create separate handlers that clean up the other listener
+    // MEMORY LEAK FIX: Create separate handlers that clean up the other listener
     let abortHandler1 = null;
     let abortHandler2 = null;
     
@@ -1079,15 +1079,15 @@ class AppInitializer {
     return controller.signal;
   }
 
-  // ✅ STATE MACHINE: Reset initialization state with proper state transitions
+  // STATE MACHINE: Reset initialization state with proper state transitions
   reset() {
-    // ✅ CRITICAL FIX: Check if reset is valid from current state
+    // CRITICAL FIX: Check if reset is valid from current state
     if (!this.stateMachine.canTransitionTo('RESET')) {
       getLogger().warn(`Cannot reset from state: ${this.stateMachine.state}`);
       return false;
     }
     
-    // ✅ Transition through RESET state to IDLE
+    // Transition through RESET state to IDLE
     const resetSucceeded = this.stateMachine.transition('RESET', {
       resetAt: Date.now(),
       reason: 'Manual reset',
@@ -1099,13 +1099,13 @@ class AppInitializer {
       return false;
     }
     
-    // ✅ Clear all state
+    // Clear all state
     this.initializationPromise = null;
     this.completedSteps.clear();
     this.failedSteps.clear();
     this.startTime = null;
     
-    // ✅ Transition to IDLE state
+    // Transition to IDLE state
     const idleSucceeded = this.stateMachine.transition('IDLE', {
       resetCompletedAt: Date.now()
     });
@@ -1124,7 +1124,7 @@ class AppInitializer {
     const step = new InitializationStep(name, fn, options);
     this.steps.push(step);
     
-    // ✅ PERFORMANCE NOTE: Dependency validation will run once at initialization time
+    // PERFORMANCE NOTE: Dependency validation will run once at initialization time
     // No need to validate here unless explicitly requested for immediate feedback
     if (options.validateImmediately) {
       this.validateAllDependencies();
@@ -1134,7 +1134,7 @@ class AppInitializer {
   }
 
   /**
-   * ✅ PARALLEL INITIALIZATION: Group steps by dependency levels for parallel execution
+   * PARALLEL INITIALIZATION: Group steps by dependency levels for parallel execution
    * Steps with no dependencies can run in parallel (level 0)
    * Steps that depend on level 0 steps run in level 1, etc.
    * 

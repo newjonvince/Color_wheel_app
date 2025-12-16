@@ -20,12 +20,12 @@ const colorCache = new LRUCache({
 
 /**
  * Normalize and validate hex color input
- * ✅ ENHANCED: Supports alpha channels and CSS color names
+ * ENHANCED: Supports alpha channels and CSS color names
  */
 function normalizeHex(hex) {
   if (typeof hex !== 'string') return null;
   
-  // ✅ CSS COLOR NAMES: Handle basic CSS color names
+  // CSS COLOR NAMES: Handle basic CSS color names
   const cssColors = {
     'red': '#ff0000', 'green': '#008000', 'blue': '#0000ff',
     'white': '#ffffff', 'black': '#000000', 'yellow': '#ffff00',
@@ -43,17 +43,17 @@ function normalizeHex(hex) {
   
   const clean = lowerHex.replace(/^#/, '');
   
-  // ✅ ALPHA SUPPORT: Handle 8-char hex with alpha (strip alpha)
+  // ALPHA SUPPORT: Handle 8-char hex with alpha (strip alpha)
   if (/^[0-9a-f]{8}$/.test(clean)) {
     return `#${clean.slice(0, 6)}`;
   }
   
-  // ✅ ALPHA SUPPORT: Handle 4-char hex with alpha (strip alpha and expand)
+  // ALPHA SUPPORT: Handle 4-char hex with alpha (strip alpha and expand)
   if (/^[0-9a-f]{4}$/.test(clean)) {
     return `#${clean[0]}${clean[0]}${clean[1]}${clean[1]}${clean[2]}${clean[2]}`;
   }
   
-  // ✅ STANDARD: Handle 3 or 6 char hex
+  // STANDARD: Handle 3 or 6 char hex
   if (!/^[0-9a-f]{3}$|^[0-9a-f]{6}$/.test(clean)) return null;
   
   const full = clean.length === 3
@@ -69,8 +69,8 @@ function getCachedColorData(hex) {
   // Validate and normalize hex input
   const normalizedHex = normalizeHex(hex);
   if (!normalizedHex) {
-    // ✅ Report invalid colors to analytics
-    // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+    // Report invalid colors to analytics
+    // CRASH FIX: Use typeof check to prevent ReferenceError in production
     if ((typeof __DEV__ === 'undefined' || !__DEV__) && global.Analytics) {
       global.Analytics.track('invalid_color_input', {
         input: hex,
@@ -96,7 +96,7 @@ function getCachedColorData(hex) {
   // Check LRU cache with automatic TTL and access tracking
   const existing = colorCache.get(normalizedHex);
   if (existing) {
-    // ✅ Advanced LRU cache handles access tracking and TTL automatically
+    // Advanced LRU cache handles access tracking and TTL automatically
     return existing;
   }
 
@@ -128,7 +128,7 @@ function computeColorData(hex) {
   // Compute color analysis once
   const analysis = computeColorAnalysis(rgb, hsl, brightness);
 
-  // ✅ Use flat structure to reduce object depth and property count
+  // Use flat structure to reduce object depth and property count
   return {
     hex,
     r: rgb.r,
@@ -158,8 +158,8 @@ function hexToRgbOptimized(hex) {
   const cleanHex = normalized.slice(1); // Remove #
   
   return {
-    r: parseInt(cleanHex.substring(0, 2), 16), // ✅ Use substring
-    g: parseInt(cleanHex.substring(2, 4), 16), // ✅ Also: note end index changed to 4 (clearer)
+    r: parseInt(cleanHex.substring(0, 2), 16), // Use substring
+    g: parseInt(cleanHex.substring(2, 4), 16), // Also: note end index changed to 4 (clearer)
     b: parseInt(cleanHex.substring(4, 6), 16)
   };
 }
@@ -168,14 +168,14 @@ function hexToRgbOptimized(hex) {
  * Convert RGB to HSL efficiently
  */
 function rgbToHsl(r, g, b) {
-  // ✅ Guard against NaN, undefined, Infinity
+  // Guard against NaN, undefined, Infinity
   if (!isFinite(r) || !isFinite(g) || !isFinite(b)) {
     console.warn('Invalid RGB values:', { r, g, b });
     reportError(ERROR_EVENTS.COLOR_VALIDATION_FAILED, new Error('Invalid RGB values'), { r, g, b });
     return { h: 0, s: 0, l: 0 }; // Safe fallback
   }
   
-  // ✅ Clamp to valid RGB range
+  // Clamp to valid RGB range
   r = Math.max(0, Math.min(255, r));
   g = Math.max(0, Math.min(255, g));
   b = Math.max(0, Math.min(255, b));
@@ -202,7 +202,7 @@ function rgbToHsl(r, g, b) {
     h /= 6;
   }
 
-  // ✅ Final validation of results
+  // Final validation of results
   const hResult = Math.round(h * 360);
   const sResult = Math.round(s * 100);
   const lResult = Math.round(l * 100);
@@ -218,20 +218,20 @@ function rgbToHsl(r, g, b) {
  * Compute luminance for contrast calculations
  */
 function computeLuminance(r, g, b) {
-  // ✅ Validate inputs
+  // Validate inputs
   if (!isFinite(r) || !isFinite(g) || !isFinite(b)) {
     console.warn('Invalid RGB for luminance:', { r, g, b });
     return 0;
   }
   
   const [rs, gs, bs] = [r, g, b].map(c => {
-    c = Math.max(0, Math.min(255, c)) / 255; // ✅ Clamp first
+    c = Math.max(0, Math.min(255, c)) / 255; // Clamp first
     return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
   });
   
   const luminance = 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
   
-  // ✅ Final validation
+  // Final validation
   return isFinite(luminance) ? Math.max(0, Math.min(1, luminance)) : 0;
 }
 
@@ -369,7 +369,7 @@ function getLightnessLevel(l) {
  * Optimized color analysis - computes everything once
  */
 export function analyzeColor(hex) {
-  // ✅ Run validation on first color operation
+  // Run validation on first color operation
   runValidationOnce();
   
   const colorData = getCachedColorData(hex);
@@ -412,7 +412,7 @@ export function getContrastRatio(color1, color2) {
   const lum1 = getColorLuminance(color1);
   const lum2 = getColorLuminance(color2);
   
-  // ✅ Validate luminance values
+  // Validate luminance values
   if (!isFinite(lum1) || !isFinite(lum2) || lum1 < 0 || lum2 < 0) {
     console.warn('Invalid luminance values for contrast:', { color1, color2, lum1, lum2 });
     return 1; // Safe fallback - no contrast
@@ -421,7 +421,7 @@ export function getContrastRatio(color1, color2) {
   const brightest = Math.max(lum1, lum2);
   const darkest = Math.min(lum1, lum2);
   
-  // ✅ Prevent division by zero (though mathematically impossible with +0.05)
+  // Prevent division by zero (though mathematically impossible with +0.05)
   const denominator = darkest + 0.05;
   if (denominator <= 0) {
     console.warn('Division by zero prevented in contrast calculation');
@@ -430,7 +430,7 @@ export function getContrastRatio(color1, color2) {
   
   const ratio = (brightest + 0.05) / denominator;
   
-  // ✅ Validate result
+  // Validate result
   return isFinite(ratio) && ratio > 0 ? ratio : 1;
 }
 
@@ -468,7 +468,7 @@ export function getBatchContrastRatios(colors) {
       
       const lum2 = luminanceMap.get(color2);
       
-      // ✅ Validate luminance values
+      // Validate luminance values
       if (!isFinite(lum1) || !isFinite(lum2) || lum1 < 0 || lum2 < 0) {
         contrastMatrix[color1][color2] = 1; // Safe fallback
         continue;
@@ -478,7 +478,7 @@ export function getBatchContrastRatios(colors) {
       const darkest = Math.min(lum1, lum2);
       const denominator = darkest + 0.05;
       
-      // ✅ Prevent division by zero and validate result
+      // Prevent division by zero and validate result
       const ratio = denominator > 0 ? (brightest + 0.05) / denominator : 1;
       contrastMatrix[color1][color2] = isFinite(ratio) && ratio > 0 ? ratio : 1;
     }
@@ -688,11 +688,11 @@ export function suggestAccessibleAlternatives(color1, color2, minContrast = 4.5)
 
 /**
  * Adjust color lightness
- * ✅ CRITICAL FIX: colorData has flat structure, not nested .hsl property
+ * CRITICAL FIX: colorData has flat structure, not nested .hsl property
  */
 function adjustColorLightness(hex, adjustment) {
   const colorData = getCachedColorData(hex);
-  // ✅ FIX: Access h, s, l directly from flat structure
+  // FIX: Access h, s, l directly from flat structure
   const { h, s, l } = colorData;
   
   const newL = Math.max(0, Math.min(100, l + adjustment));
@@ -704,14 +704,14 @@ function adjustColorLightness(hex, adjustment) {
  */
 export function hslToHex(h, s, l) {
   runValidationOnce();
-  // ✅ Validate inputs
+  // Validate inputs
   if (!isFinite(h) || !isFinite(s) || !isFinite(l)) {
     console.warn('Invalid HSL values:', { h, s, l });
     reportError(ERROR_EVENTS.COLOR_VALIDATION_FAILED, new Error('Invalid HSL values'), { h, s, l });
     return '#000000'; // Explicit fallback with warning
   }
   
-  // ✅ Clamp to valid ranges
+  // Clamp to valid ranges
   h = ((h % 360) + 360) % 360; // Normalize to 0-360
   s = Math.max(0, Math.min(100, s));
   l = Math.max(0, Math.min(100, l));
@@ -723,7 +723,7 @@ export function hslToHex(h, s, l) {
     const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
     const component = Math.round(255 * color);
     
-    // ✅ Validate component
+    // Validate component
     if (!isFinite(component) || component < 0 || component > 255) {
       return '00';
     }
@@ -779,7 +779,7 @@ export { hexToRgbOptimized as hexToRgb };
 // Proper hexToHsl function that takes hex input
 export function hexToHsl(hex) {
   const colorData = getCachedColorData(hex);
-  // ✅ FIX: colorData has flat structure, construct hsl object
+  // FIX: colorData has flat structure, construct hsl object
   return { h: colorData.h, s: colorData.s, l: colorData.l };
 }
 
@@ -789,13 +789,13 @@ export function hexToHsl(hex) {
 export function getColorScheme(baseColor, scheme) {
   const { h, s, l } = hexToHsl(baseColor);
   
-  // ✅ VALIDATION: Ensure HSL values are valid before calculations
+  // VALIDATION: Ensure HSL values are valid before calculations
   // Protects against corrupted cache data or invalid input
   const safeH = isFinite(h) ? ((h % 360) + 360) % 360 : 0;  // Normalize to 0-360
   const safeS = isFinite(s) ? Math.max(0, Math.min(100, s)) : 50;  // Clamp to 0-100
   const safeL = isFinite(l) ? Math.max(0, Math.min(100, l)) : 50;  // Clamp to 0-100
   
-  // ✅ Helper function for safe hue calculations
+  // Helper function for safe hue calculations
   const safeHue = (hueOffset) => ((safeH + hueOffset) % 360 + 360) % 360;
   
   switch (scheme) {
@@ -898,7 +898,7 @@ export function nearestAccessible(background, target, minRatio = 4.5) {
  */
 export { normalizeHex };
 
-// ✅ MODULE LOADING FIX: Defer validation to first use to prevent import-time crashes
+// MODULE LOADING FIX: Defer validation to first use to prevent import-time crashes
 let validationRun = false;
 
 const runValidationOnce = () => {
@@ -927,7 +927,7 @@ const runValidationOnce = () => {
       );
     }
   } catch (validationError) {
-    // ✅ Safe fallback if reportError isn't available yet
+    // Safe fallback if reportError isn't available yet
     if (typeof reportError === 'function') {
       reportError(ERROR_EVENTS.COLOR_VALIDATION_FAILED, validationError, {
         context: 'hex_validation_test_exception'

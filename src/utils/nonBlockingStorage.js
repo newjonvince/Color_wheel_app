@@ -1,12 +1,12 @@
 // utils/nonBlockingStorage.js - Non-blocking storage operations with lazy loading and pagination
-// ✅ CIRCULAR DEPENDENCY FIX: Remove direct import, use dependency injection instead
+// CIRCULAR DEPENDENCY FIX: Remove direct import, use dependency injection instead
 
-// ✅ CROSS-PLATFORM FIX: setImmediate polyfill for environments that don't support it
+// CROSS-PLATFORM FIX: setImmediate polyfill for environments that don't support it
 const setImmediatePolyfill = typeof setImmediate !== 'undefined' 
   ? setImmediate 
   : (fn) => setTimeout(fn, 0);
 
-// ✅ NON-BLOCKING JSON OPERATIONS: Use MessageChannel for background processing
+// NON-BLOCKING JSON OPERATIONS: Use MessageChannel for background processing
 class NonBlockingJSON {
   static async stringify(obj, chunkSize = 1000) {
     // For small objects, use regular JSON.stringify
@@ -56,7 +56,7 @@ class NonBlockingJSON {
   }
 }
 
-// ✅ LAZY LOADING STORAGE: Split large objects into smaller, manageable chunks
+// LAZY LOADING STORAGE: Split large objects into smaller, manageable chunks
 class LazyStorageManager {
   constructor(storageProvider = null) {
     this.cache = new Map();
@@ -64,19 +64,19 @@ class LazyStorageManager {
     this.storage = storageProvider;
   }
 
-  // ✅ DEPENDENCY INJECTION: Set storage provider after initialization
+  // DEPENDENCY INJECTION: Set storage provider after initialization
   setStorageProvider(provider) {
     this.storage = provider;
   }
 
-  // ✅ VALIDATION: Ensure storage provider is available
+  // VALIDATION: Ensure storage provider is available
   _ensureStorage() {
     if (!this.storage) {
       throw new Error('Storage provider not initialized. Call setStorageProvider() first.');
     }
   }
 
-  // ✅ SPLIT USER DATA: Separate basic info from heavy data like boards
+  // SPLIT USER DATA: Separate basic info from heavy data like boards
   async setUserData(userData) {
     if (!userData) return;
     this._ensureStorage();
@@ -85,7 +85,7 @@ class LazyStorageManager {
       // Split user data into basic and extended parts
       const { boards, colorHistory, preferences, ...basicData } = userData;
       
-      // ✅ BASIC DATA: Always loaded, small and fast
+      // BASIC DATA: Always loaded, small and fast
       const basicUser = {
         ...basicData,
         hasBoards: !!(boards && boards.length > 0),
@@ -96,7 +96,7 @@ class LazyStorageManager {
       // Store basic data immediately (non-blocking for small objects)
       await this.storage.setItem('user:basic', basicUser);
 
-      // ✅ LAZY DATA: Store heavy data separately for on-demand loading
+      // LAZY DATA: Store heavy data separately for on-demand loading
       if (boards && boards.length > 0) {
         await this._storeBoardsPaginated(boards);
       }
@@ -109,14 +109,14 @@ class LazyStorageManager {
         await this.storage.setItem('user:preferences', preferences);
       }
 
-      console.log('✅ User data stored with lazy loading pattern');
+      console.log('User data stored with lazy loading pattern');
     } catch (error) {
-      console.error('❌ Failed to store user data:', error);
+      console.error('Failed to store user data:', error);
       throw error;
     }
   }
 
-  // ✅ FAST BASIC LOAD: Get essential user info immediately
+  // FAST BASIC LOAD: Get essential user info immediately
   async getUserBasic() {
     this._ensureStorage();
     
@@ -127,12 +127,12 @@ class LazyStorageManager {
       }
       return basic;
     } catch (error) {
-      console.error('❌ Failed to load basic user data:', error);
+      console.error('Failed to load basic user data:', error);
       return null;
     }
   }
 
-  // ✅ LAZY LOAD BOARDS: Load boards only when needed, with pagination
+  // LAZY LOAD BOARDS: Load boards only when needed, with pagination
   async getUserBoards(page = 0, pageSize = 10) {
     const cacheKey = `user:boards:${page}`;
     
@@ -159,7 +159,7 @@ class LazyStorageManager {
     }
   }
 
-  // ✅ LAZY LOAD COLOR HISTORY: Load color history with pagination
+  // LAZY LOAD COLOR HISTORY: Load color history with pagination
   async getColorHistory(page = 0, pageSize = 20) {
     const cacheKey = `user:colors:${page}`;
     
@@ -186,7 +186,7 @@ class LazyStorageManager {
     }
   }
 
-  // ✅ PREFERENCES: Load user preferences (usually small)
+  // PREFERENCES: Load user preferences (usually small)
   async getUserPreferences() {
     const cacheKey = 'user:preferences';
     
@@ -203,12 +203,12 @@ class LazyStorageManager {
       }
       return preferences || {};
     } catch (error) {
-      console.error('❌ Failed to load user preferences:', error);
+      console.error('Failed to load user preferences:', error);
       return {};
     }
   }
 
-  // ✅ COMPLETE USER DATA: Assemble complete user data when needed (expensive)
+  // COMPLETE USER DATA: Assemble complete user data when needed (expensive)
   async getCompleteUserData() {
     try {
       const basic = await this.getUserBasic();
@@ -236,12 +236,12 @@ class LazyStorageManager {
         preferences
       };
     } catch (error) {
-      console.error('❌ Failed to load complete user data:', error);
+      console.error('Failed to load complete user data:', error);
       return null;
     }
   }
 
-  // ✅ PAGINATED BOARD STORAGE: Store boards in chunks to avoid large JSON operations
+  // PAGINATED BOARD STORAGE: Store boards in chunks to avoid large JSON operations
   async _storeBoardsPaginated(boards, pageSize = 10) {
     const totalPages = Math.ceil(boards.length / pageSize);
     
@@ -272,7 +272,7 @@ class LazyStorageManager {
     await Promise.all(storePromises);
   }
 
-  // ✅ PAGINATED COLOR HISTORY STORAGE
+  // PAGINATED COLOR HISTORY STORAGE
   async _storeColorHistoryPaginated(colorHistory, pageSize = 20) {
     const totalPages = Math.ceil(colorHistory.length / pageSize);
     
@@ -303,7 +303,7 @@ class LazyStorageManager {
     await Promise.all(storePromises);
   }
 
-  // ✅ LOAD BOARDS PAGE
+  // LOAD BOARDS PAGE
   async _loadBoardsPage(page, pageSize) {
     this._ensureStorage();
     
@@ -311,12 +311,12 @@ class LazyStorageManager {
       const pageData = await this.storage.getItem(`user:boards:page:${page}`);
       return pageData ? pageData.boards : [];
     } catch (error) {
-      console.error(`❌ Failed to load boards page ${page}:`, error);
+      console.error(`Failed to load boards page ${page}:`, error);
       return [];
     }
   }
 
-  // ✅ LOAD COLOR HISTORY PAGE
+  // LOAD COLOR HISTORY PAGE
   async _loadColorHistoryPage(page, pageSize) {
     this._ensureStorage();
     
@@ -324,12 +324,12 @@ class LazyStorageManager {
       const pageData = await this.storage.getItem(`user:colors:page:${page}`);
       return pageData ? pageData.colors : [];
     } catch (error) {
-      console.error(`❌ Failed to load color history page ${page}:`, error);
+      console.error(`Failed to load color history page ${page}:`, error);
       return [];
     }
   }
 
-  // ✅ LOAD ALL BOARDS (expensive operation)
+  // LOAD ALL BOARDS (expensive operation)
   async _loadAllBoards() {
     this._ensureStorage();
     
@@ -345,12 +345,12 @@ class LazyStorageManager {
       const pages = await Promise.all(loadPromises);
       return pages.flat();
     } catch (error) {
-      console.error('❌ Failed to load all boards:', error);
+      console.error('Failed to load all boards:', error);
       return [];
     }
   }
 
-  // ✅ LOAD ALL COLOR HISTORY (expensive operation)
+  // LOAD ALL COLOR HISTORY (expensive operation)
   async _loadAllColorHistory() {
     this._ensureStorage();
     
@@ -366,18 +366,18 @@ class LazyStorageManager {
       const pages = await Promise.all(loadPromises);
       return pages.flat();
     } catch (error) {
-      console.error('❌ Failed to load all color history:', error);
+      console.error('Failed to load all color history:', error);
       return [];
     }
   }
 
-  // ✅ CACHE MANAGEMENT
+  // CACHE MANAGEMENT
   clearCache() {
     this.cache.clear();
     this.loadingPromises.clear();
   }
 
-  // ✅ PRELOAD: Preload commonly accessed data
+  // PRELOAD: Preload commonly accessed data
   async preloadEssentials() {
     try {
       // Preload basic user data and first page of boards/colors
@@ -389,14 +389,14 @@ class LazyStorageManager {
       ];
 
       await Promise.all(promises);
-      console.log('✅ Essential user data preloaded');
+      console.log('Essential user data preloaded');
     } catch (error) {
-      console.error('❌ Failed to preload essentials:', error);
+      console.error('Failed to preload essentials:', error);
     }
   }
 }
 
-// ✅ BACKGROUND PROCESSING: Use Web Workers or similar for heavy operations
+// BACKGROUND PROCESSING: Use Web Workers or similar for heavy operations
 class BackgroundProcessor {
   static async processLargeData(data, processor) {
     return new Promise((resolve, reject) => {
@@ -442,7 +442,7 @@ class BackgroundProcessor {
   }
 }
 
-// ✅ SINGLETON INSTANCE: Created without storage provider (will be injected later)
+// SINGLETON INSTANCE: Created without storage provider (will be injected later)
 const lazyStorageManager = new LazyStorageManager();
 
 export {

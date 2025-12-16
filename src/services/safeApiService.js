@@ -1,7 +1,7 @@
 ﻿// services/safeApiService.js - API service with safe dependency handling
 import axios from 'axios';
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load safeStorage to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load safeStorage to prevent crash on module initialization
 let _safeStorageInstance = null;
 const getSafeStorage = () => {
   if (_safeStorageInstance) return _safeStorageInstance;
@@ -25,7 +25,7 @@ const getSafeStorage = () => {
   return _safeStorageInstance;
 };
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
   if (_isDebugModeValue === null) {
@@ -61,7 +61,7 @@ const logger = {
   error: (...args) => getLogger()?.error?.(...args),
 };
 
-// ✅ CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
+// CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
 const IS_DEBUG_MODE = () => getIsDebugMode();
 
 // Request cancellation support
@@ -79,7 +79,7 @@ const safeStringify = (value, fallback = '') => {
 // Safe API configuration with URL validation
 const getApiBaseUrl = () => {
   try {
-    // ✅ BUG FIX: Properly load expoConfigHelper to get extra config
+    // BUG FIX: Properly load expoConfigHelper to get extra config
     const helper = require('../utils/expoConfigHelper');
     const extra = helper.getSafeExpoExtra ? helper.getSafeExpoExtra() : {};
     const apiUrl = extra && typeof extra === 'object' ? extra.EXPO_PUBLIC_API_BASE_URL : null;
@@ -140,14 +140,14 @@ class SafeApiService {
     this.initializationFailed = false;
     this.initializationError = null;
     
-    // ✅ FIX: Create promise that handles async errors properly
+    // FIX: Create promise that handles async errors properly
     this.readyPromise = this._initializeAsync();
     
     // Token refresh race condition prevention
     this.isRefreshing = false;
     this.refreshPromise = null;
     this.failedQueue = [];
-    this.MAX_QUEUE_SIZE = 50;  // ✅ Add limit to prevent unbounded queue growth
+    this.MAX_QUEUE_SIZE = 50;  // Add limit to prevent unbounded queue growth
   }
 
   async _initializeAsync() {
@@ -158,7 +158,7 @@ class SafeApiService {
       console.error('safeApiService: initialization failed:', error);
       this.initializationFailed = true;
       this.initializationError = error;
-      // ✅ Don't re-throw - let app continue with degraded service
+      // Don't re-throw - let app continue with degraded service
       return false;
     }
   }
@@ -168,7 +168,7 @@ class SafeApiService {
     return this.readyPromise || Promise.resolve(false);  // safe fallback
   }
 
-  // ✅ SAFER: Comprehensive response validation
+  // SAFER: Comprehensive response validation
   validateAndProcessResponse(response, endpoint) {
     try {
       // Validate response object structure
@@ -203,13 +203,13 @@ class SafeApiService {
 
       // Validate headers
       if (!response.headers || typeof response.headers !== 'object') {
-        console.warn(`⚠️ Response missing headers for ${endpoint}`);
+        console.warn(`Response missing headers for ${endpoint}`);
       }
 
       // Validate content type for JSON endpoints
       const contentType = response.headers?.['content-type'] || response.headers?.['Content-Type'];
       if (contentType && !contentType.includes('application/json') && !contentType.includes('text/')) {
-        console.warn(`⚠️ Unexpected content type for ${endpoint}: ${contentType}`);
+        console.warn(`Unexpected content type for ${endpoint}: ${contentType}`);
       }
 
       // Validate response data
@@ -240,7 +240,7 @@ class SafeApiService {
 
       // Log successful response for debugging (only in debug mode)
       if (IS_DEBUG_MODE()) {
-        console.log(`✅ Response validated for ${endpoint}:`, {
+        console.log(`Response validated for ${endpoint}:`, {
           status: response.status,
           contentType,
           dataType: typeof response.data,
@@ -250,7 +250,7 @@ class SafeApiService {
 
       return response.data;
     } catch (validationError) {
-      console.error(`❌ Response validation failed for ${endpoint}:`, validationError.message);
+      console.error(`Response validation failed for ${endpoint}:`, validationError.message);
       throw validationError;
     }
   }
@@ -313,14 +313,14 @@ class SafeApiService {
       }
 
       try {
-        // ✅ FIX: Check abort signal before storage operations
+        // FIX: Check abort signal before storage operations
         if (signal?.aborted) {
           throw new Error('API service initialization aborted before token loading');
         }
 
         const token = await getSafeStorage().getToken();
         
-        // ✅ FIX: Check abort signal between operations
+        // FIX: Check abort signal between operations
         if (signal?.aborted) {
           throw new Error('API service initialization aborted during token loading');
         }
@@ -347,7 +347,7 @@ class SafeApiService {
         console.warn('Failed to load tokens from storage:', storageError?.message || storageError);
       }
 
-      // ✅ FIX: Set both isReady and isInitialized for consistency
+      // FIX: Set both isReady and isInitialized for consistency
       this.isReady = true;
       this.isInitialized = true;
       this.initializationFailed = false;
@@ -365,17 +365,17 @@ class SafeApiService {
       this.initializationFailed = true;
       this.initializationError = error;
       
-      // ✅ FIX: Throw error for proper error handling in AppInitializer
+      // FIX: Throw error for proper error handling in AppInitializer
       throw error;
     }
   }
 
-  // ✅ HELPER: Check if service is properly initialized
+  // HELPER: Check if service is properly initialized
   isServiceReady() {
     return this.isInitialized && this.isReady && !this.initializationFailed;
   }
 
-  // ✅ HELPER: Get initialization status for debugging
+  // HELPER: Get initialization status for debugging
   getInitializationStatus() {
     return {
       isInitialized: this.isInitialized,
@@ -410,7 +410,7 @@ class SafeApiService {
     }
   }
 
-  // 🔧 Token refresh with race condition prevention
+  // Token refresh with race condition prevention
   async refreshTokens() {
     // If already refreshing, return the existing promise
     if (this.isRefreshing && this.refreshPromise) {
@@ -426,7 +426,7 @@ class SafeApiService {
     
     this.refreshPromise = (async () => {
       try {
-        logger.info('🔄 Refreshing authentication tokens...');
+        logger.info('Refreshing authentication tokens...');
         
         const response = await fetch(`${getApiRoot()}/auth/refresh`, {
           method: 'POST',
@@ -455,11 +455,11 @@ class SafeApiService {
         // Process failed queue
         this.processFailedQueue(null, data.accessToken);
         
-        logger.info('✅ Tokens refreshed successfully');
+        logger.info('Tokens refreshed successfully');
         return data.accessToken;
         
       } catch (error) {
-        logger.error('❌ Token refresh failed:', error);
+        logger.error('Token refresh failed:', error);
         
         // Clear tokens on refresh failure
         await this.setToken(null);
@@ -512,7 +512,7 @@ class SafeApiService {
               source.cancel('Request aborted');
             };
             
-            // ✅ MEMORY LEAK FIX: Use { once: true } to auto-remove after firing
+            // MEMORY LEAK FIX: Use { once: true } to auto-remove after firing
             options.signal.addEventListener('abort', abortHandler, { once: true });
           }
         } catch (cancelError) {
@@ -532,7 +532,7 @@ class SafeApiService {
         }
       }
 
-      // ✅ SAFER: Create axios config with comprehensive validation
+      // SAFER: Create axios config with comprehensive validation
       const { method = 'GET', data, headers = {}, timeout = 30000, ...restOptions } = options;
       
       // Validate request data if present and cache stringified version
@@ -578,19 +578,19 @@ class SafeApiService {
         throw new Error(`Request execution failed: ${axiosError.message}`);
       }
       
-      // ✅ SAFER: Comprehensive response validation
+      // SAFER: Comprehensive response validation
       return this.validateAndProcessResponse(response, endpoint);
     } catch (error) {
       console.warn(`API request failed for ${endpoint}:`, error.message);
       
       // Handle different types of errors
       if (error.response?.status === 401) {
-        // 🔧 Token refresh with race condition prevention
+        // Token refresh with race condition prevention
         if (!endpoint.includes('/auth/refresh') && this.refreshToken) {
           try {
             // If already refreshing, wait for it
             if (this.isRefreshing) {
-              // ✅ FIX: Prevent unbounded queue growth
+              // FIX: Prevent unbounded queue growth
               if (this.failedQueue.length >= this.MAX_QUEUE_SIZE) {
                 throw new Error('Too many pending authentication requests');
               }
@@ -624,7 +624,7 @@ class SafeApiService {
             return this.request(endpoint, newOptions);
             
           } catch (refreshError) {
-            logger.error('❌ Token refresh failed, clearing auth:', refreshError);
+            logger.error('Token refresh failed, clearing auth:', refreshError);
             await this.setToken(null);
             throw new Error('Authentication expired. Please log in again.');
           }
@@ -771,7 +771,7 @@ class SafeApiService {
     return this.request(`/likes/color-matches/${matchId}`);
   }
 
-  // ✅ NEW: Batch API for getting multiple color match likes at once
+  // NEW: Batch API for getting multiple color match likes at once
   async getBatchColorMatchLikes(matchIds, options = {}) {
     return this.request('/likes/color-matches/batch', {
       method: 'POST',
@@ -835,7 +835,7 @@ class SafeApiService {
     }
   }
 
-  // ✅ SAFER: Validate request data before sending
+  // SAFER: Validate request data before sending
   validateRequestData(data, method) {
     try {
       // Check for null or undefined (which are valid for some requests)
@@ -852,7 +852,7 @@ class SafeApiService {
       let dataString;
       if (typeof data === 'object') {
         try {
-          // ✅ PERFORMANCE: Compute JSON.stringify only once and cache it
+          // PERFORMANCE: Compute JSON.stringify only once and cache it
           dataString = JSON.stringify(data); // This will throw if there are circular references
         } catch (stringifyError) {
           throw new Error(`Invalid request data: ${stringifyError.message}`);
@@ -860,14 +860,14 @@ class SafeApiService {
 
         // Check for potentially dangerous properties
         if (data.constructor && data.constructor !== Object && data.constructor !== Array) {
-          console.warn('⚠️ Request data contains non-plain object with constructor:', data.constructor.name);
+          console.warn('Request data contains non-plain object with constructor:', data.constructor.name);
         }
       } else {
         // For strings, use as-is
         dataString = data;
       }
       
-      // ✅ SAFER: React Native compatible size calculation (Blob API doesn't exist in RN)
+      // SAFER: React Native compatible size calculation (Blob API doesn't exist in RN)
       let dataSizeBytes;
       try {
         // Try TextEncoder first (modern environments)
@@ -884,10 +884,10 @@ class SafeApiService {
 
       // Log large payloads for monitoring
       if (dataSizeKB > 100) { // 100KB
-        console.warn(`⚠️ Large request payload: ${dataSizeKB.toFixed(2)}KB for ${method} request`);
+        console.warn(`Large request payload: ${dataSizeKB.toFixed(2)}KB for ${method} request`);
       }
 
-      // ✅ PERFORMANCE FIX: Return the stringified version to avoid double JSON.stringify
+      // PERFORMANCE FIX: Return the stringified version to avoid double JSON.stringify
       return { valid: true, stringified: dataString };
 
     } catch (validationError) {
@@ -895,7 +895,7 @@ class SafeApiService {
     }
   }
 
-  // ✅ SAFER: Validate request configuration
+  // SAFER: Validate request configuration
   validateRequestConfig(config, endpoint) {
     try {
       // Validate required properties
@@ -936,7 +936,7 @@ class SafeApiService {
 
       // Validate data for methods that shouldn't have body
       if (['GET', 'HEAD', 'DELETE'].includes(config.method.toUpperCase()) && config.data) {
-        console.warn(`⚠️ ${config.method} request with body data for ${endpoint}`);
+        console.warn(`${config.method} request with body data for ${endpoint}`);
       }
 
       // Validate auth token format if present
@@ -957,7 +957,7 @@ class SafeApiService {
     }
   }
 
-  // ✅ IMAGE ENDPOINTS: Add missing image processing endpoints with guards
+  // IMAGE ENDPOINTS: Add missing image processing endpoints with guards
   async extractColorsFromImage(uri, options = {}) {
     try {
       const formData = new FormData();

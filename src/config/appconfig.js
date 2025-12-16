@@ -1,7 +1,7 @@
 // config/appconfig.js - Ultra-optimized app configuration with caching and validation
 import { Platform, AppState } from 'react-native';
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
 let _isProductionValue = null;
 
@@ -31,8 +31,8 @@ const getIsProduction = () => {
   return _isProductionValue;
 };
 
-// ✅ CIRCULAR DEPENDENCY FIX: Simple console wrapper instead of AppLogger
-// ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+// CIRCULAR DEPENDENCY FIX: Simple console wrapper instead of AppLogger
+// CRASH FIX: Use typeof check to prevent ReferenceError in production
 const log = {
   debug: (...args) => (typeof __DEV__ !== 'undefined' && __DEV__) && console.log('[CONFIG]', ...args),
   info: (...args) => console.log('[CONFIG]', ...args),
@@ -54,7 +54,7 @@ try {
   // Will be handled gracefully in the getStateFromPath function
 }
 
-// ✅ CIRCULAR DEPENDENCY FIX: Use lazy getters instead of module-load-time calls
+// CIRCULAR DEPENDENCY FIX: Use lazy getters instead of module-load-time calls
 const IS_DEBUG_MODE = () => getIsDebugMode();
 const IS_DEV = () => getIsDebugMode();
 const IS_PROD = () => getIsProduction();
@@ -116,7 +116,7 @@ const createAppConfig = (() => {
   
   return () => {
     if (cachedConfig) {
-      // ✅ FIXED: Deep clone objects but preserve functions
+      // FIXED: Deep clone objects but preserve functions
       return {
         ...cachedConfig,
         linking: {
@@ -125,7 +125,7 @@ const createAppConfig = (() => {
             ...cachedConfig.linking.config,
             screens: { ...cachedConfig.linking.config.screens }
           },
-          // ✅ CRITICAL: Preserve getStateFromPath function - don't clone it!
+          // CRITICAL: Preserve getStateFromPath function - don't clone it!
           getStateFromPath: cachedConfig.linking.getStateFromPath
         },
         tabNavigation: { 
@@ -215,23 +215,23 @@ const createAppConfig = (() => {
       // Enhanced tab icons with Unicode escape sequences to avoid bundle issues
       tabIcons: {
         Community: { 
-          focused: '\u{1F310}', // 🌐 Globe with meridians
-          unfocused: '\u{1F30D}', // 🌍 Earth globe Europe-Africa
+          focused: '', // Globe with meridians
+          unfocused: '', // Earth globe Europe-Africa
           description: 'Community tab - connects users together'
         },
         ColorWheel: { 
-          focused: '\u{1F3A8}', // 🎨 Artist palette
-          unfocused: '\u{1F3AD}', // 🎭 Performing arts
+          focused: '', // Artist palette
+          unfocused: '', // Performing arts
           description: 'Color Wheel tab - main color selection tool'
         },
         Profile: { 
-          focused: '\u{1F464}', // 👤 Bust in silhouette
-          unfocused: '\u{1F465}', // 👥 Busts in silhouette
+          focused: '', // Bust in silhouette
+          unfocused: '', // Busts in silhouette
           description: 'Profile tab - user profile and boards'
         },
         Settings: { 
-          focused: '\u{2699}\u{FE0F}', // ⚙️ Gear
-          unfocused: '\u{1F527}', // 🔧 Wrench
+          focused: '', // Gear
+          unfocused: '', // Wrench
           description: 'Settings tab - app configuration'
         },
       },
@@ -260,7 +260,7 @@ const createAppConfig = (() => {
       // Note: getStateFromPath is a function, don't freeze it
     }
     
-    // ✅ FIXED: Return the config directly - it's already created and cached
+    // FIXED: Return the config directly - it's already created and cached
     // No need to clone on first creation since we're caching the original
     return cachedConfig;
   };
@@ -298,14 +298,14 @@ export const initializeAppConfig = () => {
     return Promise.resolve({ ok: true, alreadyInitialized: true });
   }
 
-  // ✅ RACE CONDITION FIX: Synchronous lock to prevent duplicate initialization
+  // RACE CONDITION FIX: Synchronous lock to prevent duplicate initialization
   if (initializationPromise) {
     return initializationPromise;
   }
 
   const startTime = Date.now();
 
-  // ✅ RACE CONDITION FIX: Create and assign promise synchronously BEFORE any async work
+  // RACE CONDITION FIX: Create and assign promise synchronously BEFORE any async work
   initializationPromise = (async () => {
     try {
       // Production JS fatal handler with enhanced error reporting
@@ -440,7 +440,7 @@ export const getMatchesKey = (userId) => {
   return key;
 };
 
-// ✅ MEMORY LEAK FIX: Safer interval management to prevent orphaned intervals
+// MEMORY LEAK FIX: Safer interval management to prevent orphaned intervals
 let cacheCleanupInterval = null;
 
 const setupCacheCleanup = () => {
@@ -475,7 +475,7 @@ const setupCacheCleanup = () => {
   }
 };
 
-// ✅ SAFE CLEANUP: Properly exposed cleanup function
+// SAFE CLEANUP: Properly exposed cleanup function
 export const stopCacheCleanup = () => {
   if (cacheCleanupInterval) {
     clearInterval(cacheCleanupInterval);
@@ -489,7 +489,7 @@ export const stopCacheCleanup = () => {
 // Initialize cleanup on module load
 setupCacheCleanup();
 
-// ✅ APP STATE MANAGEMENT: Handle background/foreground transitions
+// APP STATE MANAGEMENT: Handle background/foreground transitions
 let appStateSubscription = null;
 
 const handleAppStateChange = (nextAppState) => {
@@ -531,7 +531,7 @@ export const clearAllCaches = () => {
   log.info('All caches cleared manually');
 };
 
-// ✅ DEPRECATED: Use stopCacheCleanup() directly instead
+// DEPRECATED: Use stopCacheCleanup() directly instead
 export const stopCacheCleanupInterval = stopCacheCleanup;
 
 // Performance monitoring utilities (development only)

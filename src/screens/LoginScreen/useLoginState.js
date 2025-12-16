@@ -46,20 +46,20 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
   const isProcessingRef = useRef(false);
   const isMountedRef = useRef(false);
   
-  // ✅ Client-side rate limiting to prevent abuse
+  // Client-side rate limiting to prevent abuse
   const loginAttemptsRef = useRef([]);
   const MAX_ATTEMPTS = 5;
   const LOCKOUT_DURATION = 60000; // 1 minute
   const RATE_LIMIT_KEY = '@login_attempts';
 
-  // 🔧 Don't use useRef for debounced function - use useMemo
+  // Don't use useRef for debounced function - use useMemo
   const debouncedValidate = useMemo(() => {
     const fn = debounce((value) => {
       if (!value) return;
       
       const validation = validateEmail(value);
       
-      // 🔧 Use callback form to avoid closure issues
+      // Use callback form to avoid closure issues
       setErrors(prev => {
         if (!validation.isValid) {
           return { ...prev, email: validation.message };
@@ -74,7 +74,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     return fn;
   }, []); // Create once
 
-  // 🔧 Load persisted rate limit on mount
+  // Load persisted rate limit on mount
   useEffect(() => {
     const loadRateLimit = async () => {
       try {
@@ -94,7 +94,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     loadRateLimit();
   }, []);
 
-  // ✅ REMOVED: Duplicate cleanup effect - consolidated into single cleanup at end
+  // REMOVED: Duplicate cleanup effect - consolidated into single cleanup at end
 
   const updateEmail = useCallback((value) => {
     setEmail(value);
@@ -104,7 +104,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     });
     if (globalError) setGlobalError('');
     
-    // 🔧 Call debounced validation directly
+    // Call debounced validation directly
     if (value && value.length > 3) {
       debouncedValidate(value);
     }
@@ -139,7 +139,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     }
   }, []);
 
-  // 🔧 Persist rate limit on change
+  // Persist rate limit on change
   const checkRateLimit = useCallback(async () => {
     const now = Date.now();
     
@@ -152,7 +152,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       const oldestAttempt = Math.min(...loginAttemptsRef.current);
       const timeRemaining = Math.ceil((LOCKOUT_DURATION - (now - oldestAttempt)) / 1000);
       
-      // 🔧 Haptic feedback for rate limit warning
+      // Haptic feedback for rate limit warning
       try {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       } catch (hapticError) {
@@ -168,7 +168,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     // Record this attempt
     loginAttemptsRef.current.push(now);
     
-    // 🔧 Persist to storage
+    // Persist to storage
     try {
       await safeAsyncStorage.setItem(
         RATE_LIMIT_KEY,
@@ -190,7 +190,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     }
   }, []);
 
-  // ✅ SAFER: Save session with transaction safety
+  // SAFER: Save session with transaction safety
   const saveSession = useCallback(async ({ user, token }) => {
     try {
       // Write-then-swap pattern to avoid partial state
@@ -248,7 +248,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     }
   }, []);
 
-  // ✅ SAFER: Login handler with sanitization, rate limiting, and AbortController compatibility
+  // SAFER: Login handler with sanitization, rate limiting, and AbortController compatibility
   const handleLogin = useCallback(async () => {
     if (isProcessingRef.current) return;
     
@@ -288,15 +288,15 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       const formValidation = validateForm(email, password);
       if (!formValidation.isValid) {
         setErrors(formValidation.errors);
-        throw new Error('Validation failed'); // ✅ Throw instead of return
+        throw new Error('Validation failed'); // Throw instead of return
       }
 
-      // ✅ Sanitize inputs before sending to API
+      // Sanitize inputs before sending to API
       const sanitizedEmail = sanitizeEmail(email);
       const sanitizedPassword = sanitizePassword(password);
 
       const response = await withTimeout(
-        ApiService.login(sanitizedEmail, sanitizedPassword, requestOptions), // ✅ Sanitized inputs
+        ApiService.login(sanitizedEmail, sanitizedPassword, requestOptions), // Sanitized inputs
         TIMEOUTS.login
       );
 
@@ -305,7 +305,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       if (user && token) {
         await saveSession({ user, token });
         
-        // 🔧 Haptic feedback for login success
+        // Haptic feedback for login success
         try {
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (hapticError) {
@@ -323,7 +323,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         if (error.message !== 'Validation failed') {
           setGlobalError(getErrorMessage(error));
           
-          // 🔧 Haptic feedback for login error
+          // Haptic feedback for login error
           try {
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           } catch (hapticError) {
@@ -334,12 +334,12 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     } finally {
       isProcessingRef.current = false;
       if (isMountedRef.current) {
-        setLoading(false); // ✅ Always executes now
+        setLoading(false); // Always executes now
       }
     }
   }, [email, password, onLoginSuccess, saveSession, checkRateLimit]);
 
-  // 🔧 Demo login with atomic transaction semantics
+  // Demo login with atomic transaction semantics
   const handleDemoLogin = useCallback(async () => {
     if (isProcessingRef.current) return;
     
@@ -359,7 +359,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     setGlobalError('');
     
     try {
-      // 🔧 Try backend demo with full transaction semantics
+      // Try backend demo with full transaction semantics
       try {
         const response = await withTimeout(
           ApiService.demoLogin(requestOptions), 
@@ -372,28 +372,28 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
           throw new Error('Invalid demo response');
         }
         
-        // 🔧 CRITICAL: saveSession must complete fully or rollback
+        // CRITICAL: saveSession must complete fully or rollback
         await saveSession({ user, token });
         
-        // 🔧 Haptic feedback for demo login success
+        // Haptic feedback for demo login success
         try {
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (hapticError) {
           logger.warn('Haptic feedback failed:', hapticError);
         }
         
-        // 🔧 Only call success callback after FULL transaction
+        // Only call success callback after FULL transaction
         if (isMountedRef.current) {
           onLoginSuccess?.(user);
         }
         
-        // 🔧 Success - early return
+        // Success - early return
         return;
         
       } catch (backendError) {
         logger.warn('Backend demo failed:', backendError);
         
-        // 🔧 Check if component unmounted during backend call
+        // Check if component unmounted during backend call
         if (!isMountedRef.current) {
           return;
         }
@@ -405,23 +405,23 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         }
       }
       
-      // 🔧 Local fallback - only runs if backend completely failed
+      // Local fallback - only runs if backend completely failed
       logger.info('Using local demo fallback');
       
       try {
         const demoUser = createDemoUser();
         
-        // 🔧 Atomic session write - all or nothing
+        // Atomic session write - all or nothing
         const sessionData = {
           userData: JSON.stringify(demoUser),
           isLoggedIn: 'true',
         };
         
-        // 🔧 Try writing to temp keys first
+        // Try writing to temp keys first
         await safeStorage.setItem('__temp_userData', sessionData.userData);
         await safeStorage.setItem('__temp_isLoggedIn', sessionData.isLoggedIn);
         
-        // 🔧 Then atomically move to real keys
+        // Then atomically move to real keys
         await Promise.all([
           safeStorage.removeItem(STORAGE_KEYS.userData),
           safeStorage.removeItem(STORAGE_KEYS.authToken),
@@ -433,13 +433,13 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
           safeStorage.setItem(STORAGE_KEYS.isLoggedIn, sessionData.isLoggedIn),
         ]);
         
-        // 🔧 Clean up temp keys
+        // Clean up temp keys
         await Promise.all([
           safeStorage.removeItem('__temp_userData'),
           safeStorage.removeItem('__temp_isLoggedIn'),
         ]);
         
-        // 🔧 Haptic feedback for local demo success
+        // Haptic feedback for local demo success
         try {
           await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (hapticError) {
@@ -454,7 +454,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       } catch (localError) {
         logger.error('Local demo fallback failed:', localError);
         
-        // 🔧 Rollback - clear all session data
+        // Rollback - clear all session data
         await Promise.all([
           safeStorage.removeItem(STORAGE_KEYS.userData),
           safeStorage.removeItem(STORAGE_KEYS.authToken),
@@ -466,7 +466,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         if (isMountedRef.current) {
           setGlobalError('Demo login failed. Please try again.');
           
-          // 🔧 Haptic feedback for demo login error
+          // Haptic feedback for demo login error
           try {
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
           } catch (hapticError) {
@@ -483,7 +483,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     }
   }, [onLoginSuccess, saveSession]);
 
-  // ✅ FIXED: Single cleanup effect with empty deps (no unnecessary dependencies)
+  // FIXED: Single cleanup effect with empty deps (no unnecessary dependencies)
   useEffect(() => {
     isMountedRef.current = true;
 
@@ -494,10 +494,10 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         abortControllerRef.current.abort();
       }
       
-      // ✅ Safe to call even if undefined - debouncedValidate created once with useMemo([], [])
+      // Safe to call even if undefined - debouncedValidate created once with useMemo([], [])
       debouncedValidate?.cancel?.();
     };
-  }, []); // ✅ Empty deps - cleanup only on unmount
+  }, []); // Empty deps - cleanup only on unmount
 
   return {
     // Form state

@@ -4,7 +4,7 @@ import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { safeAsyncStorage } from './safeAsyncStorage';
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
   if (_isDebugModeValue === null) {
@@ -19,22 +19,22 @@ const getIsDebugMode = () => {
   return _isDebugModeValue;
 };
 
-// ✅ IMPORT ORDER FIX: Move all imports to the top before any code execution
+// IMPORT ORDER FIX: Move all imports to the top before any code execution
 // Note: STORAGE_KEYS import moved to top to follow ES6 module hoisting principles
 // This prevents potential circular dependency issues and ensures proper module loading
 
-// ✅ PRODUCTION FIX: Load all optional modules at the top to prevent bundle issues
+// PRODUCTION FIX: Load all optional modules at the top to prevent bundle issues
 let STORAGE_KEYS;
 let lazyStorageManager = null;
 let NonBlockingJSON = null;
 
-// ✅ SAFE MODULE LOADING: Load all dependencies at module initialization
+// SAFE MODULE LOADING: Load all dependencies at module initialization
 try {
   // Try to import STORAGE_KEYS if the file exists
   const storageKeysModule = require('../constants/storageKeys');
   STORAGE_KEYS = storageKeysModule.STORAGE_KEYS;
 } catch (error) {
-  // ✅ FALLBACK: Define essential storage keys inline if constants file is missing
+  // FALLBACK: Define essential storage keys inline if constants file is missing
   console.warn('safeStorage: storageKeys.js not found, using fallback keys');
   STORAGE_KEYS = {
     AUTH_TOKEN: 'auth_token',
@@ -44,7 +44,7 @@ try {
   };
 }
 
-// ✅ PRODUCTION FIX: Load nonBlockingStorage at module level to prevent runtime requires
+// PRODUCTION FIX: Load nonBlockingStorage at module level to prevent runtime requires
 try {
   const nonBlockingModule = require('./nonBlockingStorage');
   lazyStorageManager = nonBlockingModule.lazyStorageManager;
@@ -75,7 +75,7 @@ const logger = {
   error: (...args) => getLogger()?.error?.(...args),
 };
 
-// ✅ CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
+// CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
 const IS_DEBUG_MODE = () => getIsDebugMode();
 
 // Error monitoring for critical failures
@@ -150,12 +150,12 @@ class OptimizedSafeStorage {
       return;
     }
 
-    // ✅ FIX: Check if initialization was aborted
+    // FIX: Check if initialization was aborted
     if (signal?.aborted) {
       throw new Error('SafeStorage initialization aborted');
     }
 
-    // ✅ FIX: Track abort listeners for cleanup
+    // FIX: Track abort listeners for cleanup
     const abortListeners = [];
     const addAbortListener = (abortSignal, handler) => {
       if (abortSignal?.addEventListener) {
@@ -177,7 +177,7 @@ class OptimizedSafeStorage {
       // Test AsyncStorage first (critical dependency)
       let asyncStorageAvailable = false;
       try {
-        // ✅ FIX: Pass abort signal to AsyncStorage initialization
+        // FIX: Pass abort signal to AsyncStorage initialization
         if (signal?.aborted) {
           throw new Error('SafeStorage initialization aborted before AsyncStorage init');
         }
@@ -188,10 +188,10 @@ class OptimizedSafeStorage {
         
         // Log critical storage status only in debug mode
         if (IS_DEBUG_MODE()) {
-          console.log('📱 AsyncStorage status:', asyncStorageAvailable ? '✅ Working' : '❌ Failed');
+          console.log('AsyncStorage status:', asyncStorageAvailable ? 'Working' : 'Failed');
         }
       } catch (asyncError) {
-        console.error('❌ AsyncStorage is not available or corrupted:', asyncError.message);
+        console.error('AsyncStorage is not available or corrupted:', asyncError.message);
         reportError(asyncError, 'AsyncStorage test failed during initialization');
         
         // CRITICAL: Mark storage as unavailable but don't crash the app
@@ -201,7 +201,7 @@ class OptimizedSafeStorage {
         this.asyncStorageUnavailable = true;
       }
 
-      // ✅ FIX: Abort check between operations
+      // FIX: Abort check between operations
       if (signal?.aborted) {
         throw new Error('SafeStorage initialization aborted before SecureStore test');
       }
@@ -209,7 +209,7 @@ class OptimizedSafeStorage {
       // Test SecureStore availability (optional dependency) with timeout protection
       if (this.secureStore) {
         try {
-          // ✅ FIX: Proper abort signal handling with cleanup
+          // FIX: Proper abort signal handling with cleanup
           const secureTest = this.secureStore.isAvailableAsync();
 
           const secureOperation = new Promise((resolve, reject) => {
@@ -237,7 +237,7 @@ class OptimizedSafeStorage {
               }
             }, 3000); // 3 second timeout for keychain access
 
-            // ✅ FIX: Proper abort signal handling with cleanup tracking
+            // FIX: Proper abort signal handling with cleanup tracking
             if (signal?.addEventListener) {
               abortHandler = () => {
                 if (!settled) {
@@ -274,7 +274,7 @@ class OptimizedSafeStorage {
           this.isSecureStoreAvailable = await secureOperation;
           // Log SecureStore status only in debug mode
           if (IS_DEBUG_MODE()) {
-            console.log('🔐 SecureStore status:', this.isSecureStoreAvailable ? '✅ Available' : '❌ Not available');
+            console.log('SecureStore status:', this.isSecureStoreAvailable ? 'Available' : 'Not available');
           }
         } catch (secureError) {
           console.warn('SecureStore availability check failed:', secureError.message);
@@ -293,7 +293,7 @@ class OptimizedSafeStorage {
       
       // Log initialization status only in debug mode
       if (IS_DEBUG_MODE()) {
-        console.log('🔐 SafeStorage initialized:', {
+        console.log('SafeStorage initialized:', {
           asyncStorage: asyncStorageAvailable,
           secureStore: this.isSecureStoreAvailable,
           platform: 'iOS Production'
@@ -302,7 +302,7 @@ class OptimizedSafeStorage {
 
       // Warn if AsyncStorage failed but continue
       if (!asyncStorageAvailable) {
-        console.warn('⚠️ SafeStorage initialized with AsyncStorage issues - storage operations may fail');
+        console.warn('SafeStorage initialized with AsyncStorage issues - storage operations may fail');
       }
       
     } catch (error) {
@@ -311,13 +311,13 @@ class OptimizedSafeStorage {
       this.isSecureStoreAvailable = false;
       this.isInitialized = true; // Mark as initialized even if tests failed
     } finally {
-      // ✅ FIX: Always cleanup abort listeners to prevent memory leaks
+      // FIX: Always cleanup abort listeners to prevent memory leaks
       cleanupAbortListeners();
     }
   }
 
   /**
-   * ✅ FIX: Initialize AsyncStorage with abort signal support
+   * FIX: Initialize AsyncStorage with abort signal support
    * @private
    */
   async _initAsyncStorageWithAbort(signal) {
@@ -374,7 +374,7 @@ class OptimizedSafeStorage {
   }
 
   /**
-   * ✅ FIX: Utility method to wrap async operations with abort signal support
+   * FIX: Utility method to wrap async operations with abort signal support
    * @private
    */
   _withAbortSignal(asyncOperation, signal, operationName = 'operation') {
@@ -488,7 +488,7 @@ class OptimizedSafeStorage {
    * Helper to guard async operations with a timeout to avoid hangs
    */
   _withTimeout(promise, timeoutMs, label) {
-    // ✅ CRITICAL FIX: Manual timeout management to prevent uncaught promise rejections
+    // CRITICAL FIX: Manual timeout management to prevent uncaught promise rejections
     return new Promise((resolve, reject) => {
       let settled = false;
       let timeoutId = null;
@@ -524,7 +524,7 @@ class OptimizedSafeStorage {
           }
         }
       ).catch((error) => {
-        // ✅ SAFETY: Catch any remaining promise rejections
+        // SAFETY: Catch any remaining promise rejections
         if (!settled) {
           settled = true;
           cleanup();
@@ -638,7 +638,7 @@ class OptimizedSafeStorage {
           return null;
         }
       } finally {
-        // ✅ Always clean up pending operation
+        // Always clean up pending operation
         this.pendingOperations.delete(key);
       }
     })();
@@ -647,7 +647,7 @@ class OptimizedSafeStorage {
     return promise;
   }
 
-  // ✅ CLEANUP: Removed redundant _getItemOperation method since getItem already handles everything
+  // CLEANUP: Removed redundant _getItemOperation method since getItem already handles everything
 
   /**
    * Advanced setItem with secure storage and batching
@@ -790,7 +790,7 @@ class OptimizedSafeStorage {
    */
   _addToBatch(operation, key, value, options) {
     return new Promise((resolve, reject) => {
-      // ✅ Check if mounted before adding to batch
+      // Check if mounted before adding to batch
       if (!this._isMounted) {
         reject(new Error('Storage unmounted'));
         return;
@@ -803,7 +803,7 @@ class OptimizedSafeStorage {
       }
 
       this.batchTimer = setTimeout(() => {
-        // ✅ Check mounted state before processing
+        // Check mounted state before processing
         if (this._isMounted) {
           this._processBatch();
         } else {
@@ -849,9 +849,9 @@ class OptimizedSafeStorage {
     });
   }
 
-  // 🔧 Token ONLY goes in SecureStore or nowhere
+  // Token ONLY goes in SecureStore or nowhere
   async setToken(token) {
-    // ✅ CRASH FIX: Check mounted state before async operation
+    // CRASH FIX: Check mounted state before async operation
     if (!this._isMounted) {
       throw new Error('Storage instance destroyed');
     }
@@ -860,14 +860,14 @@ class OptimizedSafeStorage {
       throw new Error('Token is required');
     }
 
-    // ✅ CRASH FIX: Ensure initialization before token operations
+    // CRASH FIX: Ensure initialization before token operations
     if (!this.isInitialized) {
       await this.init();
     }
     
-    // ✅ CRASH FIX: Check if SecureStore is available before trying
+    // CRASH FIX: Check if SecureStore is available before trying
     if (this.secureStoreUnavailable || !this.isSecureStoreAvailable) {
-      logger.error('❌ SecureStore not available for token storage');
+      logger.error('SecureStore not available for token storage');
       this.tokenStorageType = null;
       
       Alert.alert(
@@ -882,13 +882,13 @@ class OptimizedSafeStorage {
     try {
       await this.secureStore.setItemAsync(STORAGE_KEYS.AUTH_TOKEN, token, CONFIG.SECURE_STORE_OPTIONS);
       this.tokenStorageType = 'secure';
-      logger.info('✅ Token saved to SecureStore');
+      logger.info('Token saved to SecureStore');
     } catch (error) {
-      logger.error('❌ Failed to save token to SecureStore:', error);
+      logger.error('Failed to save token to SecureStore:', error);
       
-      // 🔧 NEVER fallback to AsyncStorage for tokens
+      // NEVER fallback to AsyncStorage for tokens
       this.tokenStorageType = null;
-      // ✅ CRASH FIX: Mark SecureStore as unavailable to prevent repeated failures
+      // CRASH FIX: Mark SecureStore as unavailable to prevent repeated failures
       this.secureStoreUnavailable = true;
       
       Alert.alert(
@@ -901,21 +901,21 @@ class OptimizedSafeStorage {
     }
   }
 
-  // 🔧 Token ONLY comes from SecureStore
+  // Token ONLY comes from SecureStore
   async getToken() {
-    // ✅ CRASH FIX: Check mounted state before async operation
+    // CRASH FIX: Check mounted state before async operation
     if (!this._isMounted) {
       return null;
     }
     
-    // ✅ CRASH FIX: Ensure initialization before token operations
+    // CRASH FIX: Ensure initialization before token operations
     if (!this.isInitialized) {
       await this.init();
     }
     
-    // ✅ CRASH FIX: Check if SecureStore is available before trying
+    // CRASH FIX: Check if SecureStore is available before trying
     if (this.secureStoreUnavailable || !this.isSecureStoreAvailable) {
-      logger.warn('⚠️ SecureStore not available, cannot retrieve token');
+      logger.warn('SecureStore not available, cannot retrieve token');
       this.tokenStorageType = null;
       return null;
     }
@@ -928,49 +928,49 @@ class OptimizedSafeStorage {
         return token;
       }
       
-      // 🔧 No fallback - if not in SecureStore, token doesn't exist
+      // No fallback - if not in SecureStore, token doesn't exist
       this.tokenStorageType = null;
       return null;
       
     } catch (error) {
-      logger.error('❌ Failed to get token from SecureStore:', error);
+      logger.error('Failed to get token from SecureStore:', error);
       this.tokenStorageType = null;
-      // ✅ CRASH FIX: Mark SecureStore as unavailable to prevent repeated failures
+      // CRASH FIX: Mark SecureStore as unavailable to prevent repeated failures
       this.secureStoreUnavailable = true;
       
-      // 🔧 Don't check AsyncStorage for tokens
+      // Don't check AsyncStorage for tokens
       return null;
     }
   }
 
-  // 🔧 Clear token from both locations for safety
+  // Clear token from both locations for safety
   async clearToken() {
-    // ✅ CRASH FIX: Check mounted state before async operation
+    // CRASH FIX: Check mounted state before async operation
     if (!this._isMounted) {
       return;
     }
     
-    // ✅ CRASH FIX: Ensure initialization before token operations
+    // CRASH FIX: Ensure initialization before token operations
     if (!this.isInitialized) {
       await this.init();
     }
     
     const errors = [];
     
-    // ✅ CRASH FIX: Only try SecureStore if available
+    // CRASH FIX: Only try SecureStore if available
     if (!this.secureStoreUnavailable && this.isSecureStoreAvailable) {
       try {
-        // ✅ SECURITY FIX: Use same keychain service as setToken/getToken
+        // SECURITY FIX: Use same keychain service as setToken/getToken
         await this.secureStore.deleteItemAsync(STORAGE_KEYS.AUTH_TOKEN, CONFIG.SECURE_STORE_OPTIONS);
       } catch (error) {
         logger.error('Failed to clear SecureStore token:', error);
         errors.push(error);
-        // ✅ CRASH FIX: Mark SecureStore as unavailable to prevent repeated failures
+        // CRASH FIX: Mark SecureStore as unavailable to prevent repeated failures
         this.secureStoreUnavailable = true;
       }
     }
     
-    // 🔧 Also clear from AsyncStorage in case old version stored it there
+    // Also clear from AsyncStorage in case old version stored it there
     try {
       await safeAsyncStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN);
     } catch (error) {
@@ -981,45 +981,45 @@ class OptimizedSafeStorage {
     this.tokenStorageType = null;
     
     if (errors.length > 0) {
-      // ✅ CRASH FIX: Log but don't throw - clearing should be best-effort
+      // CRASH FIX: Log but don't throw - clearing should be best-effort
       logger.warn('Token clearing completed with errors:', errors.length);
     }
   }
 
-  // ✅ NON-BLOCKING USER DATA: Use lazy loading pattern to prevent UI blocking
+  // NON-BLOCKING USER DATA: Use lazy loading pattern to prevent UI blocking
   async setUserData(userData) {
-    // ✅ PRODUCTION FIX: Use pre-loaded module instead of runtime require
+    // PRODUCTION FIX: Use pre-loaded module instead of runtime require
     if (lazyStorageManager) {
       try {
         await lazyStorageManager.setUserData(userData);
-        logger.info('✅ User data saved with lazy loading pattern');
+        logger.info('User data saved with lazy loading pattern');
         return;
       } catch (error) {
-        logger.error('❌ Failed to save user data with lazy loading:', error);
+        logger.error('Failed to save user data with lazy loading:', error);
       }
     }
     
-    // ✅ FALLBACK: Use traditional method for compatibility
+    // FALLBACK: Use traditional method for compatibility
     await this._setUserDataTraditional(userData);
   }
 
-  // ✅ FAST USER DATA: Get basic user info immediately
+  // FAST USER DATA: Get basic user info immediately
   async getUserData() {
-    // ✅ PRODUCTION FIX: Use pre-loaded module instead of runtime require
+    // PRODUCTION FIX: Use pre-loaded module instead of runtime require
     if (lazyStorageManager) {
       try {
-        // ✅ FAST PATH: Try to get basic user data first
+        // FAST PATH: Try to get basic user data first
         const basicUser = await lazyStorageManager.getUserBasic();
         if (basicUser) {
-          logger.info('✅ Basic user data loaded quickly');
+          logger.info('Basic user data loaded quickly');
           return basicUser;
         }
       } catch (error) {
-        logger.warn('⚠️ Lazy loading failed, falling back to traditional method:', error);
+        logger.warn('Lazy loading failed, falling back to traditional method:', error);
       }
     }
 
-    // ✅ FALLBACK: Use traditional method
+    // FALLBACK: Use traditional method
     return this._getUserDataTraditional();
   }
 
@@ -1071,22 +1071,22 @@ class OptimizedSafeStorage {
     if (lazyStorageManager) {
       try {
         await lazyStorageManager.preloadEssentials();
-        logger.info('✅ User essentials preloaded');
+        logger.info('User essentials preloaded');
         return;
       } catch (error) {
-        logger.warn('⚠️ Failed to preload user essentials:', error);
+        logger.warn('Failed to preload user essentials:', error);
       }
     }
     
-    logger.warn('⚠️ Lazy storage manager not available, skipping preload');
+    logger.warn('Lazy storage manager not available, skipping preload');
   }
 
-  // ✅ TRADITIONAL FALLBACK METHODS (for compatibility)
+  // TRADITIONAL FALLBACK METHODS (for compatibility)
   async _setUserDataTraditional(userData) {
-    // ✅ PRODUCTION FIX: Use pre-loaded module instead of runtime require
+    // PRODUCTION FIX: Use pre-loaded module instead of runtime require
     let serialized;
     try {
-      // ✅ NON-BLOCKING: Use non-blocking JSON serialization if available
+      // NON-BLOCKING: Use non-blocking JSON serialization if available
       if (NonBlockingJSON) {
         serialized = await NonBlockingJSON.stringify(userData);
       } else {
@@ -1105,7 +1105,7 @@ class OptimizedSafeStorage {
           serialized,
           CONFIG.SECURE_STORE_OPTIONS
         );
-        logger.info('✅ User data saved to SecureStore (traditional)');
+        logger.info('User data saved to SecureStore (traditional)');
         return;
       } catch (error) {
         lastError = error;
@@ -1115,20 +1115,20 @@ class OptimizedSafeStorage {
 
     try {
       await safeAsyncStorage.setItem(STORAGE_KEYS.USER_DATA, serialized);
-      logger.info('✅ User data saved to AsyncStorage fallback (traditional)');
+      logger.info('User data saved to AsyncStorage fallback (traditional)');
     } catch (error) {
-      logger.error('❌ Failed to save user data:', error);
+      logger.error('Failed to save user data:', error);
       throw (lastError || error);
     }
   }
 
   async _getUserDataTraditional() {
-    // ✅ PRODUCTION FIX: Use pre-loaded module instead of runtime require
+    // PRODUCTION FIX: Use pre-loaded module instead of runtime require
     if (this.isSecureStoreAvailable && !this.secureStoreUnavailable) {
       try {
         const data = await this.secureStore.getItemAsync(STORAGE_KEYS.USER_DATA);
         if (data !== null && data !== undefined) {
-          // ✅ NON-BLOCKING: Use non-blocking JSON parsing if available
+          // NON-BLOCKING: Use non-blocking JSON parsing if available
           if (NonBlockingJSON) {
             return await NonBlockingJSON.parse(data);
           } else {
@@ -1143,7 +1143,7 @@ class OptimizedSafeStorage {
     try {
       const data = await safeAsyncStorage.getItem(STORAGE_KEYS.USER_DATA);
       if (data) {
-        // ✅ NON-BLOCKING: Use non-blocking JSON parsing if available
+        // NON-BLOCKING: Use non-blocking JSON parsing if available
         if (NonBlockingJSON) {
           return await NonBlockingJSON.parse(data);
         } else {
@@ -1152,7 +1152,7 @@ class OptimizedSafeStorage {
       }
       return null;
     } catch (error) {
-      logger.error('❌ Failed to get user data:', error);
+      logger.error('Failed to get user data:', error);
       return null;
     }
   }
@@ -1206,7 +1206,7 @@ class OptimizedSafeStorage {
           const successCount = removeResults.filter(r => r.status === 'fulfilled').length;
           results.asyncStorageCleared = successCount > 0;
           
-          console.log(`🔄 AsyncStorage: ${successCount}/${authKeys.length} auth keys cleared`);
+          console.log(`AsyncStorage: ${successCount}/${authKeys.length} auth keys cleared`);
         } else {
           results.asyncStorageCleared = true; // No auth keys to clear
         }
@@ -1248,7 +1248,7 @@ class OptimizedSafeStorage {
         }
         
         results.secureStoreCleared = secureSuccesses > 0 || secureAuthKeys.length === 0;
-        console.log(`🔐 SecureStore: ${secureSuccesses}/${secureAuthKeys.length} auth keys cleared`);
+        console.log(`SecureStore: ${secureSuccesses}/${secureAuthKeys.length} auth keys cleared`);
       } else {
         results.secureStoreCleared = true; // SecureStore not available, nothing to clear
       }
@@ -1268,7 +1268,7 @@ class OptimizedSafeStorage {
         }
       }
       results.cacheCleared = true;
-      console.log(`💾 Cache: ${cacheCleared} auth entries cleared`);
+      console.log(`Cache: ${cacheCleared} auth entries cleared`);
     } catch (error) {
       console.error('Cache clearing failed:', error.message);
       results.errors.push(`Cache clearing failed: ${error.message}`);
@@ -1278,14 +1278,14 @@ class OptimizedSafeStorage {
     const overallSuccess = results.asyncStorageCleared && results.secureStoreCleared && results.cacheCleared;
     
     if (results.errors.length > 0) {
-      console.warn('⚠️ clearAuth completed with errors:', results.errors);
+      console.warn('clearAuth completed with errors:', results.errors);
       reportError(new Error(results.errors.join('; ')), 'clearAuth partial failure');
     }
     
     if (overallSuccess) {
-      console.log('✅ clearAuth completed successfully');
+      console.log('clearAuth completed successfully');
     } else {
-      console.warn('⚠️ clearAuth completed with partial success');
+      console.warn('clearAuth completed with partial success');
     }
 
     return overallSuccess;
@@ -1324,7 +1324,7 @@ class OptimizedSafeStorage {
    * Calculate cache hit rate (simplified)
    */
   _calculateCacheHitRate() {
-    // ✅ FIX: Return null instead of misleading hardcoded value
+    // FIX: Return null instead of misleading hardcoded value
     // TODO: Implement proper cache hit tracking if needed
     return null;
   }
@@ -1340,7 +1340,7 @@ class OptimizedSafeStorage {
    * Cleanup resources
    */
   destroy() {
-    this._isMounted = false; // ✅ Mark as unmounted
+    this._isMounted = false; // Mark as unmounted
     
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
@@ -1351,12 +1351,12 @@ class OptimizedSafeStorage {
     this.batchQueue.forEach(item => {
       item.reject(new Error('Storage destroyed'));
     });
-    this.batchQueue = []; // ✅ FIX: Clear the batch queue array
+    this.batchQueue = []; // FIX: Clear the batch queue array
     
     this.clearCache();
     this.pendingOperations.clear();
     
-    // ✅ FIX: Reset token storage type on destroy
+    // FIX: Reset token storage type on destroy
     this.tokenStorageType = null;
   }
 }
@@ -1364,28 +1364,28 @@ class OptimizedSafeStorage {
 // Create the optimized storage instance
 const optimizedSafeStorage = new OptimizedSafeStorage();
 
-// ✅ CIRCULAR DEPENDENCY FIX: Inject safeStorage into lazyStorageManager after creation
+// CIRCULAR DEPENDENCY FIX: Inject safeStorage into lazyStorageManager after creation
 if (lazyStorageManager) {
   lazyStorageManager.setStorageProvider(optimizedSafeStorage);
 }
 
 // Export optimized interface with secure token methods
 export const safeStorage = {
-  init: (options) => optimizedSafeStorage.init(options), // ✅ CRITICAL FIX: Export init method with options
+  init: (options) => optimizedSafeStorage.init(options), // CRITICAL FIX: Export init method with options
   getItem: (key) => optimizedSafeStorage.getItem(key),
   setItem: (key, value, options) => optimizedSafeStorage.setItem(key, value, options),
   removeItem: (key, options) => optimizedSafeStorage.removeItem(key, options),
   clearAuth: () => optimizedSafeStorage.clearAuth(),
   getStats: () => optimizedSafeStorage.getStats(),
   clearCache: () => optimizedSafeStorage.clearCache(),
-  destroy: () => optimizedSafeStorage.destroy(), // ✅ Export destroy method
+  destroy: () => optimizedSafeStorage.destroy(), // Export destroy method
   
-  // 🔧 Secure token methods - never fallback to AsyncStorage
+  // Secure token methods - never fallback to AsyncStorage
   setToken: (token) => optimizedSafeStorage.setToken(token),
   getToken: () => optimizedSafeStorage.getToken(),
   clearToken: () => optimizedSafeStorage.clearToken(),
   
-  // 🔧 Non-sensitive data methods
+  // Non-sensitive data methods
   setUserData: (userData) => optimizedSafeStorage.setUserData(userData),
   getUserData: () => optimizedSafeStorage.getUserData(),
 };

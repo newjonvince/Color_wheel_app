@@ -1,8 +1,8 @@
 // contexts/AuthContext.js - Split Auth Context for better performance
-// ✅ PERFORMANCE: Split state and dispatch to prevent unnecessary re-renders
+// PERFORMANCE: Split state and dispatch to prevent unnecessary re-renders
 import React, { createContext, useContext, useReducer, useCallback, useEffect, useRef } from 'react';
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load logger to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load logger to prevent crash on module initialization
 // App.js → AuthContext.js → AppLogger.js can cause circular dependency issues
 let _loggerInstance = null;
 const getLogger = () => {
@@ -17,7 +17,7 @@ const getLogger = () => {
   return _loggerInstance;
 };
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load safeStorage to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load safeStorage to prevent crash on module initialization
 let _safeStorageInstance = null;
 const getSafeStorage = () => {
   if (_safeStorageInstance) return _safeStorageInstance;
@@ -36,8 +36,8 @@ const getSafeStorage = () => {
   return _safeStorageInstance;
 };
 
-// ✅ PRODUCTION SAFETY: Gate console.log statements
-// ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+// PRODUCTION SAFETY: Gate console.log statements
+// CRASH FIX: Use typeof check to prevent ReferenceError in production
 const devLog = (...args) => (typeof __DEV__ !== 'undefined' && __DEV__) && console.log(...args);
 const devWarn = (...args) => (typeof __DEV__ !== 'undefined' && __DEV__) && console.warn(...args);
 
@@ -144,11 +144,11 @@ const authReducer = (state, action) => {
   }
 };
 
-// ✅ PERFORMANCE: Split contexts to prevent unnecessary re-renders
+// PERFORMANCE: Split contexts to prevent unnecessary re-renders
 const AuthStateContext = createContext(null);
 const AuthDispatchContext = createContext(null);
 
-// ✅ PERFORMANCE: Memoized auth state hook
+// PERFORMANCE: Memoized auth state hook
 export const useAuthState = () => {
   const context = useContext(AuthStateContext);
   if (!context) {
@@ -157,7 +157,7 @@ export const useAuthState = () => {
   return context;
 };
 
-// ✅ PERFORMANCE: Memoized auth dispatch hook
+// PERFORMANCE: Memoized auth dispatch hook
 export const useAuthDispatch = () => {
   const context = useContext(AuthDispatchContext);
   if (!context) {
@@ -166,7 +166,7 @@ export const useAuthDispatch = () => {
   return context;
 };
 
-// ✅ BACKWARD COMPATIBILITY: Combined auth hook
+// BACKWARD COMPATIBILITY: Combined auth hook
 export const useAuth = () => {
   const state = useAuthState();
   const dispatch = useAuthDispatch();
@@ -177,25 +177,25 @@ export const useAuth = () => {
   };
 };
 
-// ✅ MAIN AUTH PROVIDER: Manages authentication state and actions
+// MAIN AUTH PROVIDER: Manages authentication state and actions
 export const AuthProvider = ({ children }) => {
   const [state, dispatch] = useReducer(authReducer, initialAuthState);
   const initializationRef = useRef(false);
-  // ✅ MEMORY LEAK FIX: Track mounted state to prevent state updates after unmount
+  // MEMORY LEAK FIX: Track mounted state to prevent state updates after unmount
   const isMountedRef = useRef(true);
 
-  // ✅ REAL AUTH PERSISTENCE: Using safeStorage for actual user persistence
+  // REAL AUTH PERSISTENCE: Using safeStorage for actual user persistence
   const getStoredUser = useCallback(async () => {
     try {
-      devLog('🔑 Checking for stored user...');
+      devLog('Checking for stored user...');
       
       const storedUserJson = await getSafeStorage().getUserData();
       if (storedUserJson) {
-        devLog('✅ Found stored user');
+        devLog('Found stored user');
         return storedUserJson; // Already parsed by safeStorage
       }
       
-      devLog('ℹ️ No stored user found');
+      devLog('No stored user found');
       return null;
     } catch (error) {
       getLogger().error('Failed to get stored user:', error);
@@ -206,10 +206,10 @@ export const AuthProvider = ({ children }) => {
   const setStoredUser = useCallback(async (user) => {
     try {
       if (user) {
-        devLog('💾 Storing user...');
+        devLog('Storing user...');
         await getSafeStorage().setUserData(user);
       } else {
-        devLog('🗑️ Removing stored user...');
+        devLog('Removing stored user...');
         await getSafeStorage().clearAuth();
       }
     } catch (error) {
@@ -217,17 +217,17 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  // ✅ INITIALIZATION: Check for existing auth on app start
+  // INITIALIZATION: Check for existing auth on app start
   const initializeAuth = useCallback(async () => {
     if (initializationRef.current) {
-      devLog('🔐 Auth already initialized, skipping...');
+      devLog('Auth already initialized, skipping...');
       return;
     }
 
     initializationRef.current = true;
     
     try {
-      devLog('🔐 Initializing authentication...');
+      devLog('Initializing authentication...');
       dispatch({ type: AUTH_ACTIONS.INITIALIZE_START });
 
       // Check for stored user
@@ -235,13 +235,13 @@ export const AuthProvider = ({ children }) => {
       
       if (storedUser) {
         // TODO: Validate stored user token/session
-        devLog('✅ Restored user from storage');
+        devLog('Restored user from storage');
         dispatch({ 
           type: AUTH_ACTIONS.INITIALIZE_SUCCESS, 
           payload: { user: storedUser } 
         });
       } else {
-        devLog('ℹ️ No stored user, starting fresh');
+        devLog('No stored user, starting fresh');
         dispatch({ 
           type: AUTH_ACTIONS.INITIALIZE_SUCCESS, 
           payload: { user: null } 
@@ -249,24 +249,24 @@ export const AuthProvider = ({ children }) => {
       }
     } catch (error) {
       getLogger().error('Auth initialization failed:', error);
-      // ✅ CRASH FIX: Only dispatch if still mounted
+      // CRASH FIX: Only dispatch if still mounted
       if (isMountedRef.current) {
         dispatch({ 
           type: AUTH_ACTIONS.INITIALIZE_ERROR, 
-          // ✅ FIX: Serialize error message instead of full error object
+          // FIX: Serialize error message instead of full error object
           payload: { error: error?.message || 'Auth initialization failed' } 
         });
       }
     }
-  }, [getStoredUser]); // ✅ FIX: Remove logger from deps - it's a stable module import
+  }, [getStoredUser]); // FIX: Remove logger from deps - it's a stable module import
 
-  // ✅ LOGIN: Handle user login
+  // LOGIN: Handle user login
   const handleLoginSuccess = useCallback(async (user) => {
-    // ✅ CRASH FIX: Early return if unmounted
+    // CRASH FIX: Early return if unmounted
     if (!isMountedRef.current) return;
     
     try {
-      devLog('🔐 Processing login success...');
+      devLog('Processing login success...');
       
       if (!user) {
         throw new Error('No user data provided');
@@ -277,56 +277,56 @@ export const AuthProvider = ({ children }) => {
       // Store user
       await setStoredUser(user);
       
-      // ✅ CRASH FIX: Check mounted before dispatching after async
+      // CRASH FIX: Check mounted before dispatching after async
       if (isMountedRef.current) {
         dispatch({ 
           type: AUTH_ACTIONS.LOGIN_SUCCESS, 
           payload: { user } 
         });
-        getLogger().info('✅ Login successful');
+        getLogger().info('Login successful');
       }
     } catch (error) {
       getLogger().error('Login processing failed:', error);
-      // ✅ CRASH FIX: Check mounted and serialize error
+      // CRASH FIX: Check mounted and serialize error
       if (isMountedRef.current) {
         dispatch({ 
           type: AUTH_ACTIONS.LOGIN_ERROR, 
-          // ✅ FIX: Serialize error message instead of full error object
+          // FIX: Serialize error message instead of full error object
           payload: { error: error?.message || 'Login failed' } 
         });
       }
     }
-  }, [setStoredUser]); // ✅ FIX: Remove logger from deps - it's a stable module import
+  }, [setStoredUser]); // FIX: Remove logger from deps - it's a stable module import
 
-  // ✅ LOGOUT: Handle user logout
+  // LOGOUT: Handle user logout
   const handleLogout = useCallback(async () => {
     try {
-      devLog('🔐 Processing logout...');
+      devLog('Processing logout...');
       
       // Clear stored user
       await setStoredUser(null);
       
-      // ✅ CRASH FIX: Check mounted before dispatching after async
+      // CRASH FIX: Check mounted before dispatching after async
       if (isMountedRef.current) {
         dispatch({ type: AUTH_ACTIONS.LOGOUT });
-        getLogger().info('✅ Logout successful');
+        getLogger().info('Logout successful');
       }
     } catch (error) {
       getLogger().error('Logout failed:', error);
       // Still dispatch logout even if storage clear fails
-      // ✅ CRASH FIX: Check mounted before dispatching
+      // CRASH FIX: Check mounted before dispatching
       if (isMountedRef.current) {
         dispatch({ type: AUTH_ACTIONS.LOGOUT });
       }
     }
-  }, [setStoredUser]); // ✅ FIX: Remove logger from deps - it's a stable module import
+  }, [setStoredUser]); // FIX: Remove logger from deps - it's a stable module import
 
-  // ✅ UTILITY: Clear auth errors
+  // UTILITY: Clear auth errors
   const clearError = useCallback(() => {
     dispatch({ type: AUTH_ACTIONS.CLEAR_ERROR });
   }, []);
 
-  // ✅ UTILITY: Set user directly (for external auth flows)
+  // UTILITY: Set user directly (for external auth flows)
   const setUser = useCallback((user) => {
     dispatch({ 
       type: AUTH_ACTIONS.SET_USER, 
@@ -334,7 +334,7 @@ export const AuthProvider = ({ children }) => {
     });
   }, []);
 
-  // ✅ MEMOIZED DISPATCH ACTIONS: Prevent unnecessary re-renders
+  // MEMOIZED DISPATCH ACTIONS: Prevent unnecessary re-renders
   const dispatchActions = React.useMemo(() => ({
     initializeAuth,
     handleLoginSuccess,
@@ -343,17 +343,17 @@ export const AuthProvider = ({ children }) => {
     setUser
   }), [initializeAuth, handleLoginSuccess, handleLogout, clearError, setUser]);
 
-  // ✅ AUTO-INITIALIZE: Initialize auth on mount
+  // AUTO-INITIALIZE: Initialize auth on mount
   useEffect(() => {
     initializeAuth();
     
-    // ✅ MEMORY LEAK FIX: Cleanup on unmount
+    // MEMORY LEAK FIX: Cleanup on unmount
     return () => {
       isMountedRef.current = false;
     };
   }, [initializeAuth]);
 
-  devLog('🔐 AuthProvider rendering, state:', {
+  devLog('AuthProvider rendering, state:', {
     hasUser: !!state.user,
     loading: state.loading,
     isInitialized: state.isInitialized,
@@ -369,9 +369,9 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
-// ✅ DEVELOPMENT: Display name for debugging
+// DEVELOPMENT: Display name for debugging
 AuthProvider.displayName = 'AuthProvider';
 
-// ✅ EXPORTS: All auth functionality
+// EXPORTS: All auth functionality
 export default AuthProvider;
 export { AUTH_ACTIONS };

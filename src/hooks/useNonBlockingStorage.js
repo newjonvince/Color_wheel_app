@@ -2,7 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { lazyStorageManager } from '../utils/nonBlockingStorage';
 
-// ✅ HOOK: Non-blocking user data with lazy loading
+// HOOK: Non-blocking user data with lazy loading
 export const useUserData = (loadComplete = false) => {
   const [basicUser, setBasicUser] = useState(null);
   const [completeUser, setCompleteUser] = useState(null);
@@ -11,7 +11,7 @@ export const useUserData = (loadComplete = false) => {
   const loadingRef = useRef(false);
   const isMountedRef = useRef(true);
 
-  // ✅ FAST LOAD: Load basic user data immediately
+  // FAST LOAD: Load basic user data immediately
   useEffect(() => {
     if (loadingRef.current) return;
     loadingRef.current = true;
@@ -23,15 +23,15 @@ export const useUserData = (loadComplete = false) => {
           setError(null);
         }
 
-        // ✅ FAST PATH: Load basic user data (non-blocking)
+        // FAST PATH: Load basic user data (non-blocking)
         const basic = await lazyStorageManager.getUserBasic();
         
-        // ✅ RACE CONDITION FIX: Only update state if component is still mounted
+        // RACE CONDITION FIX: Only update state if component is still mounted
         if (isMountedRef.current) {
           setBasicUser(basic);
         }
 
-        // ✅ PRELOAD: Start preloading essentials in background
+        // PRELOAD: Start preloading essentials in background
         lazyStorageManager.preloadEssentials().catch(console.warn);
 
       } catch (err) {
@@ -48,14 +48,14 @@ export const useUserData = (loadComplete = false) => {
 
     loadBasicData();
 
-    // ✅ CLEANUP: Reset loading flag and mark as unmounted
+    // CLEANUP: Reset loading flag and mark as unmounted
     return () => {
       loadingRef.current = false;
       isMountedRef.current = false;
     };
   }, []);
 
-  // ✅ COMPLETE LOAD: Load complete user data when requested
+  // COMPLETE LOAD: Load complete user data when requested
   useEffect(() => {
     if (!loadComplete || !basicUser || completeUser) return;
 
@@ -67,7 +67,7 @@ export const useUserData = (loadComplete = false) => {
         
         const complete = await lazyStorageManager.getCompleteUserData();
         
-        // ✅ RACE CONDITION FIX: Only update state if component is still mounted
+        // RACE CONDITION FIX: Only update state if component is still mounted
         if (isMountedRef.current) {
           setCompleteUser(complete);
         }
@@ -86,7 +86,7 @@ export const useUserData = (loadComplete = false) => {
     loadCompleteData();
   }, [loadComplete, basicUser, completeUser]);
 
-  // ✅ REFRESH: Manually refresh user data
+  // REFRESH: Manually refresh user data
   const refresh = useCallback(async (complete = false) => {
     try {
       if (isMountedRef.current) {
@@ -132,7 +132,7 @@ export const useUserData = (loadComplete = false) => {
   };
 };
 
-// ✅ HOOK: Paginated user boards with lazy loading
+// HOOK: Paginated user boards with lazy loading
 export const useUserBoards = (autoLoad = true) => {
   const [boards, setBoards] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -142,14 +142,14 @@ export const useUserBoards = (autoLoad = true) => {
   const isMountedRef = useRef(true);
   const pageSize = 10;
 
-  // ✅ CLEANUP: Mark as unmounted on cleanup
+  // CLEANUP: Mark as unmounted on cleanup
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
     };
   }, []);
 
-  // ✅ LOAD PAGE: Load a specific page of boards
+  // LOAD PAGE: Load a specific page of boards
   const loadPage = useCallback(async (pageNum, append = false) => {
     try {
       if (isMountedRef.current) {
@@ -159,7 +159,7 @@ export const useUserBoards = (autoLoad = true) => {
 
       const pageBoards = await lazyStorageManager.getUserBoards(pageNum, pageSize);
       
-      // ✅ RACE CONDITION FIX: Only update state if component is still mounted
+      // RACE CONDITION FIX: Only update state if component is still mounted
       if (isMountedRef.current) {
         if (append) {
           setBoards(prev => [...prev, ...pageBoards]);
@@ -185,7 +185,7 @@ export const useUserBoards = (autoLoad = true) => {
     }
   }, [pageSize]);
 
-  // ✅ LOAD MORE: Load next page and append to current boards
+  // LOAD MORE: Load next page and append to current boards
   const loadMore = useCallback(async () => {
     if (loading || !hasMore) return;
 
@@ -197,7 +197,7 @@ export const useUserBoards = (autoLoad = true) => {
     }
   }, [loading, hasMore, page, loadPage]);
 
-  // ✅ REFRESH: Reload from first page
+  // REFRESH: Reload from first page
   const refresh = useCallback(async () => {
     if (isMountedRef.current) {
       setPage(0);
@@ -206,7 +206,7 @@ export const useUserBoards = (autoLoad = true) => {
     await loadPage(0, false);
   }, [loadPage]);
 
-  // ✅ AUTO LOAD: Load first page on mount
+  // AUTO LOAD: Load first page on mount
   useEffect(() => {
     if (autoLoad) {
       loadPage(0, false);
@@ -224,7 +224,7 @@ export const useUserBoards = (autoLoad = true) => {
   };
 };
 
-// ✅ HOOK: Paginated color history with lazy loading
+// HOOK: Paginated color history with lazy loading
 export const useColorHistory = (autoLoad = true) => {
   const [colors, setColors] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -234,14 +234,14 @@ export const useColorHistory = (autoLoad = true) => {
   const isMountedRef = useRef(true);
   const pageSize = 20;
 
-  // ✅ CLEANUP: Mark as unmounted on cleanup
+  // CLEANUP: Mark as unmounted on cleanup
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
     };
   }, []);
 
-  // ✅ LOAD PAGE: Load a specific page of colors
+  // LOAD PAGE: Load a specific page of colors
   const loadPage = useCallback(async (pageNum, append = false) => {
     try {
       if (isMountedRef.current) {
@@ -251,7 +251,7 @@ export const useColorHistory = (autoLoad = true) => {
 
       const pageColors = await lazyStorageManager.getColorHistory(pageNum, pageSize);
       
-      // ✅ RACE CONDITION FIX: Only update state if component is still mounted
+      // RACE CONDITION FIX: Only update state if component is still mounted
       if (isMountedRef.current) {
         if (append) {
           setColors(prev => [...prev, ...pageColors]);
@@ -277,7 +277,7 @@ export const useColorHistory = (autoLoad = true) => {
     }
   }, [pageSize]);
 
-  // ✅ LOAD MORE: Load next page and append to current colors
+  // LOAD MORE: Load next page and append to current colors
   const loadMore = useCallback(async () => {
     if (loading || !hasMore) return;
 
@@ -289,7 +289,7 @@ export const useColorHistory = (autoLoad = true) => {
     }
   }, [loading, hasMore, page, loadPage]);
 
-  // ✅ REFRESH: Reload from first page
+  // REFRESH: Reload from first page
   const refresh = useCallback(async () => {
     if (isMountedRef.current) {
       setPage(0);
@@ -298,7 +298,7 @@ export const useColorHistory = (autoLoad = true) => {
     await loadPage(0, false);
   }, [loadPage]);
 
-  // ✅ AUTO LOAD: Load first page on mount
+  // AUTO LOAD: Load first page on mount
   useEffect(() => {
     if (autoLoad) {
       loadPage(0, false);
@@ -316,21 +316,21 @@ export const useColorHistory = (autoLoad = true) => {
   };
 };
 
-// ✅ HOOK: User preferences (usually small, can load immediately)
+// HOOK: User preferences (usually small, can load immediately)
 export const useUserPreferences = () => {
   const [preferences, setPreferences] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const isMountedRef = useRef(true);
 
-  // ✅ CLEANUP: Mark as unmounted on cleanup
+  // CLEANUP: Mark as unmounted on cleanup
   useEffect(() => {
     return () => {
       isMountedRef.current = false;
     };
   }, []);
 
-  // ✅ LOAD PREFERENCES: Load user preferences
+  // LOAD PREFERENCES: Load user preferences
   const loadPreferences = useCallback(async () => {
     try {
       if (isMountedRef.current) {
@@ -340,7 +340,7 @@ export const useUserPreferences = () => {
 
       const prefs = await lazyStorageManager.getUserPreferences();
       
-      // ✅ RACE CONDITION FIX: Only update state if component is still mounted
+      // RACE CONDITION FIX: Only update state if component is still mounted
       if (isMountedRef.current) {
         setPreferences(prefs || {});
       }
@@ -356,7 +356,7 @@ export const useUserPreferences = () => {
     }
   }, []);
 
-  // ✅ UPDATE PREFERENCES: Update user preferences
+  // UPDATE PREFERENCES: Update user preferences
   const updatePreferences = useCallback(async (newPreferences) => {
     try {
       if (isMountedRef.current) {
@@ -386,7 +386,7 @@ export const useUserPreferences = () => {
     }
   }, [preferences, loadPreferences]);
 
-  // ✅ AUTO LOAD: Load preferences on mount
+  // AUTO LOAD: Load preferences on mount
   useEffect(() => {
     loadPreferences();
   }, [loadPreferences]);
@@ -400,7 +400,7 @@ export const useUserPreferences = () => {
   };
 };
 
-// ✅ HOOK: Background preloader for better UX
+// HOOK: Background preloader for better UX
 export const useStoragePreloader = () => {
   const [preloaded, setPreloaded] = useState(false);
   const [preloading, setPreloading] = useState(false);
@@ -412,15 +412,15 @@ export const useStoragePreloader = () => {
       setPreloading(true);
       await lazyStorageManager.preloadEssentials();
       setPreloaded(true);
-      console.log('✅ Storage preloading completed');
+      console.log('Storage preloading completed');
     } catch (error) {
-      console.warn('⚠️ Storage preloading failed:', error);
+      console.warn('Storage preloading failed:', error);
     } finally {
       setPreloading(false);
     }
   }, [preloaded, preloading]);
 
-  // ✅ AUTO PRELOAD: Start preloading on mount
+  // AUTO PRELOAD: Start preloading on mount
   useEffect(() => {
     // Delay preloading slightly to not interfere with initial render
     const timer = setTimeout(preload, 100);
@@ -434,7 +434,7 @@ export const useStoragePreloader = () => {
   };
 };
 
-// ✅ HOOK: Storage performance monitoring
+// HOOK: Storage performance monitoring
 export const useStoragePerformance = () => {
   const [metrics, setMetrics] = useState({
     cacheHits: 0,

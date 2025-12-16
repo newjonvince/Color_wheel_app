@@ -39,7 +39,7 @@ export const SchemeSelector = React.memo(({
   );
 });
 
-// ✅ PropTypes validation for development safety
+// PropTypes validation for development safety
 SchemeSelector.propTypes = {
   selectedScheme: PropTypes.string.isRequired,
   onSchemeChange: PropTypes.func.isRequired,

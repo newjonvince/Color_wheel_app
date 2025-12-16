@@ -2,7 +2,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
 import { MaterialIcons, Feather, Ionicons } from '@expo/vector-icons';
-// ✅ Safe import with fallback
+// Safe import with fallback
 let COLOR_WHEEL_CONFIG;
 try {
   COLOR_WHEEL_CONFIG = require('../config/colorWheelConfig').COLOR_WHEEL_CONFIG;
@@ -42,11 +42,11 @@ const TAB_ICONS = {
 
 // Emoji fallbacks (kept for compatibility)
 const EMOJI_FALLBACKS = {
-  Community: { focused: '🌍', unfocused: '🌎' },
-  ColorWheel: { focused: '🌈', unfocused: '⭕' },
-  Boards: { focused: '📋', unfocused: '📄' },
-  Profile: { focused: '👤', unfocused: '👥' },
-  Settings: { focused: '⚙️', unfocused: '🔧' },
+  Community: { focused: '', unfocused: '' },
+  ColorWheel: { focused: '', unfocused: '' },
+  Boards: { focused: '', unfocused: '' },
+  Profile: { focused: '', unfocused: '' },
+  Settings: { focused: '', unfocused: '' },
 };
 
 const TabIcon = React.memo(({ name, focused, size = 24, color = '#666' }) => {

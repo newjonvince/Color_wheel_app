@@ -10,7 +10,7 @@ import {
   Platform
 } from 'react-native';
 import PropTypes from 'prop-types';
-// ✅ Use shared helper to avoid duplicate code
+// Use shared helper to avoid duplicate code
 import { isDebugMode } from '../utils/expoConfigHelper';
 
 const IS_DEBUG_MODE = isDebugMode();
@@ -80,7 +80,7 @@ class UnifiedErrorBoundary extends React.Component {
     }
 
     // Log error in development
-    // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+    // CRASH FIX: Use typeof check to prevent ReferenceError in production
     if (IS_DEBUG_MODE || (typeof __DEV__ !== 'undefined' && __DEV__)) {
       console.error('UnifiedErrorBoundary caught error:', error);
       console.error('Component stack:', errorInfo?.componentStack);
@@ -116,12 +116,12 @@ class UnifiedErrorBoundary extends React.Component {
       
       // Get category-specific messaging
       const categoryConfig = {
-        network: { emoji: '📡', title: 'Connection Problem' },
-        storage: { emoji: '💾', title: 'Storage Issue' },
-        auth: { emoji: '🔐', title: 'Authentication Error' },
-        navigation: { emoji: '🧭', title: 'Navigation Error' },
-        runtime: { emoji: '⚠️', title: 'Runtime Error' },
-        unknown: { emoji: '❌', title: 'Something Went Wrong' },
+        network: { emoji: '', title: 'Connection Problem' },
+        storage: { emoji: '', title: 'Storage Issue' },
+        auth: { emoji: '', title: 'Authentication Error' },
+        navigation: { emoji: '', title: 'Navigation Error' },
+        runtime: { emoji: '', title: 'Runtime Error' },
+        unknown: { emoji: '', title: 'Something Went Wrong' },
       };
 
       const config = categoryConfig[category] || categoryConfig.unknown;

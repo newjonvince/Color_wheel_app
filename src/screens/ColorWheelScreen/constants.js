@@ -17,10 +17,10 @@ export const DEFAULT_SCHEME = 'complementary';
 // HSL validation and utilities
 export const mod = (a, n) => ((a % n) + n) % n;
 
-// ✅ EDGE CASE FIX: Comprehensive validation with all edge cases handled
+// EDGE CASE FIX: Comprehensive validation with all edge cases handled
 export const validateHSL = (h, s, l) => {
   const parseComponent = (value, defaultValue = 0) => {
-    // ✅ EDGE CASE FIX: Strict type checking first
+    // EDGE CASE FIX: Strict type checking first
     if (typeof value === 'number') {
       // Handle all number edge cases
       if (isNaN(value) || !isFinite(value) || value === Infinity || value === -Infinity) {
@@ -29,7 +29,7 @@ export const validateHSL = (h, s, l) => {
       return value;
     }
     
-    // ✅ EDGE CASE FIX: Enhanced string validation
+    // EDGE CASE FIX: Enhanced string validation
     if (typeof value === 'string') {
       const trimmed = value.trim();
       
@@ -38,7 +38,7 @@ export const validateHSL = (h, s, l) => {
         return defaultValue;
       }
       
-      // ✅ EDGE CASE FIX: Reject scientific notation and invalid formats
+      // EDGE CASE FIX: Reject scientific notation and invalid formats
       // More comprehensive regex to catch edge cases
       if (!/^-?\d*\.?\d+$/.test(trimmed) || 
           /[eE]/.test(trimmed) ||           // Reject scientific notation
@@ -52,7 +52,7 @@ export const validateHSL = (h, s, l) => {
       
       const parsed = parseFloat(trimmed);
       
-      // ✅ EDGE CASE FIX: Comprehensive number validation after parsing
+      // EDGE CASE FIX: Comprehensive number validation after parsing
       if (isNaN(parsed) || !isFinite(parsed) || parsed === Infinity || parsed === -Infinity) {
         return defaultValue;
       }
@@ -60,7 +60,7 @@ export const validateHSL = (h, s, l) => {
       return parsed;
     }
     
-    // ✅ EDGE CASE FIX: Reject all other types (arrays, objects, booleans, null, undefined)
+    // EDGE CASE FIX: Reject all other types (arrays, objects, booleans, null, undefined)
     return defaultValue;
   };
   
@@ -68,7 +68,7 @@ export const validateHSL = (h, s, l) => {
   const satValue = parseComponent(s, 0);
   const lightValue = parseComponent(l, 0);
   
-  // ✅ EDGE CASE FIX: Safe modulo operation with validation
+  // EDGE CASE FIX: Safe modulo operation with validation
   const safeMod = (value, divisor) => {
     if (!isFinite(value) || !isFinite(divisor) || divisor === 0) {
       return 0;

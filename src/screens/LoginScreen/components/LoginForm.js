@@ -3,7 +3,7 @@ import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, Platform, StyleSheet } from 'react-native';
 import { optimizedStyles as styles, optimizedColors } from '../styles';
 
-// ✅ Match the target design - solid translucent backgrounds instead of blur
+// Match the target design - solid translucent backgrounds instead of blur
 const InputContainer = ({ style, children }) => {
   return (
     <View style={[{
@@ -72,8 +72,8 @@ const LoginForm = React.memo(({
             onSubmitEditing={onFocusNext}
             accessibilityLabel="Email input"
             accessibilityHint="Enter your email address"
-            accessibilityRequired={true} // ✅ Mark as required field
-            accessibilityInvalid={!!errors.email} // ✅ Indicate validation state
+            accessibilityRequired={true} // Mark as required field
+            accessibilityInvalid={!!errors.email} // Indicate validation state
             testID="email-input"
             blurOnSubmit={false}
           />
@@ -82,7 +82,7 @@ const LoginForm = React.memo(({
           <Text 
             style={styles.errorText}
             accessibilityRole="alert"
-            accessibilityLiveRegion="polite" // ✅ Announce field errors to screen readers
+            accessibilityLiveRegion="polite" // Announce field errors to screen readers
           >
             {errors.email}
           </Text>
@@ -115,8 +115,8 @@ const LoginForm = React.memo(({
               onSubmitEditing={onSubmit}
               accessibilityLabel="Password input"
               accessibilityHint="Enter your password"
-              accessibilityRequired={true} // ✅ Mark as required field
-              accessibilityInvalid={!!errors.password} // ✅ Indicate validation state
+              accessibilityRequired={true} // Mark as required field
+              accessibilityInvalid={!!errors.password} // Indicate validation state
               testID="password-input"
             />
             <TouchableOpacity 
@@ -136,7 +136,7 @@ const LoginForm = React.memo(({
           <Text 
             style={styles.errorText}
             accessibilityRole="alert"
-            accessibilityLiveRegion="polite" // ✅ Announce field errors to screen readers
+            accessibilityLiveRegion="polite" // Announce field errors to screen readers
           >
             {errors.password}
           </Text>

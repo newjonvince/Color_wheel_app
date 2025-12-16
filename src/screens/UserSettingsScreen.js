@@ -44,7 +44,7 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
     );
     
     if (result.success) {
-      // ✅ DEFENSIVE: Ensure preferences object exists and has expected shape
+      // DEFENSIVE: Ensure preferences object exists and has expected shape
       const preferences = result.data?.preferences || {};
       setNotificationsEnabled(preferences.notifications_enabled ?? true);
       setShareDataEnabled(preferences.share_data_enabled ?? false);
@@ -102,7 +102,7 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
             text: 'OK',
             onPress: async () => {
               setShowDeleteConfirmation(false);
-              // ✅ SAFETY: Secure account deletion with error handling
+              // SAFETY: Secure account deletion with error handling
               try {
                 // Clear all auth data after successful account deletion
                 await safeStorage.clearAuth();
@@ -296,7 +296,7 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
         <TouchableOpacity
           style={styles.settingItem}
           onPress={async () => {
-            // ✅ SAFETY: Secure logout with error handling
+            // SAFETY: Secure logout with error handling
             try {
               // Use ApiService's built-in logout method
               await ApiService.logout();

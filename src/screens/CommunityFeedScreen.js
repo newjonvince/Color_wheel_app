@@ -98,7 +98,7 @@ IMPROVEMENTS MADE:
       if (loading && !replace) return;
       setLoading(true);
       
-      // ✅ CRASH FIX: Add error handling even though safeApiCall shouldn't throw
+      // CRASH FIX: Add error handling even though safeApiCall shouldn't throw
       try {
         const result = await apiPatterns.loadCommunityPosts(cursor);
         
@@ -127,7 +127,7 @@ IMPROVEMENTS MADE:
           setHasMore(false);
         }
       } catch (error) {
-        // ✅ CRASH FIX: Handle unexpected errors from loadCommunityPosts
+        // CRASH FIX: Handle unexpected errors from loadCommunityPosts
         console.error('Unexpected error fetching community posts:', error);
         if (replace) {
           setPosts([]);
@@ -393,7 +393,7 @@ ${post.image_url || ''}` : (post.image_url || ''),
           <TouchableOpacity 
             style={styles.navIcon} 
             onPress={() => {
-              // ✅ CRASH FIX: Navigate to existing route instead of non-existent 'Upload'
+              // CRASH FIX: Navigate to existing route instead of non-existent 'Upload'
               try {
                 navigation.navigate('Boards'); // Navigate to Boards where users can save/upload
               } catch (error) {
@@ -410,7 +410,7 @@ ${post.image_url || ''}` : (post.image_url || ''),
           <TouchableOpacity 
             style={styles.navIcon} 
             onPress={() => {
-              // ✅ SAFE NAVIGATION: Add error handling for ColorWheel route
+              // SAFE NAVIGATION: Add error handling for ColorWheel route
               try {
                 navigation.navigate('ColorWheel');
               } catch (error) {

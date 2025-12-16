@@ -85,10 +85,10 @@ export const styles = StyleSheet.create({
 
   // Color Wheel Styles
   wheelContainer: {
-    alignItems: 'center', // ✅ Removed position: 'relative' - not needed anymore
+    alignItems: 'center', // Removed position: 'relative' - not needed anymore
   },
   cameraButtonsContainer: {
-    marginTop: 16, // ✅ Use margin instead of absolute positioning
+    marginTop: 16, // Use margin instead of absolute positioning
     flexDirection: 'row',
     justifyContent: 'center',
     paddingVertical: 8,

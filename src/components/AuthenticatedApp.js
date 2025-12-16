@@ -4,7 +4,7 @@ import { View, TouchableOpacity, Text, StyleSheet, Platform } from 'react-native
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import PropTypes from 'prop-types';
-// ✅ Use shared helper to avoid duplicate code
+// Use shared helper to avoid duplicate code
 import { isDebugMode } from '../utils/expoConfigHelper';
 
 // Screen imports
@@ -79,7 +79,7 @@ const AuthenticatedApp = ({ user, handleLogout }) => {
           component={ColorWheelScreen}
           options={{
             title: 'Color Wheel',
-            headerTitle: '🎨 Fashion Color Wheel',
+            headerTitle: 'Fashion Color Wheel',
             tabBarIcon: renderTabIcon('ColorWheel'),
           }}
         />
@@ -88,7 +88,7 @@ const AuthenticatedApp = ({ user, handleLogout }) => {
           component={BoardsScreen}
           options={{
             title: 'Boards',
-            headerTitle: '📋 My Boards',
+            headerTitle: 'My Boards',
             tabBarIcon: renderTabIcon('Boards'),
           }}
         />
@@ -97,7 +97,7 @@ const AuthenticatedApp = ({ user, handleLogout }) => {
           component={CommunityFeedScreen}
           options={{
             title: 'Community',
-            headerTitle: '👥 Community',
+            headerTitle: 'Community',
             tabBarIcon: renderTabIcon('Community'),
           }}
         />
@@ -105,7 +105,7 @@ const AuthenticatedApp = ({ user, handleLogout }) => {
           name="Settings"
           options={{
             title: 'Settings',
-            headerTitle: '⚙️ Settings',
+            headerTitle: 'Settings',
             tabBarIcon: renderTabIcon('Settings'),
             headerRight: renderLogoutButton,
           }}

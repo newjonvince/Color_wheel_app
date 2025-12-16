@@ -12,13 +12,13 @@ export const getSafeExpoExtra = () => {
     if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
       return expoConfig.extra;
     }
-    // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+    // CRASH FIX: Use typeof check to prevent ReferenceError in production
     // Only warn in development to avoid console noise in production
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
       console.warn('getSafeExpoExtra: expoConfig missing or malformed, using defaults');
     }
   } catch (error) {
-    // ✅ CRASH FIX: Use typeof check to prevent ReferenceError in production
+    // CRASH FIX: Use typeof check to prevent ReferenceError in production
     if (typeof __DEV__ !== 'undefined' && __DEV__) {
       console.warn('getSafeExpoExtra: unable to read expoConfig safely', error);
     }

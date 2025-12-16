@@ -1,5 +1,5 @@
 // utils/crashReporting.js - Crash reporting utility with Sentry integration
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugMode = null;
 let _isProduction = null;
 

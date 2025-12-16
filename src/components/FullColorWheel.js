@@ -2,7 +2,7 @@
 // Canva-style multi-handle color wheel with Skia + Reanimated
 // Crash-safe: no non-serializable captures inside worklets (no Set/refs); hex conversion on JS thread
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
   if (_isDebugModeValue === null) {
@@ -49,7 +49,7 @@ import { hslToHex, hexToHsl } from '../utils/optimizedColor';
 
 let Canvas, SkiaCircle, SweepGradient, RadialGradient, Paint, vec;
 try {
-  // ✅ SIMPLIFIED: Universal Skia loading (works on all platforms)
+  // SIMPLIFIED: Universal Skia loading (works on all platforms)
   const Skia = require('@shopify/react-native-skia');
   Canvas = Skia.Canvas;
   SkiaCircle = Skia.Circle;
@@ -63,7 +63,7 @@ try {
     console.log('Skia module load failed on', Platform.OS + ':', e.message);
   }
   
-  // ✅ PROPER FALLBACK: Functional color picker UI
+  // PROPER FALLBACK: Functional color picker UI
   const FallbackColorWheel = ({ style, children, ...props }) => (
     <View style={[style, {
       backgroundColor: '#f0f0f0',
@@ -123,7 +123,7 @@ import { SCHEME_OFFSETS, SCHEME_COUNTS } from '../constants/colorWheelConstants'
 export { SCHEME_OFFSETS, SCHEME_COUNTS };
 
 // JS helper functions for worklet callbacks (defined at top-level for performance)
-// ✅ Don't pass ref to worklet - use callback instead
+// Don't pass ref to worklet - use callback instead
 const addFreedIndexCallback = (freedRef) => (idx) => {
   freedRef.current.add(idx);
 };
@@ -185,10 +185,10 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   const freed = useRef(new Set(freedIndices || []));                      // JS-only
   const freedIdxSV = useSharedValue((freedIndices || []).slice());        // UI-thread safe (array)
   
-  // ✅ Create callback that doesn't pass ref to worklet
+  // Create callback that doesn't pass ref to worklet
   const addFreedIndex = useCallback(addFreedIndexCallback(freed), []);
   
-  // ✅ Throttling for worklet memory leak prevention
+  // Throttling for worklet memory leak prevention
   const lastEmitTime = useSharedValue(0);
 
   // Precomputed hue sweep
@@ -296,7 +296,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   const emitPalette = (phase = 'change') => {
     'worklet';
     try {
-      // ✅ THROTTLING: Prevent excessive emissions for worklet memory leak prevention
+      // THROTTLING: Prevent excessive emissions for worklet memory leak prevention
       const now = Date.now();
       const THROTTLE_MS = 16; // ~60fps throttling
       
@@ -350,7 +350,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   // Choose nearest handle
   const nearestHandle = (x, y) => {
     'worklet';
-    // ✅ WORKLET FIX: Safe access to constants in worklet context
+    // WORKLET FIX: Safe access to constants in worklet context
     const c = (typeof SCHEME_COUNTS !== 'undefined' && SCHEME_COUNTS && SCHEME_COUNTS[scheme]) ? SCHEME_COUNTS[scheme] : 1;
     let best = 0, bestDist = 1e9;
     for (let i=0;i<c;i++) {
@@ -400,7 +400,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       } else if (linked && (scheme === 'analogous' || scheme === 'triadic' || scheme === 'tetradic' || scheme === 'split-complementary')) {
         // Synchronized movement for multi-handle schemes
         const baseAngle = deg;
-        // ✅ WORKLET FIX: Capture constants in worklet-safe way
+        // WORKLET FIX: Capture constants in worklet-safe way
         const schemeOffsets = (typeof SCHEME_OFFSETS !== 'undefined' && SCHEME_OFFSETS && SCHEME_OFFSETS[scheme]) ? SCHEME_OFFSETS[scheme] : [0];
         const handleCount = (typeof SCHEME_COUNTS !== 'undefined' && SCHEME_COUNTS && SCHEME_COUNTS[scheme]) ? SCHEME_COUNTS[scheme] : 1;
         
@@ -417,7 +417,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
         for (let k = 1; k < c; k++) {
           const freedArray = Array.isArray(freedIdxSV.value) ? freedIdxSV.value : [];
           if (freedArray.indexOf(k) === -1) {
-            // ✅ Add extra safety for worklet context
+            // Add extra safety for worklet context
             const schemeOffsets = (SCHEME_OFFSETS && SCHEME_OFFSETS[scheme]) ? SCHEME_OFFSETS[scheme] : [0];
             const offset = k < schemeOffsets.length ? schemeOffsets[k] : 0;
             handleAngles[k].value = mod(deg + offset, 360);
@@ -483,7 +483,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   useImperativeHandle(ref, () => ({
     setActiveHandleHSL: (h,s,l) => {
       try {
-        // ✅ FIX: Safe access to constants and shared values
+        // FIX: Safe access to constants and shared values
         const currentScheme = scheme; // Capture scheme prop
         const schemeCount = (typeof SCHEME_COUNTS !== 'undefined' && SCHEME_COUNTS && SCHEME_COUNTS[currentScheme]) ? SCHEME_COUNTS[currentScheme] : 1;
         const idx = Math.min(Math.max(activeIdx.value, 0), schemeCount - 1);

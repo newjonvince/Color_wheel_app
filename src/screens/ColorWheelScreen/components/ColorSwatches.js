@@ -3,7 +3,7 @@ import React, { memo, useCallback } from 'react';
 import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import PropTypes from 'prop-types';
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
   if (_isDebugModeValue === null) {
@@ -27,20 +27,20 @@ export const ColorSwatches = React.memo(({
   schemeColors,
   selectedScheme,
   activeIdx,
-  onSwatchPress, // ✅ New prop for handling swatch selection
+  onSwatchPress, // New prop for handling swatch selection
 }) => {
   const schemeTitle = getSchemeDisplayName(selectedScheme);
 
-  // ✅ Handle swatch press with validation
+  // Handle swatch press with validation
   const handleSwatchPress = useCallback((color, index) => {
     if (onSwatchPress && typeof onSwatchPress === 'function') {
       try {
         onSwatchPress(color, index);
         if (IS_DEBUG_MODE()) {
-          console.log(`🎨 Swatch selected: ${color} at index ${index}`);
+          console.log(`Swatch selected: ${color} at index ${index}`);
         }
       } catch (error) {
-        console.error('❌ Error in swatch press handler:', error);
+        console.error('Error in swatch press handler:', error);
       }
     }
   }, [onSwatchPress]);
@@ -81,7 +81,7 @@ export const ColorSwatches = React.memo(({
   );
 });
 
-// ✅ PropTypes validation for development safety
+// PropTypes validation for development safety
 ColorSwatches.propTypes = {
   selectedColor: PropTypes.string.isRequired,
   schemeColors: PropTypes.arrayOf(PropTypes.string).isRequired,

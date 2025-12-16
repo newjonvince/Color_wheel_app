@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugMode = null;
 const getIsDebugMode = () => {
   if (_isDebugMode === null) {
@@ -20,18 +20,18 @@ const FALLBACK_MAX_ENTRIES = 100;
 
 /**
  * Safe AsyncStorage wrapper with enhanced error handling for iOS production crashes
- * ✅ SINGLETON FIX: Proper singleton pattern implementation
+ * SINGLETON FIX: Proper singleton pattern implementation
  */
 class SafeAsyncStorage {
   static instance = null;
   
   constructor() {
-    // ✅ SINGLETON FIX: Private-ish constructor - prevent direct instantiation
+    // SINGLETON FIX: Private-ish constructor - prevent direct instantiation
     if (SafeAsyncStorage.instance) {
       throw new Error('Use SafeAsyncStorage.getInstance() instead of new SafeAsyncStorage()');
     }
     
-    // ✅ Initialize instance properties
+    // Initialize instance properties
     this.isAvailable = null;
     this.initPromise = null;
     this.fallbackStorage = new Map();
@@ -46,9 +46,9 @@ class SafeAsyncStorage {
   }
 
   static getInstance({ forceReset = false } = {}) {
-    // ✅ SINGLETON FIX: Proper singleton factory method
+    // SINGLETON FIX: Proper singleton factory method
     if (forceReset && SafeAsyncStorage.instance) {
-      // ✅ RACE CONDITION FIX: Clear cached initialization state on reset
+      // RACE CONDITION FIX: Clear cached initialization state on reset
       SafeAsyncStorage.instance.initPromise = null;
       SafeAsyncStorage.instance.isAvailable = null;
       // Clear the instance to allow recreation
@@ -56,7 +56,7 @@ class SafeAsyncStorage {
     }
     
     if (!SafeAsyncStorage.instance) {
-      // ✅ FIXED: Use new keyword properly
+      // FIXED: Use new keyword properly
       // Temporarily clear instance check for construction
       const wasInstance = SafeAsyncStorage.instance;
       SafeAsyncStorage.instance = null;  // Allow construction
@@ -113,7 +113,7 @@ class SafeAsyncStorage {
       return;
     }
     
-    // ✅ ABORT SIGNAL: Check if already aborted
+    // ABORT SIGNAL: Check if already aborted
     if (signal?.aborted) {
       throw new Error('SafeAsyncStorage initialization aborted');
     }
@@ -122,7 +122,7 @@ class SafeAsyncStorage {
       return this.initPromise;
     }
 
-    // ✅ RACE CONDITION FIX: Create and assign promise atomically
+    // RACE CONDITION FIX: Create and assign promise atomically
     this.initPromise = (async () => {
       try {
         await this._performInit(signal);
@@ -131,7 +131,7 @@ class SafeAsyncStorage {
         this.isAvailable = false;
         throw error;
       }
-      // ✅ RACE CONDITION FIX: Don't clear initPromise in finally block
+      // RACE CONDITION FIX: Don't clear initPromise in finally block
       // Let it remain for subsequent calls to return the same result
     })();
     
@@ -140,9 +140,9 @@ class SafeAsyncStorage {
 
   async _performInit(signal) {
     try {
-      console.log('🔧 Initializing SafeAsyncStorage...');
+      console.log('Initializing SafeAsyncStorage...');
 
-      // ✅ ABORT SIGNAL: Check if aborted before starting
+      // ABORT SIGNAL: Check if aborted before starting
       if (signal?.aborted) {
         throw new Error('SafeAsyncStorage initialization aborted');
       }
@@ -150,9 +150,9 @@ class SafeAsyncStorage {
       const testKey = '__safe_storage_test__';
       const testValue = 'test_' + Date.now();
 
-      console.log('📱 Testing AsyncStorage operations...');
+      console.log('Testing AsyncStorage operations...');
       const asyncTest = (async () => {
-        // ✅ ABORT SIGNAL: Check before each operation
+        // ABORT SIGNAL: Check before each operation
         if (signal?.aborted) {
           throw new Error('AsyncStorage test aborted');
         }
@@ -203,7 +203,7 @@ class SafeAsyncStorage {
   }
 
   _safeTimeout(asyncOperation, timeoutMs, operationName, signal) {
-    // ✅ CRITICAL FIX: Manual timeout management to prevent uncaught promise rejections
+    // CRITICAL FIX: Manual timeout management to prevent uncaught promise rejections
     return new Promise((resolve, reject) => {
       let settled = false;
       
@@ -217,7 +217,7 @@ class SafeAsyncStorage {
         }
       };
       
-      // ✅ ABORT SIGNAL: Set up abort listener
+      // ABORT SIGNAL: Set up abort listener
       let abortListener = null;
       if (signal) {
         abortListener = () => {
@@ -260,7 +260,7 @@ class SafeAsyncStorage {
           }
         }
       ).catch((error) => {
-        // ✅ SAFETY: Catch any remaining promise rejections
+        // SAFETY: Catch any remaining promise rejections
         if (!settled) {
           settled = true;
           cleanup();

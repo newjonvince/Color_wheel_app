@@ -23,7 +23,7 @@ export const useThrottledCallbacks = ({
   const pendingSelectedUpdate = useRef(null);
   const isGestureActive = useRef(false);
 
-  // ✅ SAFER: Race condition prevention in cleanup
+  // SAFER: Race condition prevention in cleanup
   const isMountedRef = useRef(true);
   
   useEffect(() => {
@@ -225,7 +225,7 @@ export const debounce = (func, delay) => {
     timeoutId = setTimeout(() => func.apply(this, args), delay);
   };
   
-  // ✅ MEMORY LEAK FIX: Add cancel method for proper cleanup
+  // MEMORY LEAK FIX: Add cancel method for proper cleanup
   debouncedFunction.cancel = () => {
     clearTimeout(timeoutId);
     timeoutId = null;

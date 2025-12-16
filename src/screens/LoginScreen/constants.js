@@ -1,7 +1,7 @@
 // Simple validation rules and constants for LoginScreen
 import { STORAGE_KEYS } from '../../constants/storageKeys';
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
   if (_isDebugModeValue === null) {
@@ -27,7 +27,7 @@ export const VALIDATION_RULES = {
   },
 };
 
-// ✅ Factory function instead of static object
+// Factory function instead of static object
 export const createDemoUser = () => ({
   id: 'demo-user',
   email: 'demo@fashioncolorwheel.com',
@@ -37,7 +37,7 @@ export const createDemoUser = () => ({
   gender: 'Prefer not to say',
   isLoggedIn: true,
   demo: true,
-  createdAt: new Date().toISOString(), // ✅ Fresh timestamp each call
+  createdAt: new Date().toISOString(), // Fresh timestamp each call
 });
 
 export const TIMEOUTS = {
@@ -127,12 +127,12 @@ export const withTimeout = (maybePromise, timeoutMs) => {
     ),
     timeoutPromise
   ]).finally(() => {
-    // ✅ Always cleanup
+    // Always cleanup
     if (timeoutId) clearTimeout(timeoutId);
   });
 };
 
-// 🔧 Whitelist of allowed properties
+// Whitelist of allowed properties
 const ALLOWED_USER_FIELDS = new Set([
   'id', '_id', 'userId',
   'email', 'username', 'name', 'displayName',
@@ -142,18 +142,18 @@ const ALLOWED_USER_FIELDS = new Set([
   'bio', 'preferences',
 ]);
 
-// 🔧 Safe property picker - prevents prototype pollution
+// Safe property picker - prevents prototype pollution
 const pickSafeProperties = (obj, allowedFields) => {
   if (!obj || typeof obj !== 'object') return {};
   
-  const safe = Object.create(null); // 🔧 No prototype!
+  const safe = Object.create(null); // No prototype!
   
   for (const key of allowedFields) {
-    // 🔧 Only copy own properties, not prototype properties
+    // Only copy own properties, not prototype properties
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
       const value = obj[key];
       
-      // 🔧 Deep validation for nested objects
+      // Deep validation for nested objects
       if (value && typeof value === 'object' && !Array.isArray(value)) {
         // For nested objects like birthday, validate structure
         safe[key] = JSON.parse(JSON.stringify(value));
@@ -166,7 +166,7 @@ const pickSafeProperties = (obj, allowedFields) => {
   return safe;
 };
 
-// 🔧 Secure response parser with property whitelisting
+// Secure response parser with property whitelisting
 export const parseLoginResponse = (response) => {
   // Handle various response structures
   let data;
@@ -216,7 +216,7 @@ export const parseLoginResponse = (response) => {
                 user?.accessToken ||
                 user?.jwt;
 
-  // 🔧 Validate user object has required fields
+  // Validate user object has required fields
   if (!user || typeof user !== 'object') {
     throw new Error('Invalid user data structure');
   }
@@ -225,10 +225,10 @@ export const parseLoginResponse = (response) => {
     throw new Error('User missing required identifier');
   }
 
-  // 🔧 Safely pick only whitelisted properties
+  // Safely pick only whitelisted properties
   const safeUser = pickSafeProperties(user, ALLOWED_USER_FIELDS);
   
-  // 🔧 Build normalized user with explicit properties
+  // Build normalized user with explicit properties
   const normalizedUser = Object.create(null); // No prototype
   
   normalizedUser.id = safeUser.id || safeUser._id || safeUser.userId;
@@ -244,12 +244,12 @@ export const parseLoginResponse = (response) => {
   
   normalizedUser.createdAt = safeUser.createdAt || new Date().toISOString();
 
-  // 🔧 Validate token format
+  // Validate token format
   if (!token || typeof token !== 'string') {
     throw new Error('Invalid token format');
   }
   
-  // 🔧 Basic JWT validation (should have 3 parts)
+  // Basic JWT validation (should have 3 parts)
   const tokenParts = token.split('.');
   if (tokenParts.length !== 3) {
     throw new Error('Invalid JWT token structure');
@@ -261,7 +261,7 @@ export const parseLoginResponse = (response) => {
   };
 };
 
-// ✅ Input sanitization to prevent injection attacks and DOS
+// Input sanitization to prevent injection attacks and DOS
 export const sanitizeEmail = (email) => {
   if (!email) return '';
   
@@ -269,8 +269,8 @@ export const sanitizeEmail = (email) => {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, '') // Remove whitespace
-    .replace(/[<>"&]/g, '') // ✅ Only remove HTML injection chars (keep ' and +)
-    .slice(0, 254); // ✅ RFC 5321 max length is 254
+    .replace(/[<>"&]/g, '') // Only remove HTML injection chars (keep ' and +)
+    .slice(0, 254); // RFC 5321 max length is 254
 };
 
 export const sanitizePassword = (password) => {
@@ -290,7 +290,7 @@ export const sanitizeInput = (input, maxLength = 255) => {
     .slice(0, maxLength);
 };
 
-// ✅ CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
+// CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
 const IS_DEBUG_MODE = () => getIsDebugMode();
 
 export const getErrorMessage = (error) => {
@@ -298,7 +298,7 @@ export const getErrorMessage = (error) => {
 
   let rawMessage = (error.message || String(error) || '').toLowerCase();
   
-  // ✅ SECURITY: Remove any potential credential leaks from error messages
+  // SECURITY: Remove any potential credential leaks from error messages
   rawMessage = rawMessage
     .replace(/password[:\s]*[^\s]+/gi, 'password: [REDACTED]')
     .replace(/email[:\s]*[^\s@]+@[^\s]+/gi, 'email: [REDACTED]')

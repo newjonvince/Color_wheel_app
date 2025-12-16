@@ -7,7 +7,7 @@ import PropTypes from 'prop-types';
 import { AppErrorBoundary } from '../../components/AppErrorBoundary';
 import { isValidHex6 } from '../../utils/colorValidation';
 
-// ✅ CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
   if (_isDebugModeValue === null) {
@@ -37,7 +37,7 @@ let ApiIntegrationStatus = null;
 try {
   CoolorsColorExtractor = require('../../components/CoolorsColorExtractor').default;
 } catch (error) {
-  console.warn('⚠️ CoolorsColorExtractor not available:', error.message);
+  console.warn('CoolorsColorExtractor not available:', error.message);
   // Fallback component
   CoolorsColorExtractor = () => null;
 }
@@ -45,7 +45,7 @@ try {
 try {
   ApiIntegrationStatus = require('../../components/ApiIntegrationStatus').default;
 } catch (error) {
-  console.warn('⚠️ ApiIntegrationStatus not available:', error.message);
+  console.warn('ApiIntegrationStatus not available:', error.message);
   // Fallback component
   ApiIntegrationStatus = () => null;
 }
@@ -97,7 +97,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
       if (result.success) {
         // Log API integration status only in debug mode
         if (IS_DEBUG_MODE()) {
-          console.log('✅ API Integration Status:', {
+          console.log('API Integration Status:', {
             authenticated: !!ApiService.getToken(),
             userDataLoaded: !!result.data,
             apiReady: true,
@@ -110,7 +110,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
       console.warn('Failed to load user data:', result.error);
 
       // Always log API integration issues for production debugging
-      console.error('❌ API Integration Issue:', {
+      console.error('API Integration Issue:', {
         error: result.error?.message ?? String(result.error),
         isAuthError: result.error?.isAuthError,
         hasToken: !!ApiService.getToken(),
@@ -120,9 +120,9 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
         onLogout();
       }
     } catch (error) {
-      console.error('❌ loadUserData threw:', error);
+      console.error('loadUserData threw:', error);
       // Always log API integration crashes for production debugging
-      console.error('❌ API Integration Crash Path:', {
+      console.error('API Integration Crash Path:', {
         message: error.message,
         stack: error.stack,
         hasToken: !!ApiService.getToken(),
@@ -135,7 +135,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     loadUserData(); 
   }, [loadUserData]));
 
-  // ✅ Enhanced memoized scheme colors with performance monitoring
+  // Enhanced memoized scheme colors with performance monitoring
   const schemeColors = useMemo(() => {
     const startTime = Date.now();
     
@@ -168,27 +168,27 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     resetScheme();
   }, [resetScheme]);
 
-  // ✅ Handle swatch press to select different palette colors
+  // Handle swatch press to select different palette colors
   const handleSwatchPress = useCallback((color, index) => {
     try {
       if (!isValidHex6(color)) {
-        console.warn('⚠️ Invalid color selected from swatch:', color);
+        console.warn('Invalid color selected from swatch:', color);
         return;
       }
 
-      // ✅ CRASH FIX: Use existing hook handlers instead of undefined setters
+      // CRASH FIX: Use existing hook handlers instead of undefined setters
       handleHexChange(color);
       
-      // ✅ VALIDATION FIX: Proper index validation - must be actual number >= 0
+      // VALIDATION FIX: Proper index validation - must be actual number >= 0
       if (typeof index === 'number' && !isNaN(index) && Number.isInteger(index) && index >= 0) {
         // Valid palette index - update active handle
         handleActiveHandleChange(index);
         
         if (IS_DEBUG_MODE()) {
-          console.log(`🎨 Color selected from swatch: ${color} (valid index: ${index})`);
+          console.log(`Color selected from swatch: ${color} (valid index: ${index})`);
         }
       } else if (index !== -1) { // -1 is used for selected color swatch, so it's expected
-        console.warn('⚠️ Invalid swatch index provided:', {
+        console.warn('Invalid swatch index provided:', {
           index,
           type: typeof index,
           isNaN: isNaN(index),
@@ -197,14 +197,14 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
       }
       
       if (IS_DEBUG_MODE() && (index === -1 || (typeof index === 'number' && !isNaN(index) && Number.isInteger(index) && index >= 0))) {
-        console.log(`🎨 Color selected from swatch: ${color} (index: ${index})`);
+        console.log(`Color selected from swatch: ${color} (index: ${index})`);
       }
     } catch (error) {
-      console.error('❌ Error handling swatch press:', error);
+      console.error('Error handling swatch press:', error);
     }
   }, [handleHexChange, handleActiveHandleChange]);
 
-  // ✅ Memoized color match object to prevent unnecessary recreations
+  // Memoized color match object to prevent unnecessary recreations
   const colorMatchData = useMemo(() => ({
     base_color: selectedColor,
     scheme: selectedScheme,
@@ -221,7 +221,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
       
       // Log color match saving only in debug mode
       if (IS_DEBUG_MODE()) {
-        console.log('💾 Saving Color Match:', {
+        console.log('Saving Color Match:', {
           baseColor: colorMatchData.base_color,
           scheme: colorMatchData.scheme,
           colorsCount: colorMatchData.colors.length,
@@ -233,7 +233,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
       
       // Log successful color match saves only in debug mode
       if (IS_DEBUG_MODE()) {
-        console.log('✅ Color Match Saved:', {
+        console.log('Color Match Saved:', {
           success: !!result,
           matchId: result?.id,
           timestamp: new Date().toISOString()
@@ -244,7 +244,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     } catch (error) {
       console.error('Failed to save color match:', error);
       // Always log color match save errors for production debugging
-      console.error('❌ Save Color Match Error:', {
+      console.error('Save Color Match Error:', {
         error: error.message,
         isAuthError: error.isAuthError,
         colorMatch: {
@@ -335,7 +335,7 @@ ColorWheelScreen.defaultProps = {
   onSaveColorMatch: () => {},
 };
 
-// ✅ Wrap with error boundary for production safety
+// Wrap with error boundary for production safety
 const ColorWheelScreenWithErrorBoundary = (props) => (
   <AppErrorBoundary>
     <ColorWheelScreen {...props} />

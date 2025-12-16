@@ -17,7 +17,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
 import ApiService from '../services/safeApiService';
-// ✅ Use shared helper to avoid duplicate code
+// Use shared helper to avoid duplicate code
 import { isDebugMode } from '../utils/expoConfigHelper';
 
 const IS_DEBUG_MODE = isDebugMode();
@@ -27,7 +27,7 @@ const safe = (fn, context = 'unknown') => (...args) => {
   try {
     return fn(...args);
   } catch (error) {
-    console.error(`🚨 CoolorsColorExtractor Error in ${context}:`, error);
+    console.error(`CoolorsColorExtractor Error in ${context}:`, error);
     console.error('Stack trace:', error.stack);
     console.error('Args:', args);
     throw error; // Re-throw to maintain error handling flow
@@ -154,7 +154,7 @@ export default function CoolorsColorExtractor({
       return await res.json(); // { hex }
     } catch (e) {
       // Always log critical color sampling errors for production debugging
-      console.error('🚨 CoolorsColorExtractor Error in callServerSample:', e);
+      console.error('CoolorsColorExtractor Error in callServerSample:', e);
       console.error('Stack trace:', e.stack);
       console.error('Args:', { imageId, normX, normY, radius });
       
@@ -250,7 +250,7 @@ export default function CoolorsColorExtractor({
       }
     } catch (e) {
       // Always log image processing errors for production debugging
-      console.error('🚨 CoolorsColorExtractor Error in processImage:', e);
+      console.error('CoolorsColorExtractor Error in processImage:', e);
       console.error('Stack trace:', e.stack);
       console.error('Asset:', asset);
       setServerPalette(fallbackPalette);
@@ -310,7 +310,7 @@ export default function CoolorsColorExtractor({
       }
     } catch (error) {
       // Always log critical ImagePicker errors in production
-      console.error('🚨 CoolorsColorExtractor Error in pickImage:', error);
+      console.error('CoolorsColorExtractor Error in pickImage:', error);
       console.error('ImagePicker Error Details:', {
         type: typeof error,
         name: error?.name,
@@ -322,7 +322,7 @@ export default function CoolorsColorExtractor({
       // Enhanced error reporting for native module failures
       const errorMessage = error?.message || 'Unknown error';
       if (errorMessage.includes('Swift') || errorMessage.includes('native')) {
-        console.error('🚨 Native module error detected - potential Swift runtime issue');
+        console.error('Native module error detected - potential Swift runtime issue');
       }
       
       Alert.alert('Error', 'Failed to select image');
@@ -366,7 +366,7 @@ export default function CoolorsColorExtractor({
     })();
   }, [initialImageUri, mode, onClose, processImage]);
 
-  // ✅ SAFETY FIX: Close server session on unmount with proper guards
+  // SAFETY FIX: Close server session on unmount with proper guards
   useEffect(() => {
     return () => {
       if (imageToken && ApiService.closeImageSession) {

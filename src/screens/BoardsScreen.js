@@ -12,27 +12,27 @@ const { width: screenWidth } = Dimensions.get('window');
 const boardWidth = (screenWidth - 45) / 2; // 2 columns with margins
 
 const MAIN_FOLDERS = [
-  { id: 'private', name: 'Private', icon: '🔒', description: 'Only visible to you' },
-  { id: 'public', name: 'Public', icon: '🌍', description: 'Visible to everyone' },
+  { id: 'private', name: 'Private', icon: '', description: 'Only visible to you' },
+  { id: 'public', name: 'Public', icon: '', description: 'Visible to everyone' },
 ];
 
 // Generate scheme folders with proper icons from centralized definitions
 const SCHEME_ICONS = {
-  complementary: '🎨',
-  analogous: '🌈', 
-  triadic: '🔺',
-  tetradic: '⬜',
-  monochromatic: '🎯',
-  compound: '🔀',
-  shades: '🌑',
-  tints: '🌕',
-  'split-complementary': '🎭'
+  complementary: '',
+  analogous: '', 
+  triadic: '',
+  tetradic: '',
+  monochromatic: '',
+  compound: '',
+  shades: '',
+  tints: '',
+  'split-complementary': ''
 };
 
 const SCHEME_FOLDERS = getAllSchemes().map(scheme => ({
   id: scheme.key,
   name: scheme.name,
-  icon: SCHEME_ICONS[scheme.key] || '🎨',
+  icon: SCHEME_ICONS[scheme.key] || '',
   description: scheme.description
 }));
 
@@ -303,14 +303,14 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
                 <Text style={styles.colorMatchBaseColor}>Base: {item.baseColor}</Text>
                 <View style={styles.privacyIndicator}>
                   <Text style={styles.privacyText}>
-                    {item.privacy === 'private' ? '🔒 Private' : '🌍 Public'}
+                    {item.privacy === 'private' ? 'Private' : 'Public'}
                   </Text>
                 </View>
               </View>
             )}
             ListEmptyComponent={() => (
               <View style={styles.emptyBoard}>
-                <Text style={styles.emptyBoardIcon}>🎨</Text>
+                <Text style={styles.emptyBoardIcon}></Text>
                 <Text style={styles.emptyBoardText}>No color matches yet</Text>
                 <Text style={styles.emptyBoardSubtext}>
                   Save color combinations from the Color Wheel or upload images
@@ -547,7 +547,7 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
                 onPress={extractedPalette ? handleSaveExtractedPalette : handleUploadImage}
               >
                 <Text style={styles.uploadButtonText}>
-                  {extractedPalette ? '💾 Save Palette' : '📷 Upload Image'}
+                  {extractedPalette ? 'Save Palette' : 'Upload Image'}
                 </Text>
               </TouchableOpacity>
             </View>

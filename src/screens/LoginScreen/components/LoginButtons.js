@@ -27,7 +27,7 @@ export default function LoginButtons({ loading = false, onLogin, onDemo, onSignU
         style={styles.gradientWrapper}
         accessibilityRole="button"
         accessibilityLabel={loading ? "Logging in, please wait" : "Log in"}
-        accessibilityState={{ disabled: loading, busy: loading }} // ✅ Add busy state
+        accessibilityState={{ disabled: loading, busy: loading }} // Add busy state
       >
         <LinearGradient
           colors={[optimizedColors.buttonStart, optimizedColors.buttonEnd]}
@@ -39,9 +39,9 @@ export default function LoginButtons({ loading = false, onLogin, onDemo, onSignU
             <View style={styles.activityIndicatorContainer}>
               <ActivityIndicator 
                 color={optimizedColors.textPrimary}
-                accessibilityLabel="Loading" // ✅ Label the spinner
+                accessibilityLabel="Loading" // Label the spinner
               />
-              <Text style={styles.activityIndicatorText}>Logging in...</Text> {/* ✅ Visual text too */}
+              <Text style={styles.activityIndicatorText}>Logging in...</Text> {/* Visual text too */}
             </View>
           ) : (
             <Text style={styles.primaryButtonText}>Log in</Text>
