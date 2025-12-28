@@ -139,9 +139,9 @@ class SafeApiService {
     this.isReady = false;
     this.initializationFailed = false;
     this.initializationError = null;
-    
+
     // FIX: Create promise that handles async errors properly
-    this.readyPromise = this._initializeAsync();
+    this.readyPromise = null;
     
     // Token refresh race condition prevention
     this.isRefreshing = false;
@@ -165,7 +165,15 @@ class SafeApiService {
 
   // Expose ready promise for app bootstrap
   get ready() {
-    return this.readyPromise || Promise.resolve(false);  // safe fallback
+    if (this.isServiceReady()) {
+      return Promise.resolve(true);
+    }
+
+    if (!this.readyPromise) {
+      this.readyPromise = this._initializeAsync();
+    }
+
+    return this.readyPromise;
   }
 
   // SAFER: Comprehensive response validation

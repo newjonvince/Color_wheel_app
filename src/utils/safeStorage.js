@@ -1,6 +1,5 @@
 // utils/safeStorage.js - Secure storage with expo-secure-store and proper initialization
 import { Platform, Alert } from 'react-native';
-import Constants from 'expo-constants';
 import * as SecureStore from 'expo-secure-store';
 import { safeAsyncStorage } from './safeAsyncStorage';
 

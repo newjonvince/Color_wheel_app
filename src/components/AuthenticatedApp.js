@@ -18,7 +18,13 @@ import TabIcon from './TabIcon';
 
 const Tab = createBottomTabNavigator();
 
-const IS_DEBUG_MODE = isDebugMode();
+let _isDebugModeValue = null;
+const IS_DEBUG_MODE = () => {
+  if (_isDebugModeValue === null) {
+    _isDebugModeValue = isDebugMode();
+  }
+  return _isDebugModeValue;
+};
 
 /**
  * AuthenticatedApp - Main app navigation for authenticated users

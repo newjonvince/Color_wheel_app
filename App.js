@@ -3,10 +3,25 @@ import 'react-native-gesture-handler';
 
 // Configure LogBox FIRST - before any other imports or code
 import { LogBox } from 'react-native';
-import Constants from 'expo-constants';
+
+let _expoConstants = undefined;
+const getExpoConstants = () => {
+  if (_expoConstants !== undefined) return _expoConstants;
+  try {
+    _expoConstants = require('expo-constants')?.default ?? null;
+  } catch (_error) {
+    _expoConstants = null;
+  }
+  return _expoConstants;
+};
+
+const getExpoExtra = () => {
+  const Constants = getExpoConstants();
+  return Constants?.expoConfig?.extra || {};
+};
 
 // Configure LogBox immediately at app entry point
-const extra = Constants.expoConfig?.extra || {};
+const extra = getExpoExtra();
 const IS_PROD = extra.EXPO_PUBLIC_NODE_ENV === 'production';
 
 if (IS_PROD) {
@@ -360,7 +375,7 @@ function FashionColorWheelApp() {
             await new Promise(resolve => setTimeout(resolve, 0));
             
             const basicChecks = {
-              hasConstants: typeof Constants !== 'undefined',
+              hasConstants: !!getExpoConstants(),
               hasAsyncStorage: typeof AsyncStorage !== 'undefined',
               hasNetInfo: typeof NetInfo !== 'undefined',
               platform: Platform.OS,
@@ -829,7 +844,7 @@ function FashionColorWheelApp() {
                   memoryUsage: typeof performance !== 'undefined' ? performance.memory : 'unavailable',
                   userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unavailable',
                   platform: typeof Platform !== 'undefined' ? Platform.OS : 'unknown',
-                  constants: typeof Constants !== 'undefined' ? 'available' : 'missing'
+                  constants: getExpoConstants() ? 'available' : 'missing'
                 };
                 
                 const hasIssues = systemCheck.constants === 'missing';

@@ -286,11 +286,87 @@ const validateAppConfig = (config) => {
 };
 
 // Memoized configuration getter
-export const APP_CONFIG = createAppConfig();
+let _appConfig = null;
+const getAppConfig = () => {
+  if (_appConfig) return _appConfig;
+  _appConfig = createAppConfig();
+  return _appConfig;
+};
+
+export const APP_CONFIG = new Proxy({}, {
+  get: (_target, prop) => {
+    const cfg = getAppConfig();
+    return cfg?.[prop];
+  },
+  set: (_target, prop, value) => {
+    const cfg = getAppConfig();
+    try {
+      cfg[prop] = value;
+      return true;
+    } catch (_) {
+      return false;
+    }
+  },
+  has: (_target, prop) => {
+    const cfg = getAppConfig();
+    return prop in cfg;
+  },
+  ownKeys: () => {
+    const cfg = getAppConfig();
+    return Reflect.ownKeys(cfg);
+  },
+  getOwnPropertyDescriptor: (_target, prop) => {
+    const cfg = getAppConfig();
+    const desc = Object.getOwnPropertyDescriptor(cfg, prop);
+    if (desc) return desc;
+    return {
+      configurable: true,
+      enumerable: true,
+      writable: false,
+      value: cfg?.[prop]
+    };
+  },
+});
 
 // Optimized initialization with error handling and performance monitoring
 let isInitialized = false;
 let initializationPromise = null;
+
+let backgroundTasksStarted = false;
+const startBackgroundTasks = () => {
+  if (backgroundTasksStarted) return;
+  backgroundTasksStarted = true;
+
+  if (typeof setTimeout !== 'undefined') {
+    setTimeout(() => {
+      try {
+        // Initialize cleanup on module load
+        setupCacheCleanup();
+      } catch (error) {
+        try {
+          log.warn('Cache cleanup setup failed:', error?.message || error);
+        } catch (_) {
+          console.warn('Cache cleanup setup failed:', error?.message || error);
+        }
+      }
+
+      try {
+        // Set up AppState listener
+        if (typeof AppState !== 'undefined' && AppState?.addEventListener) {
+          if (!appStateSubscription) {
+            appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
+          }
+        }
+      } catch (error) {
+        try {
+          log.warn('AppState listener setup failed:', error?.message || error);
+        } catch (_) {
+          console.warn('AppState listener setup failed:', error?.message || error);
+        }
+      }
+    }, 0);
+  }
+};
 
 export const initializeAppConfig = () => {
   // Return immediately if already initialized
@@ -342,6 +418,16 @@ export const initializeAppConfig = () => {
             performance: APP_CONFIG.performance.ENABLED,
           });
         }
+
+      try {
+        startBackgroundTasks();
+      } catch (error) {
+        try {
+          log.warn('Background tasks start failed:', error?.message || error);
+        } catch (_) {
+          console.warn('Background tasks start failed:', error?.message || error);
+        }
+      }
       
       isInitialized = true;
       
@@ -486,9 +572,6 @@ export const stopCacheCleanup = () => {
   }
 };
 
-// Initialize cleanup on module load
-setupCacheCleanup();
-
 // APP STATE MANAGEMENT: Handle background/foreground transitions
 let appStateSubscription = null;
 
@@ -507,11 +590,6 @@ const handleAppStateChange = (nextAppState) => {
     }
   }
 };
-
-// Set up AppState listener
-if (typeof AppState !== 'undefined' && AppState.addEventListener) {
-  appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
-}
 
 // Export function to clean up AppState listener
 export const cleanupAppStateListener = () => {
@@ -535,8 +613,9 @@ export const clearAllCaches = () => {
 export const stopCacheCleanupInterval = stopCacheCleanup;
 
 // Performance monitoring utilities (development only)
-export const performanceUtils = IS_DEV() ? {
+export const performanceUtils = {
   startTimer: (label) => {
+    if (!IS_DEV()) return () => 0;
     const startTime = Date.now();
     return () => {
       const duration = Date.now() - startTime;
@@ -546,8 +625,9 @@ export const performanceUtils = IS_DEV() ? {
       return duration;
     };
   },
-  
+
   measureAsync: async (label, asyncFn) => {
+    if (!IS_DEV()) return asyncFn();
     const endTimer = performanceUtils.startTimer(label);
     try {
       const result = await asyncFn();
@@ -558,9 +638,6 @@ export const performanceUtils = IS_DEV() ? {
       throw error;
     }
   }
-} : {
-  startTimer: () => () => 0,
-  measureAsync: async (label, asyncFn) => asyncFn()
 };
 
 // Memory management utilities
@@ -597,10 +674,10 @@ export const cleanupAppConfig = () => {
 
 // Export environment flags for other modules
 export const ENV = {
-  IS_DEV: IS_DEV(),
-  IS_PROD: IS_PROD(),
-  PLATFORM: Platform.OS,
-  VERSION: Platform.Version,
+  get IS_DEV() { return IS_DEV(); },
+  get IS_PROD() { return IS_PROD(); },
+  get PLATFORM() { return Platform.OS; },
+  get VERSION() { return Platform.Version; },
 };
 
 // Default export for convenience
