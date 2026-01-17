@@ -1,7 +1,21 @@
 // utils/safeStorage.js - Secure storage with expo-secure-store and proper initialization
 import { Platform, Alert } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
+// CRASH FIX: Lazy-load expo-secure-store to prevent native bridge access at module load time
+// This prevents crashes when the module is imported before React Native bridge is ready (~300ms after launch)
 import { safeAsyncStorage } from './safeAsyncStorage';
+
+// Lazy expo-secure-store getter to avoid module-load-time native bridge access
+let _secureStoreModule = undefined;
+const getSecureStore = () => {
+  if (_secureStoreModule !== undefined) return _secureStoreModule;
+  try {
+    _secureStoreModule = require('expo-secure-store');
+  } catch (error) {
+    console.warn('safeStorage: expo-secure-store load failed', error?.message);
+    _secureStoreModule = null;
+  }
+  return _secureStoreModule;
+};
 
 // CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
@@ -121,7 +135,7 @@ const CONFIG = {
 // Advanced SafeStorage class with proper security separation
 class OptimizedSafeStorage {
   constructor() {
-    this.secureStore = SecureStore;
+    this.secureStore = null; // CRASH FIX: Defer SecureStore access until init()
     this.isSecureStoreAvailable = false;
     this.isInitialized = false;
     this.asyncStorageUnavailable = false; // Track AsyncStorage availability (permanent flag)
@@ -147,6 +161,11 @@ class OptimizedSafeStorage {
   async init({ signal } = {}) {
     if (this.isInitialized) {
       return;
+    }
+
+    // CRASH FIX: Load SecureStore lazily at init time, not at module load time
+    if (!this.secureStore) {
+      this.secureStore = getSecureStore();
     }
 
     // FIX: Check if initialization was aborted

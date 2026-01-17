@@ -12,10 +12,21 @@ import {
 } from 'react-native';
 import { StyleSheet } from 'react-native';
 import { safeStorage } from '../utils/safeStorage';
-// Use shared helper to avoid duplicate code
-import { isDebugMode } from '../utils/expoConfigHelper';
-
-const IS_DEBUG_MODE = isDebugMode();
+// CRASH FIX: Use lazy getter to avoid calling isDebugMode() at module load time
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('AppErrorBoundary: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
+const IS_DEBUG_MODE = getIsDebugMode;
 
 class AppErrorBoundary extends React.Component {
   static MAX_ERRORS_PER_MINUTE = 5;

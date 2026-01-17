@@ -45,44 +45,17 @@ export const initializeCrashReporting = async (options = {}) => {
     return { success: true, alreadyInitialized: true };
   }
 
-  try {
-    // Only initialize Sentry in production
-    if (getIsProduction()) {
-      try {
-        // Dynamic import to avoid bundling issues if Sentry isn't installed
-        const SentryModule = await import('@sentry/react-native');
-        Sentry = SentryModule;
-        
-        // Initialize with default options if not already done
-        if (options.dsn) {
-          Sentry.init({
-            dsn: options.dsn,
-            enableAutoSessionTracking: true,
-            sessionTrackingIntervalMillis: 30000,
-            ...options,
-          });
-        }
-        
-        isInitialized = true;
-        console.log('[CrashReporting] Sentry initialized successfully');
-        return { success: true };
-      } catch (sentryError) {
-        // Sentry not available - graceful degradation
-        console.warn('[CrashReporting] Sentry not available:', sentryError.message);
-        isInitialized = true; // Mark as initialized to prevent retries
-        return { success: false, error: 'Sentry not available' };
-      }
-    } else {
-      if (getIsDebugMode()) {
-        console.log('[CrashReporting] Skipping Sentry initialization in development');
-      }
-      isInitialized = true;
-      return { success: true, skipped: true };
-    }
-  } catch (error) {
-    console.error('[CrashReporting] Initialization failed:', error);
-    return { success: false, error: error.message };
+  // CRASH FIX: Completely disable Sentry loading to prevent native module crashes
+  // The @sentry/react-native package requires native module linking which may not be
+  // properly configured. Skip all Sentry initialization to ensure app stability.
+  // TODO: Re-enable Sentry after proper native module configuration with EAS Build
+  
+  if (getIsDebugMode()) {
+    console.log('[CrashReporting] Sentry disabled - using console logging only');
   }
+  
+  isInitialized = true;
+  return { success: true, skipped: true, reason: 'Sentry disabled for stability' };
 };
 
 /**

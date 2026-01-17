@@ -1,10 +1,21 @@
 // utils/moduleLoader.js - Safe module loading with error handling
 import React from 'react';
 import { View, Text, TouchableOpacity, Platform } from 'react-native';
-// Use shared helper to avoid duplicate code
-import { isDebugMode } from './expoConfigHelper';
-
-const IS_DEBUG_MODE = isDebugMode();
+// CRASH FIX: Use lazy getter to avoid calling isDebugMode() at module load time
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('./expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('moduleLoader: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
+const IS_DEBUG_MODE = getIsDebugMode;
 
 // Safe module loading helper with validation
 const loadModule = (modulePath, exportName, fallback = null) => {

@@ -13,14 +13,71 @@
 //
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, Alert, StyleSheet, Dimensions, PanResponder } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
-import * as Haptics from 'expo-haptics';
+// CRASH FIX: Lazy-load expo modules to prevent native bridge access at module load time
 import ApiService from '../services/safeApiService';
-// Use shared helper to avoid duplicate code
-import { isDebugMode } from '../utils/expoConfigHelper';
 
-const IS_DEBUG_MODE = isDebugMode();
+// Lazy expo-image-picker getter
+let _ImagePicker = null;
+const getImagePicker = () => {
+  if (_ImagePicker) return _ImagePicker;
+  try {
+    _ImagePicker = require('expo-image-picker');
+  } catch (error) {
+    console.warn('CoolorsColorExtractor: expo-image-picker load failed', error?.message);
+    _ImagePicker = {
+      launchImageLibraryAsync: () => Promise.resolve({ canceled: true }),
+      requestMediaLibraryPermissionsAsync: () => Promise.resolve({ status: 'denied' }),
+    };
+  }
+  return _ImagePicker;
+};
+
+// Lazy expo-image-manipulator getter
+let _ImageManipulator = null;
+const getImageManipulator = () => {
+  if (_ImageManipulator) return _ImageManipulator;
+  try {
+    _ImageManipulator = require('expo-image-manipulator');
+  } catch (error) {
+    console.warn('CoolorsColorExtractor: expo-image-manipulator load failed', error?.message);
+    _ImageManipulator = {
+      manipulateAsync: (uri) => Promise.resolve({ uri }),
+      SaveFormat: { JPEG: 'jpeg' },
+    };
+  }
+  return _ImageManipulator;
+};
+
+// Lazy expo-haptics getter
+let _Haptics = null;
+const getHaptics = () => {
+  if (_Haptics) return _Haptics;
+  try {
+    _Haptics = require('expo-haptics');
+  } catch (error) {
+    console.warn('CoolorsColorExtractor: expo-haptics load failed', error?.message);
+    _Haptics = {
+      impactAsync: () => Promise.resolve(),
+      ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
+    };
+  }
+  return _Haptics;
+};
+// CRASH FIX: Use lazy getter to avoid calling isDebugMode() at module load time
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('CoolorsColorExtractor: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
+const IS_DEBUG_MODE = getIsDebugMode;
 
 // Safe wrapper to log real errors + stack traces from component layer
 const safe = (fn, context = 'unknown') => (...args) => {
@@ -38,10 +95,10 @@ const safe = (fn, context = 'unknown') => (...args) => {
 const prepareAssetForUpload = async (asset) => {
   try {
     // Re-encode to JPEG to avoid HEIC 415 from server
-    const manip = await ImageManipulator.manipulateAsync(
+    const manip = await getImageManipulator().manipulateAsync(
       asset.uri,
       [], // no transforms
-      { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
+      { compress: 0.9, format: getImageManipulator().SaveFormat.JPEG }
     );
     return { ...asset, uri: manip.uri };
   } catch (error) {
@@ -263,13 +320,14 @@ export default function CoolorsColorExtractor({
   const pickImage = useCallback(async () => {
     try {
       // Enhanced type safety for ImagePicker to prevent Swift runtime crashes
+      const ImagePicker = getImagePicker();
       if (!ImagePicker || typeof ImagePicker.launchImageLibraryAsync !== 'function') {
         throw new Error('ImagePicker module not available');
       }
 
       // Validate MediaTypeOptions exists and has Images property
-      const mediaTypeImages = ImagePicker.MediaTypeOptions?.Images || 
-                             ImagePicker.MediaTypeOptions?.['Images'] || 
+      const mediaTypeImages = getImagePicker().MediaTypeOptions?.Images || 
+                             getImagePicker().MediaTypeOptions?.['Images'] || 
                              'Images';
 
       // Safe ImagePicker options with comprehensive type validation
@@ -283,7 +341,7 @@ export default function CoolorsColorExtractor({
         exif: false,
       };
       
-      const result = await ImagePicker.launchImageLibraryAsync(pickerOptions);
+      const result = await getImagePicker().launchImageLibraryAsync(pickerOptions);
       
       // Enhanced result validation to prevent Swift collection iterator failures
       if (result && 
@@ -338,8 +396,8 @@ export default function CoolorsColorExtractor({
       }
       // Honor `mode` and request permissions
       const perm = await (mode === 'camera'
-        ? ImagePicker.requestCameraPermissionsAsync()
-        : ImagePicker.requestMediaLibraryPermissionsAsync());
+        ? getImagePicker().requestCameraPermissionsAsync()
+        : getImagePicker().requestMediaLibraryPermissionsAsync());
       if (perm.status !== 'granted') {
         Alert.alert('Permission needed', mode === 'camera'
           ? 'Camera permission is required to take a photo.'
@@ -350,13 +408,13 @@ export default function CoolorsColorExtractor({
       // Safe ImagePicker calls with type validation
       const cameraOptions = { quality: 0.9 };
       const libraryOptions = { 
-        mediaTypes: ImagePicker.MediaTypeOptions?.Images || 'Images', 
+        mediaTypes: getImagePicker().MediaTypeOptions?.Images || 'Images', 
         quality: 0.9 
       };
       
       const result = await (mode === 'camera'
-        ? ImagePicker.launchCameraAsync(cameraOptions)
-        : ImagePicker.launchImageLibraryAsync(libraryOptions));
+        ? getImagePicker().launchCameraAsync(cameraOptions)
+        : getImagePicker().launchImageLibraryAsync(libraryOptions));
         
       // Safe array access with validation
       if (!result?.canceled && Array.isArray(result.assets) && result.assets.length > 0 && result.assets[0]) {
@@ -398,7 +456,7 @@ export default function CoolorsColorExtractor({
     const colorDelta = deltaE(hex, previousColor);
     if (colorDelta > 30) { // Threshold for haptic tick (RGB distance ~30)
       try {
-        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        await getHaptics().impactAsync(getHaptics().ImpactFeedbackStyle.Light);
       } catch (_) {} // Ignore haptic errors
       setPreviousColor(hex);
     }

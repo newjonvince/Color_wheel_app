@@ -1,6 +1,22 @@
 // hooks/useNetworkStatus.js - React Native network status hook using NetInfo
 import { useState, useEffect } from 'react';
-import NetInfo from '@react-native-community/netinfo';
+
+// CRASH FIX: Lazy-load NetInfo to prevent native bridge access at module load time
+let _NetInfo = null;
+const getNetInfo = () => {
+  if (_NetInfo) return _NetInfo;
+  try {
+    const mod = require('@react-native-community/netinfo');
+    _NetInfo = mod.default || mod;
+  } catch (error) {
+    console.warn('useNetworkStatus: NetInfo load failed', error?.message);
+    _NetInfo = {
+      fetch: () => Promise.resolve({ isConnected: true, isInternetReachable: true, type: 'unknown' }),
+      addEventListener: () => () => {},
+    };
+  }
+  return _NetInfo;
+};
 
 /**
  * Custom hook for network status monitoring using NetInfo
@@ -24,7 +40,7 @@ export const useNetworkStatus = () => {
     // Get initial network state
     const getInitialState = async () => {
       try {
-        const state = await NetInfo.fetch();
+        const state = await getNetInfo().fetch();
         setNetworkState({
           isConnected: state.isConnected ?? true,
           isInternetReachable: state.isInternetReachable ?? true,
@@ -44,7 +60,7 @@ export const useNetworkStatus = () => {
     getInitialState();
 
     // Subscribe to network state changes
-    const unsubscribe = NetInfo.addEventListener(state => {
+    const unsubscribe = getNetInfo().addEventListener(state => {
       setNetworkState({
         isConnected: state.isConnected ?? true,
         isInternetReachable: state.isInternetReachable ?? true,
@@ -83,7 +99,7 @@ export const useIsOffline = () => {
  */
 export const getNetworkStatus = async () => {
   try {
-    const state = await NetInfo.fetch();
+    const state = await getNetInfo().fetch();
     return {
       isConnected: state.isConnected ?? true,
       isInternetReachable: state.isInternetReachable ?? true,

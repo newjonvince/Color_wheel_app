@@ -1,5 +1,36 @@
 // utils/apiHelpers.ts - Typed API utility functions with request deduplication
-import Constants from 'expo-constants';
+// CRASH FIX: Removed direct import of expo-constants to prevent native bridge access at module load time
+// expo-constants is not used in this file - it was a dead import
+
+// CRASH FIX: Safe AbortController wrapper - not all React Native runtimes have AbortController
+const isAbortControllerAvailable = typeof AbortController !== 'undefined';
+
+const createSafeAbortController = (): AbortController => {
+  if (isAbortControllerAvailable) {
+    return new AbortController();
+  }
+  // Polyfill for environments without AbortController
+  let aborted = false;
+  const listeners: Array<() => void> = [];
+  return {
+    signal: {
+      get aborted() { return aborted; },
+      addEventListener: (type: string, handler: () => void) => { if (type === 'abort') listeners.push(handler); },
+      removeEventListener: (type: string, handler: () => void) => {
+        if (type === 'abort') {
+          const idx = listeners.indexOf(handler);
+          if (idx >= 0) listeners.splice(idx, 1);
+        }
+      },
+    },
+    abort: () => {
+      if (!aborted) {
+        aborted = true;
+        listeners.forEach(h => { try { h(); } catch (_) {} });
+      }
+    },
+  } as unknown as AbortController;
+};
 
 // LAZY LOADING: Avoid circular dependency with safeApiService
 let apiService: any = null;
@@ -61,14 +92,41 @@ import type {
   PaginatedResponse
 } from '../types/api';
 
-// Production-ready configuration
-const extra = Constants.expoConfig?.extra || {};
-const IS_DEBUG_MODE = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+// CRASH FIX: Lazy-load expo-constants to prevent native bridge access at module load time
+let _expoConstants: any = undefined;
+const getExpoConstants = (): any => {
+  if (_expoConstants !== undefined) return _expoConstants;
+  try {
+    _expoConstants = require('expo-constants')?.default ?? null;
+  } catch (error: any) {
+    console.warn('apiHelpers.ts: expo-constants load failed', error?.message);
+    _expoConstants = null;
+  }
+  return _expoConstants;
+};
+
+// Lazy getter for debug mode to avoid module-load-time native bridge access
+let _isDebugMode: boolean | null = null;
+const getIsDebugMode = (): boolean => {
+  if (_isDebugMode !== null) return _isDebugMode;
+  try {
+    const Constants = getExpoConstants();
+    const extra = Constants?.expoConfig?.extra || {};
+    _isDebugMode = !!extra.EXPO_PUBLIC_DEBUG_MODE;
+  } catch {
+    _isDebugMode = false;
+  }
+  return _isDebugMode;
+};
+
+// Production-ready configuration - now uses lazy getter
+const IS_DEBUG_MODE = (): boolean => getIsDebugMode();
 
 // Request deduplication to prevent duplicate API calls
 const inflightRequests = new Map<string, InflightRequest>();
 const retryPromises = new Map<string, Promise<any>>(); // Store retry promises for concurrent calls
 const REQUEST_TIMEOUT = 30000; // 30 seconds
+const MAX_CACHE_SIZE = 100; // MEMORY FIX: Prevent unbounded Map growth causing Hermes memory pressure
 
 /**
  * Deduplicated API call wrapper - prevents duplicate requests
@@ -112,11 +170,12 @@ const deduplicatedApiCall = async <T>(
   });
 
   // Create cancellation wrapper
+  // MEMORY FIX: Use { once: true } to auto-remove listener and prevent memory leaks
   const cancellationPromise = signal ? new Promise<never>((_, reject) => {
     signal.addEventListener('abort', () => {
       reject(new Error(`Request cancelled: ${key}`));
       inflightRequests.delete(key);
-    });
+    }, { once: true });
   }) : null;
 
   // Race between API call, timeout, and cancellation
@@ -125,6 +184,14 @@ const deduplicatedApiCall = async <T>(
   if (cancellationPromise) promises.push(cancellationPromise);
   
   const requestPromise = Promise.race(promises);
+
+  // MEMORY FIX: Enforce MAX_CACHE_SIZE to prevent unbounded growth
+  if (inflightRequests.size >= MAX_CACHE_SIZE) {
+    // Remove oldest entries (first 10% of cache)
+    const keysToRemove = Array.from(inflightRequests.keys()).slice(0, Math.ceil(MAX_CACHE_SIZE * 0.1));
+    keysToRemove.forEach(k => inflightRequests.delete(k));
+    logger.warn(`Pruned ${keysToRemove.length} stale requests from cache`);
+  }
 
   // Store promise with timestamp
   inflightRequests.set(key, {
@@ -205,7 +272,7 @@ export const safeApiCall = async <T>(
           const delay = Math.min(1000 * Math.pow(2, attempt), 3000);
           await new Promise(resolve => setTimeout(resolve, delay));
           
-          if (IS_DEBUG_MODE) {
+          if (IS_DEBUG_MODE()) {
             console.log(`Retrying API call (attempt ${attempt + 2}/${retryCount + 1}) after ${delay}ms`);
           }
         }
@@ -301,7 +368,7 @@ export const batchApiCalls = async <T>(
   try {
     if (failFast) {
       // Cancel remaining on first error
-      const controller = new AbortController();
+      const controller = createSafeAbortController();
       const results: T[] = [];
       
       try {
@@ -351,7 +418,7 @@ export const batchApiCalls = async <T>(
  * Request cancellation utilities
  */
 export const createCancellableRequest = (): CancellableRequest => {
-  const controller = new AbortController();
+  const controller = createSafeAbortController();
   return {
     signal: controller.signal,
     cancel: () => controller.abort(),
@@ -488,13 +555,37 @@ export const apiPatterns = {
   }
 };
 
-// Add periodic cleanup of stale requests
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, cached] of inflightRequests.entries()) {
-    if (now - cached.timestamp > REQUEST_TIMEOUT) {
-      logger.warn(`Cleaning up stale request: ${key}`);
-      inflightRequests.delete(key);
+// CRASH FIX: Replace global setInterval with managed cleanup system
+// Global intervals without cleanup can cause RCTFatal crashes when JS context changes
+// (e.g., after app resumes from background after hours)
+let staleRequestCleanupInterval: ReturnType<typeof setInterval> | null = null;
+
+const cleanupStaleRequests = (): void => {
+  try {
+    const now = Date.now();
+    for (const [key, cached] of inflightRequests.entries()) {
+      if (now - cached.timestamp > REQUEST_TIMEOUT) {
+        logger.warn(`Cleaning up stale request: ${key}`);
+        inflightRequests.delete(key);
+      }
     }
+  } catch (error: any) {
+    // Silently handle errors to prevent crashes in background cleanup
+    console.warn('apiHelpers: stale request cleanup error:', error?.message);
   }
-}, 60000); // Clean up every minute
+};
+
+export const startStaleRequestCleanup = (): void => {
+  if (staleRequestCleanupInterval) return; // Already running
+  staleRequestCleanupInterval = setInterval(cleanupStaleRequests, 60000);
+};
+
+export const stopStaleRequestCleanup = (): void => {
+  if (staleRequestCleanupInterval) {
+    clearInterval(staleRequestCleanupInterval);
+    staleRequestCleanupInterval = null;
+  }
+};
+
+// Start cleanup only when explicitly called (not at module load time)
+// This prevents timers from running before the app is fully initialized

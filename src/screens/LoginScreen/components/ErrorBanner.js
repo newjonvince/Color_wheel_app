@@ -1,18 +1,24 @@
 // screens/LoginScreen/components/ErrorBanner.js
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+// CRASH FIX: Lazy-load @expo/vector-icons to prevent potential startup issues
 import { optimizedStyles as styles, optimizedColors } from '../styles';
 
-// PROPER FIX: Check MaterialIcons availability once at module level
-const ICONS_AVAILABLE = (() => {
+// Lazy MaterialIcons getter
+let _MaterialIcons = null;
+let _iconsChecked = false;
+const getMaterialIcons = () => {
+  if (_iconsChecked) return _MaterialIcons;
+  _iconsChecked = true;
   try {
-    return MaterialIcons && typeof MaterialIcons === 'object';
+    const mod = require('@expo/vector-icons');
+    _MaterialIcons = mod.MaterialIcons || null;
   } catch (error) {
-    console.warn('MaterialIcons not available in ErrorBanner:', error);
-    return false;
+    console.warn('ErrorBanner: @expo/vector-icons load failed', error?.message);
+    _MaterialIcons = null;
   }
-})();
+  return _MaterialIcons;
+};
 
 // Lazy logger proxy to avoid circular import crashes
 let _loggerInstance = null;
@@ -35,16 +41,19 @@ const ErrorBanner = React.memo(
 
     return (
       <View style={styles.errorBanner}>
-        {ICONS_AVAILABLE ? (
-          <MaterialIcons
-            name="error-outline"
-            size={20}
-            color={optimizedColors.textPrimary}
-            style={{ marginRight: 8 }}
-          />
-        ) : (
-          <View style={{ width: 20, height: 20, marginRight: 8 }} />
-        )}
+        {(() => {
+          const Icons = getMaterialIcons();
+          return Icons ? (
+            <Icons
+              name="error-outline"
+              size={20}
+              color={optimizedColors.textPrimary}
+              style={{ marginRight: 8 }}
+            />
+          ) : (
+            <View style={{ width: 20, height: 20, marginRight: 8 }} />
+          );
+        })()}
         <Text 
           style={[styles.errorBannerText, { flex: 1 }]}
           accessibilityRole="alert"
@@ -60,15 +69,18 @@ const ErrorBanner = React.memo(
             accessibilityLabel="Dismiss error message"
             accessibilityHint="Tap to close this error message"
           >
-            {ICONS_AVAILABLE ? (
-              <MaterialIcons
-                name="close"
-                size={18}
-                color={optimizedColors.textPrimary}
-              />
-            ) : (
-              <Text style={{ fontSize: 18, color: optimizedColors.textPrimary }}>×</Text>
-            )}
+            {(() => {
+              const Icons = getMaterialIcons();
+              return Icons ? (
+                <Icons
+                  name="close"
+                  size={18}
+                  color={optimizedColors.textPrimary}
+                />
+              ) : (
+                <Text style={{ fontSize: 18, color: optimizedColors.textPrimary }}>×</Text>
+              );
+            })()}
           </TouchableOpacity>
         )}
       </View>

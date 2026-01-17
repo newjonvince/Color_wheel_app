@@ -20,37 +20,72 @@ const getExpoExtra = () => {
   return Constants?.expoConfig?.extra || {};
 };
 
-// Configure LogBox immediately at app entry point
-const extra = getExpoExtra();
-const IS_PROD = extra.EXPO_PUBLIC_NODE_ENV === 'production';
-
-if (IS_PROD) {
-  // Production should have minimal LogBox ignores
-  LogBox.ignoreLogs([
-    'Setting a timer', // Known RN issue
-    'Remote debugger', // Common development warning
-  ]);
-} else {
-  // Development - ignore common warnings that don't affect functionality
-  LogBox.ignoreLogs([
-    'Setting a timer',
-    'Remote debugger',
-    'Require cycle', // Common in development
-    'VirtualizedLists should never be nested', // Known issue with certain UI patterns
-  ]);
-}
+// CRASH FIX: Do NOT call getExpoExtra() at module load time!
+// The native bridge isn't ready yet (~300ms after launch).
+// Use safe defaults for LogBox - we can configure more specifically later if needed.
+// LogBox configuration uses development-safe defaults (ignore common warnings)
+LogBox.ignoreLogs([
+  'Setting a timer', // Known RN issue
+  'Remote debugger', // Common development warning
+  'Require cycle', // Common in development
+  'VirtualizedLists should never be nested', // Known issue with certain UI patterns
+]);
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, Animated, Platform } from 'react-native';
+import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, Animated, Platform, InteractionManager } from 'react-native';
 
-// Direct imports (no lazy loading to avoid complexity)
-import { StatusBar } from 'expo-status-bar';
+// Navigation and UI imports (non-native, safe at module load)
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-community/netinfo';
+
+// CRASH FIX: Lazy-load native modules to prevent bridge access at module load time
+let _StatusBar = null;
+const getStatusBar = () => {
+  if (_StatusBar) return _StatusBar;
+  try {
+    const mod = require('expo-status-bar');
+    _StatusBar = mod.StatusBar || mod.default;
+  } catch (error) {
+    console.warn('App: expo-status-bar load failed', error?.message);
+    _StatusBar = () => null; // Fallback to no-op component
+  }
+  return _StatusBar;
+};
+
+let _AsyncStorage = null;
+const getAsyncStorage = () => {
+  if (_AsyncStorage) return _AsyncStorage;
+  try {
+    const mod = require('@react-native-async-storage/async-storage');
+    _AsyncStorage = mod.default || mod;
+  } catch (error) {
+    console.warn('App: AsyncStorage load failed', error?.message);
+    _AsyncStorage = {
+      getItem: () => Promise.resolve(null),
+      setItem: () => Promise.resolve(),
+      removeItem: () => Promise.resolve(),
+    };
+  }
+  return _AsyncStorage;
+};
+
+let _NetInfo = null;
+const getNetInfo = () => {
+  if (_NetInfo) return _NetInfo;
+  try {
+    const mod = require('@react-native-community/netinfo');
+    _NetInfo = mod.default || mod;
+  } catch (error) {
+    console.warn('App: NetInfo load failed', error?.message);
+    _NetInfo = {
+      fetch: () => Promise.resolve({ isConnected: true, isInternetReachable: true }),
+      addEventListener: () => () => {},
+    };
+  }
+  return _NetInfo;
+};
 
 // PRODUCTION SAFETY: Gate console.log statements for production
 // CRASH FIX: Use typeof check to prevent ReferenceError in production
@@ -272,7 +307,7 @@ function FashionColorWheelApp() {
 
     let isMounted = true;
     const controller = new AbortController();
-    let finalizationTimerId = null; // Track timer for cleanup
+    let initSequenceTimerId = null; // Track initialization setTimeout for cleanup
 
     // BACKGROUND INITIALIZATION: Initialize features without blocking UI
     const initializeInBackground = async () => {
@@ -299,16 +334,23 @@ function FashionColorWheelApp() {
           return;
         }
         
-        // FIXED: Call environment validation first
+        // FIXED: Call environment validation first - but don't crash on failures
         getLogger().debug('Validating environment configuration...');
-        const envValidation = validateEnv();
-        if (!envValidation.isValid) {
-          getLogger().warn('Environment validation warnings:', envValidation.warnings);
-          if (envValidation.errors.length > 0) {
-            throw new Error(`Environment validation failed: ${envValidation.errors.join(', ')}`);
+        try {
+          const envValidation = validateEnv();
+          if (!envValidation.isValid) {
+            getLogger().warn('Environment validation warnings:', envValidation.warnings);
+            if (envValidation.errors.length > 0) {
+              // CRASH FIX: Don't throw fatal error - log and continue with degraded functionality
+              getLogger().error('Environment validation errors (non-fatal):', envValidation.errors);
+              // App will continue but API calls may fail - this is better than crashing
+            }
+          } else {
+            getLogger().debug('Environment validation passed');
           }
-        } else {
-          getLogger().debug('Environment validation passed');
+        } catch (envError) {
+          // CRASH FIX: Catch any validation errors and continue
+          getLogger().error('Environment validation threw error (non-fatal):', envError?.message || envError);
         }
         
         // Initialize crash reporting early
@@ -376,8 +418,8 @@ function FashionColorWheelApp() {
             
             const basicChecks = {
               hasConstants: !!getExpoConstants(),
-              hasAsyncStorage: typeof AsyncStorage !== 'undefined',
-              hasNetInfo: typeof NetInfo !== 'undefined',
+              hasAsyncStorage: !!getAsyncStorage(),
+              hasNetInfo: !!getNetInfo(),
               platform: Platform.OS,
               memory: typeof performance !== 'undefined' && performance.memory ? {
                 used: Math.round(performance.memory.usedJSHeapSize / 1024 / 1024),
@@ -570,7 +612,21 @@ function FashionColorWheelApp() {
     }
     
     // Start initialization sequence
-    setTimeout(initializeSequentially, 100);
+    let interactionHandle = null;
+    const scheduleInit = () => {
+      initSequenceTimerId = setTimeout(initializeSequentially, 100);
+    };
+    try {
+      if (InteractionManager?.runAfterInteractions) {
+        interactionHandle = InteractionManager.runAfterInteractions(() => {
+          if (isMounted) scheduleInit();
+        });
+      } else {
+        scheduleInit();
+      }
+    } catch (_) {
+      scheduleInit();
+    }
     
     // COMPREHENSIVE CLEANUP: All timers and resources in one place
     return () => {
@@ -580,14 +636,17 @@ function FashionColorWheelApp() {
       // Mark component as unmounted to prevent stale timer execution
       isMountedRef.current = false;
       
-      // Cancel pending finalization timers/animation frames
-      if (finalizationTimerId !== null) {
-        if (typeof cancelAnimationFrame !== 'undefined') {
-          cancelAnimationFrame(finalizationTimerId);
-        } else {
-          clearTimeout(finalizationTimerId);
-        }
-        finalizationTimerId = null;
+      // Cancel pending initialization sequence timeout
+      if (initSequenceTimerId !== null) {
+        clearTimeout(initSequenceTimerId);
+        initSequenceTimerId = null;
+      }
+
+      
+      try {
+        interactionHandle?.cancel?.();
+      } catch (_) {
+        // Ignore cancel failures
       }
       
       // Clear any pending restart timers
@@ -1040,7 +1099,7 @@ function FashionColorWheelApp() {
     >
       <SafeAreaProvider>
         <GestureHandlerRootView style={styles.fullScreen}>
-          <StatusBar style={getStatusBarStyle()} />
+          {(() => { const SB = getStatusBar(); return SB ? <SB style={getStatusBarStyle()} /> : null; })()}
           <NavigationContainer 
             linking={getAppConfig().linking}
             fallback={

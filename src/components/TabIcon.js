@@ -1,7 +1,25 @@
 // components/TabIcon.js - Custom tab icons with emoji fallbacks
 import React from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
-import { MaterialIcons, Feather, Ionicons } from '@expo/vector-icons';
+// CRASH FIX: Lazy-load @expo/vector-icons to prevent potential startup issues
+
+// Lazy icon library getters
+let _vectorIcons = null;
+const getVectorIcons = () => {
+  if (_vectorIcons) return _vectorIcons;
+  try {
+    const mod = require('@expo/vector-icons');
+    _vectorIcons = {
+      MaterialIcons: mod.MaterialIcons || null,
+      Feather: mod.Feather || null,
+      Ionicons: mod.Ionicons || null,
+    };
+  } catch (error) {
+    console.warn('TabIcon: @expo/vector-icons load failed', error?.message);
+    _vectorIcons = { MaterialIcons: null, Feather: null, Ionicons: null };
+  }
+  return _vectorIcons;
+};
 // Safe import with fallback
 let COLOR_WHEEL_CONFIG;
 try {
@@ -65,11 +83,8 @@ const TabIcon = React.memo(({ name, focused, size = 24, color = '#666' }) => {
   
   // Render vector icon if available
   if (iconConfig) {
-    const IconComponent = {
-      MaterialIcons,
-      Feather,
-      Ionicons
-    }[iconConfig.library];
+    const icons = getVectorIcons();
+    const IconComponent = icons[iconConfig.library];
     
     if (IconComponent) {
       // Use configured colors safely with fallbacks

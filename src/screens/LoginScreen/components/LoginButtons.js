@@ -1,8 +1,22 @@
 // LoginButtons.js
 import React, { useMemo } from 'react';
 import { TouchableOpacity, Text, View, ActivityIndicator } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+// CRASH FIX: Lazy-load expo-linear-gradient to prevent native bridge access at module load time
 import { optimizedStyles as styles, optimizedColors } from '../styles';
+
+// Lazy LinearGradient getter
+let _LinearGradient = null;
+const getLinearGradient = () => {
+  if (_LinearGradient) return _LinearGradient;
+  try {
+    const mod = require('expo-linear-gradient');
+    _LinearGradient = mod.LinearGradient || mod.default;
+  } catch (error) {
+    console.warn('LoginButtons: expo-linear-gradient load failed', error?.message);
+    _LinearGradient = View;
+  }
+  return _LinearGradient;
+};
 
 export default function LoginButtons({ loading = false, onLogin, onDemo, onSignUp }) {
   const noopHandlers = useMemo(
@@ -29,12 +43,15 @@ export default function LoginButtons({ loading = false, onLogin, onDemo, onSignU
         accessibilityLabel={loading ? "Logging in, please wait" : "Log in"}
         accessibilityState={{ disabled: loading, busy: loading }} // Add busy state
       >
-        <LinearGradient
-          colors={[optimizedColors.buttonStart, optimizedColors.buttonEnd]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.primaryButton}
-        >
+        {(() => {
+          const LG = getLinearGradient();
+          const props = LG !== View ? {
+            colors: [optimizedColors.buttonStart, optimizedColors.buttonEnd],
+            start: { x: 0, y: 0 },
+            end: { x: 1, y: 0 },
+          } : {};
+          return (
+            <LG {...props} style={styles.primaryButton}>
           {loading ? (
             <View style={styles.activityIndicatorContainer}>
               <ActivityIndicator 
@@ -46,7 +63,9 @@ export default function LoginButtons({ loading = false, onLogin, onDemo, onSignU
           ) : (
             <Text style={styles.primaryButtonText}>Log in</Text>
           )}
-        </LinearGradient>
+            </LG>
+          );
+        })()}
       </TouchableOpacity>
 
       <TouchableOpacity 

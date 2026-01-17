@@ -10,10 +10,21 @@ import {
   Platform
 } from 'react-native';
 import PropTypes from 'prop-types';
-// Use shared helper to avoid duplicate code
-import { isDebugMode } from '../utils/expoConfigHelper';
-
-const IS_DEBUG_MODE = isDebugMode();
+// CRASH FIX: Use lazy getter to avoid calling isDebugMode() at module load time
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('UnifiedErrorBoundary: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
+const IS_DEBUG_MODE = getIsDebugMode;
 
 /**
  * Categorize errors based on their type and message

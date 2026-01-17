@@ -1,5 +1,35 @@
 // utils/apiHelpers.js - Shared API utility functions with request deduplication
 
+// CRASH FIX: Safe AbortController wrapper - not all React Native runtimes have AbortController
+const isAbortControllerAvailable = typeof AbortController !== 'undefined';
+
+const createSafeAbortController = () => {
+  if (isAbortControllerAvailable) {
+    return new AbortController();
+  }
+  // Polyfill for environments without AbortController
+  let aborted = false;
+  const listeners = [];
+  return {
+    signal: {
+      get aborted() { return aborted; },
+      addEventListener: (type, handler) => { if (type === 'abort') listeners.push(handler); },
+      removeEventListener: (type, handler) => {
+        if (type === 'abort') {
+          const idx = listeners.indexOf(handler);
+          if (idx >= 0) listeners.splice(idx, 1);
+        }
+      },
+    },
+    abort: () => {
+      if (!aborted) {
+        aborted = true;
+        listeners.forEach(h => { try { h(); } catch (_) {} });
+      }
+    },
+  };
+};
+
 // CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
@@ -558,7 +588,7 @@ export const batchApiCalls = async (apiCalls, options = {}) => {
   try {
     if (failFast) {
       // Cancel remaining on first error
-      const controller = new AbortController();
+      const controller = createSafeAbortController();
       const results = [];
       
       try {
@@ -608,7 +638,7 @@ export const batchApiCalls = async (apiCalls, options = {}) => {
  * Request cancellation utilities
  */
 export const createCancellableRequest = () => {
-  const controller = new AbortController();
+  const controller = createSafeAbortController();
   return {
     signal: controller.signal,
     cancel: () => controller.abort(),

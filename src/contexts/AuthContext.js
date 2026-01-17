@@ -184,6 +184,14 @@ export const AuthProvider = ({ children }) => {
   // MEMORY LEAK FIX: Track mounted state to prevent state updates after unmount
   const isMountedRef = useRef(true);
 
+  // Track actual mount/unmount (avoids React 18 StrictMode effect double-invoke issues)
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // REAL AUTH PERSISTENCE: Using safeStorage for actual user persistence
   const getStoredUser = useCallback(async () => {
     try {
@@ -346,11 +354,6 @@ export const AuthProvider = ({ children }) => {
   // AUTO-INITIALIZE: Initialize auth on mount
   useEffect(() => {
     initializeAuth();
-    
-    // MEMORY LEAK FIX: Cleanup on unmount
-    return () => {
-      isMountedRef.current = false;
-    };
   }, [initializeAuth]);
 
   devLog('AuthProvider rendering, state:', {

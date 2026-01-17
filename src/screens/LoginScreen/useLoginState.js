@@ -1,7 +1,24 @@
 // Simple login state hook
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import * as Haptics from 'expo-haptics';
+// CRASH FIX: Lazy-load expo-haptics to prevent native bridge access at module load time
 import { safeStorage } from '../../utils/safeStorage';
+
+// Lazy expo-haptics getter to avoid module-load-time native bridge access
+let _haptics = null;
+const getHaptics = () => {
+  if (_haptics) return _haptics;
+  try {
+    _haptics = require('expo-haptics');
+  } catch (error) {
+    console.warn('useLoginState: expo-haptics load failed', error?.message);
+    _haptics = {
+      impactAsync: () => Promise.resolve(),
+      notificationAsync: () => Promise.resolve(),
+      selectionAsync: () => Promise.resolve(),
+    };
+  }
+  return _haptics;
+};
 import { safeAsyncStorage } from '../../utils/safeAsyncStorage';
 import ApiService from '../../services/safeApiService';
 import { debounce } from '../../utils/throttledCallbacks';
@@ -154,7 +171,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       
       // Haptic feedback for rate limit warning
       try {
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        await getHaptics().notificationAsync(getHaptics().NotificationFeedbackType.Warning);
       } catch (hapticError) {
         // Haptics might not be available on all devices
         logger.warn('Haptic feedback failed:', hapticError);
@@ -307,7 +324,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         
         // Haptic feedback for login success
         try {
-          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          await getHaptics().notificationAsync(getHaptics().NotificationFeedbackType.Success);
         } catch (hapticError) {
           logger.warn('Haptic feedback failed:', hapticError);
         }
@@ -325,7 +342,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
           
           // Haptic feedback for login error
           try {
-            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            await getHaptics().notificationAsync(getHaptics().NotificationFeedbackType.Error);
           } catch (hapticError) {
             logger.warn('Haptic feedback failed:', hapticError);
           }
@@ -377,7 +394,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         
         // Haptic feedback for demo login success
         try {
-          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          await getHaptics().notificationAsync(getHaptics().NotificationFeedbackType.Success);
         } catch (hapticError) {
           logger.warn('Haptic feedback failed:', hapticError);
         }
@@ -441,7 +458,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         
         // Haptic feedback for local demo success
         try {
-          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          await getHaptics().notificationAsync(getHaptics().NotificationFeedbackType.Success);
         } catch (hapticError) {
           logger.warn('Haptic feedback failed:', hapticError);
         }
@@ -468,7 +485,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
           
           // Haptic feedback for demo login error
           try {
-            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            await getHaptics().notificationAsync(getHaptics().NotificationFeedbackType.Error);
           } catch (hapticError) {
             logger.warn('Haptic feedback failed:', hapticError);
           }

@@ -1,7 +1,22 @@
 import React from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+// CRASH FIX: Lazy-load expo-linear-gradient to prevent native bridge access at module load time
 import PropTypes from 'prop-types';
+
+// Lazy LinearGradient getter
+let _LinearGradient = null;
+const getLinearGradient = () => {
+  if (_LinearGradient) return _LinearGradient;
+  try {
+    const mod = require('expo-linear-gradient');
+    _LinearGradient = mod.LinearGradient || mod.default;
+  } catch (error) {
+    console.warn('LoginScreen: expo-linear-gradient load failed', error?.message);
+    // Fallback to a simple View
+    _LinearGradient = View;
+  }
+  return _LinearGradient;
+};
 
 import LoginHeader from './components/LoginHeader';
 import ErrorBanner from './components/ErrorBanner';
@@ -37,13 +52,20 @@ const LoginScreen = ({ onLoginSuccess }) => {
 
   const keyboardBehavior = Platform.OS === 'ios' ? 'padding' : 'height';
 
+  const LinearGradientComponent = getLinearGradient();
+  const gradientProps = LinearGradientComponent !== View ? {
+    colors: [
+      optimizedColors.gradientStart,
+      optimizedColors.gradientMid,
+      optimizedColors.gradientEnd,
+    ]
+  } : {
+    style: { flex: 1, backgroundColor: optimizedColors.gradientStart }
+  };
+
   return (
-    <LinearGradient
-      colors={[
-        optimizedColors.gradientStart,
-        optimizedColors.gradientMid,
-        optimizedColors.gradientEnd,
-      ]}
+    <LinearGradientComponent
+      {...gradientProps}
       style={{ flex: 1 }}
     >
       <KeyboardAvoidingView
@@ -85,7 +107,7 @@ const LoginScreen = ({ onLoginSuccess }) => {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
-    </LinearGradient>
+    </LinearGradientComponent>
   );
 };
 

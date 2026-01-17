@@ -18,9 +18,8 @@ const getIsDebugMode = () => {
 };
 const IS_DEBUG_MODE = () => getIsDebugMode();
 
-if (IS_DEBUG_MODE()) {
-  console.log('FullColorWheel build tag: 2025-08-16 worklet-patched');
-}
+// CRASH FIX: Removed top-level IS_DEBUG_MODE() call that was pulling expoConfigHelper
+// during module load (before native bridge is ready). Build tag logging moved to component mount.
 
 import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
 import { View, Platform, Text } from 'react-native';
@@ -33,90 +32,97 @@ import Animated, {
 } from 'react-native-reanimated';
 
 // Safe iOS check - avoid accessing potentially undefined globals at module load
+// CRASH FIX: Removed IS_DEBUG_MODE() call from catch block to avoid pulling expoConfigHelper at module load
 const REANIMATED_READY = (() => {
   try {
     return typeof global?.__reanimatedWorkletInit === 'function';
   } catch (e) {
-    // Log Reanimated issues only in debug mode
-    if (IS_DEBUG_MODE()) {
-      console.log('Reanimated worklet init check failed:', e.message);
-    }
+    // Silently fail - don't call IS_DEBUG_MODE() here as it pulls expoConfigHelper at module load
     return false;
   }
 })();
 
 import { hslToHex, hexToHsl } from '../utils/optimizedColor';
 
-let Canvas, SkiaCircle, SweepGradient, RadialGradient, Paint, vec;
-try {
-  // SIMPLIFIED: Universal Skia loading (works on all platforms)
-  const Skia = require('@shopify/react-native-skia');
-  Canvas = Skia.Canvas;
-  SkiaCircle = Skia.Circle;
-  SweepGradient = Skia.SweepGradient;
-  RadialGradient = Skia.RadialGradient;
-  Paint = Skia.Paint;
-  vec = Skia.vec;
-} catch (e) {
-  // Log Skia loading failures only in debug mode
-  if (IS_DEBUG_MODE()) {
-    console.log('Skia module load failed on', Platform.OS + ':', e.message);
+// CRASH FIX: Defer Skia loading until component render, not module load time.
+// Native module crashes bypass try/catch - only JS exceptions are caught.
+// By deferring, we ensure the app has mounted before Skia native init runs.
+let _skiaModule = null;
+let _skiaLoadAttempted = false;
+let _skiaLoadError = null;
+
+const loadSkia = () => {
+  if (_skiaLoadAttempted) {
+    return _skiaModule;
+  }
+  _skiaLoadAttempted = true;
+  
+  try {
+    const Skia = require('@shopify/react-native-skia');
+    _skiaModule = {
+      Canvas: Skia.Canvas,
+      Circle: Skia.Circle,
+      SweepGradient: Skia.SweepGradient,
+      RadialGradient: Skia.RadialGradient,
+      Paint: Skia.Paint,
+      vec: Skia.vec,
+    };
+  } catch (e) {
+    _skiaLoadError = e;
+    console.warn('FullColorWheel: Skia module load failed on', Platform.OS + ':', e?.message);
+    _skiaModule = null;
   }
   
-  // PROPER FALLBACK: Functional color picker UI
-  const FallbackColorWheel = ({ style, children, ...props }) => (
-    <View style={[style, {
-      backgroundColor: '#f0f0f0',
+  return _skiaModule;
+};
+
+// Fallback components (used if Skia fails to load)
+const FallbackCanvas = ({ style, children, ...props }) => (
+  <View style={[style, {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: '#ddd',
+    justifyContent: 'center',
+    alignItems: 'center'
+  }]} {...props}>
+    <View style={{
+      backgroundColor: '#ff6b6b',
+      width: '80%',
+      height: '80%',
       borderRadius: 999,
-      borderWidth: 2,
-      borderColor: '#ddd',
       justifyContent: 'center',
       alignItems: 'center'
-    }]} {...props}>
-      <View style={{
-        backgroundColor: '#ff6b6b',
-        width: '80%',
-        height: '80%',
-        borderRadius: 999,
-        justifyContent: 'center',
-        alignItems: 'center'
+    }}>
+      <Text style={{
+        color: 'white',
+        fontSize: 12,
+        fontWeight: 'bold',
+        textAlign: 'center'
       }}>
-        <Text style={{
-          color: 'white',
-          fontSize: 12,
-          fontWeight: 'bold',
-          textAlign: 'center'
-        }}>
-          Color{'\n'}Picker
-        </Text>
-      </View>
-      {children}
+        Color{'\n'}Picker
+      </Text>
     </View>
-  );
-  
-  const FallbackCircle = ({ cx, cy, r, color, children, ...props }) => (
-    <View style={{
-      position: 'absolute',
-      left: (cx || 0) - (r || 50),
-      top: (cy || 0) - (r || 50),
-      width: (r || 50) * 2,
-      height: (r || 50) * 2,
-      backgroundColor: color || '#ff6b6b',
-      borderRadius: 999,
-    }} {...props}>
-      {children}
-    </View>
-  );
-  
-  const FallbackGradient = () => null;
+    {children}
+  </View>
+);
 
-  Canvas = FallbackColorWheel;
-  SkiaCircle = FallbackCircle;
-  SweepGradient = FallbackGradient;
-  RadialGradient = FallbackGradient;
-  Paint = null;
-  vec = () => ({ x: 0, y: 0 });
-}
+const FallbackCircle = ({ cx, cy, r, color, children, ...props }) => (
+  <View style={{
+    position: 'absolute',
+    left: (cx || 0) - (r || 50),
+    top: (cy || 0) - (r || 50),
+    width: (r || 50) * 2,
+    height: (r || 50) * 2,
+    backgroundColor: color || '#ff6b6b',
+    borderRadius: 999,
+  }} {...props}>
+    {children}
+  </View>
+);
+
+const FallbackGradient = () => null;
+const fallbackVec = () => ({ x: 0, y: 0 });
 
 // Import constants from shared location
 import { SCHEME_OFFSETS, SCHEME_COUNTS } from '../constants/colorWheelConstants';
@@ -504,6 +510,15 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   // ===== Render: Canva look =====
   const innerSpacer = Math.max(6, radius * 0.06); // white spacer ring
   const outerRim = Math.max(10, radius * 0.10);   // glossy rim thickness
+
+  // CRASH FIX: Load Skia at render time, not module load time
+  // This ensures the app has mounted before Skia native init runs
+  const skia = loadSkia();
+  const Canvas = skia?.Canvas || FallbackCanvas;
+  const SkiaCircle = skia?.Circle || FallbackCircle;
+  const SweepGradient = skia?.SweepGradient || FallbackGradient;
+  const RadialGradient = skia?.RadialGradient || FallbackGradient;
+  const vec = skia?.vec || fallbackVec;
 
   return (
     <GestureDetector gesture={Gesture.Simultaneous(tap, pan)}>

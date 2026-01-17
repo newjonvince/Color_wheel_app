@@ -1,7 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, FlatList, Dimensions, Alert, Modal, TextInput, ScrollView } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+// CRASH FIX: Lazy-load expo-image-picker to prevent native bridge access at module load time
 import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
+
+// Lazy expo-image-picker getter
+let _ImagePicker = null;
+const getImagePicker = () => {
+  if (_ImagePicker) return _ImagePicker;
+  try {
+    _ImagePicker = require('expo-image-picker');
+  } catch (error) {
+    console.warn('BoardsScreen: expo-image-picker load failed', error?.message);
+    _ImagePicker = {
+      launchImageLibraryAsync: () => Promise.resolve({ canceled: true }),
+      requestMediaLibraryPermissionsAsync: () => Promise.resolve({ status: 'denied', granted: false }),
+      MediaTypeOptions: { Images: 'Images' },
+    };
+  }
+  return _ImagePicker;
+};
 import ApiService from '../services/safeApiService';
 import { getColorScheme as computeScheme } from '../utils/optimizedColor';
 import { getAllSchemes } from '../constants/colorSchemes';
@@ -111,6 +128,7 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
     }
 
     // Enhanced type safety for ImagePicker to prevent Swift runtime crashes
+    const ImagePicker = getImagePicker();
     if (!ImagePicker || typeof ImagePicker.requestMediaLibraryPermissionsAsync !== 'function') {
       Alert.alert('Error', 'Image picker not available');
       return;

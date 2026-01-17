@@ -1,17 +1,32 @@
 // utils/AppLogger.js - Production-safe logging with EXPO_PUBLIC flags
-// Use shared helper to avoid duplicate code
-import { getSafeExpoExtra, isDebugMode } from './expoConfigHelper';
+// CRASH FIX: Use lazy loading for expoConfigHelper to prevent native bridge access at module load time
+
+// Lazy helper getters to avoid module-load-time crashes
+let _expoConfigHelper = null;
+const getExpoConfigHelper = () => {
+  if (_expoConfigHelper) return _expoConfigHelper;
+  try {
+    _expoConfigHelper = require('./expoConfigHelper');
+  } catch (error) {
+    console.warn('AppLogger: expoConfigHelper load failed', error?.message);
+    _expoConfigHelper = {
+      getSafeExpoExtra: () => ({}),
+      isDebugMode: () => false,
+    };
+  }
+  return _expoConfigHelper;
+};
 
 // Lazy-load extra to avoid module-load crashes and handle late Constants
 let cachedExtra = null;
 const getExtra = () => {
   if (!cachedExtra) {
-    cachedExtra = getSafeExpoExtra();
+    cachedExtra = getExpoConfigHelper().getSafeExpoExtra();
   }
   return cachedExtra;
 };
 
-const IS_DEBUG_MODE = isDebugMode;
+const IS_DEBUG_MODE = () => getExpoConfigHelper().isDebugMode();
 const LOG_LEVEL = () => {
   const level = getExtra().EXPO_PUBLIC_LOG_LEVEL;
   const validLevels = ['debug', 'info', 'warn', 'error'];

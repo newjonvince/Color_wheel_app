@@ -1,6 +1,36 @@
 // utils/AppInitializer.js - Centralized initialization manager
 // Replaces mixed initialization strategies with predictable, sequential initialization
 
+// CRASH FIX: Safe AbortController wrapper - not all React Native runtimes have AbortController
+const isAbortControllerAvailable = typeof AbortController !== 'undefined';
+
+const createSafeAbortController = () => {
+  if (isAbortControllerAvailable) {
+    return new AbortController();
+  }
+  // Polyfill for environments without AbortController
+  let aborted = false;
+  const listeners = [];
+  return {
+    signal: {
+      get aborted() { return aborted; },
+      addEventListener: (type, handler) => { if (type === 'abort') listeners.push(handler); },
+      removeEventListener: (type, handler) => {
+        if (type === 'abort') {
+          const idx = listeners.indexOf(handler);
+          if (idx >= 0) listeners.splice(idx, 1);
+        }
+      },
+    },
+    abort: () => {
+      if (!aborted) {
+        aborted = true;
+        listeners.forEach(h => { try { h(); } catch (_) {} });
+      }
+    },
+  };
+};
+
 // Lazy loaders to break circular deps and avoid early crashes
 let loggerInstance = null;
 const getLogger = () => {
@@ -42,12 +72,11 @@ const getInitializeAppConfig = () => {
     return require('../config/appconfig').initializeAppConfig;
   } catch (error) {
     getLogger().error?.('AppInitializer: initializeAppConfig load failed', error?.message || error);
-    // CRITICAL FIX: Throw on config load failure instead of silent success
+    // CRASH FIX: Return safe fallback instead of throwing - app can continue with degraded config
     return async () => {
-      const configError = new Error(`Failed to load app configuration module: ${error?.message || error}`);
-      configError.cause = error;
-      configError.category = 'ConfigError';
-      throw configError;
+      getLogger().warn?.('Using fallback app config - no config file loaded');
+      // Return success to allow app to continue in degraded mode
+      return { ok: true, degraded: true, message: 'Config module not available' };
     };
   }
 };
@@ -720,13 +749,12 @@ class AppInitializer {
     // FAILURE RECOVERY: Check if we're in a failed state
     if (this.stateMachine.is('FAILED')) {
       const failedStepNames = Array.from(this.failedSteps).join(', ');
-      getLogger().warn(`Previous initialization failed at: ${failedStepNames}`);
+      getLogger().warn(`Previous initialization failed at: ${failedStepNames}. Auto-resetting for retry...`);
       
-      // Require explicit reset before retry (safer)
-      throw new Error(
-        `Cannot re-initialize without reset. Failed steps: ${failedStepNames}. ` +
-        `Call appInitializer.reset() first. Current state: ${this.stateMachine.state}`
-      );
+      // CRASH FIX: Auto-reset instead of throwing - prevents unhandled exception on retry
+      // This allows App.js to retry initialization without explicitly calling reset()
+      this.reset();
+      getLogger().info('AppInitializer auto-reset completed, proceeding with retry');
     }
 
     // STATE TRANSITION: Move to INITIALIZING state
@@ -783,7 +811,7 @@ class AppInitializer {
     let globalTimeoutId = null;
     
     // FIX: Create AbortController for global timeout that actually aborts operations
-    const globalAbortController = new AbortController();
+    const globalAbortController = createSafeAbortController();
     const combinedSignal = signal ? this._combineAbortSignals(signal, globalAbortController.signal) : globalAbortController.signal;
     
     // PROPER CANCELLATION: Use manual timeout with AbortController instead of Promise.race
@@ -1050,7 +1078,7 @@ class AppInitializer {
     if (!signal1) return signal2;
     if (!signal2) return signal1;
     
-    const controller = new AbortController();
+    const controller = createSafeAbortController();
     
     // MEMORY LEAK FIX: Create separate handlers that clean up the other listener
     let abortHandler1 = null;

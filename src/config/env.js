@@ -1,5 +1,18 @@
 // config/env.js - Environment variables validation and management
-import Constants from 'expo-constants';
+// CRASH FIX: Lazy-load expo-constants to prevent native bridge access at module load time
+
+// Lazy expo-constants getter to avoid module-load-time native bridge access
+let _expoConstants = undefined;
+const getExpoConstants = () => {
+  if (_expoConstants !== undefined) return _expoConstants;
+  try {
+    _expoConstants = require('expo-constants')?.default ?? null;
+  } catch (error) {
+    console.warn('env: expo-constants load failed', error?.message);
+    _expoConstants = null;
+  }
+  return _expoConstants;
+};
 
 // Lazy logger getter to avoid circular import crashes
 let logger = null;
@@ -17,6 +30,7 @@ const getLogger = () => {
 
 const getSafeExtra = () => {
   try {
+    const Constants = getExpoConstants();
     const expoConfig = Constants?.expoConfig;
     if (expoConfig && typeof expoConfig === 'object' && expoConfig.extra && typeof expoConfig.extra === 'object') {
       return expoConfig.extra;
