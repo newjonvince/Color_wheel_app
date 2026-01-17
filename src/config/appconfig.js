@@ -350,12 +350,8 @@ const startBackgroundTasks = () => {
         }
       }
 
-      // CRASH FIX: Start apiHelpers stale request cleanup (managed, not global)
-      try {
-        getApiHelpersCleanup().start();
-      } catch (error) {
-        // Silently ignore - cleanup is best-effort
-      }
+      // NOTE: apiHelpers cleanup is now self-managing and doesn't need explicit start
+      // The cleanup only runs when requests exist, preventing unnecessary background work
 
       try {
         // Set up AppState listener
@@ -582,44 +578,18 @@ export const stopCacheCleanup = () => {
 // APP STATE MANAGEMENT: Handle background/foreground transitions
 let appStateSubscription = null;
 
-// CRASH FIX: Lazy load apiHelpers cleanup functions to stop global intervals on background
-let _apiHelpersCleanup = null;
-const getApiHelpersCleanup = () => {
-  if (_apiHelpersCleanup) return _apiHelpersCleanup;
-  try {
-    const apiHelpers = require('../utils/apiHelpers');
-    _apiHelpersCleanup = {
-      start: apiHelpers.startStaleRequestCleanup || (() => {}),
-      stop: apiHelpers.stopStaleRequestCleanup || (() => {}),
-    };
-  } catch (e) {
-    _apiHelpersCleanup = { start: () => {}, stop: () => {} };
-  }
-  return _apiHelpersCleanup;
-};
-
 const handleAppStateChange = (nextAppState) => {
   if (nextAppState === 'background') {
-    // Stop all intervals when app goes to background to prevent RCTFatal crashes
+    // Stop cleanup when app goes to background to save resources
     stopCacheCleanup();
-    try {
-      getApiHelpersCleanup().stop();
-    } catch (e) {
-      // Silently ignore - cleanup is best-effort
-    }
     if (IS_DEV()) {
-      log.debug('App backgrounded - all cleanup intervals stopped');
+      log.debug('App backgrounded - cache cleanup stopped');
     }
   } else if (nextAppState === 'active') {
-    // Restart intervals when app becomes active
+    // Restart cleanup when app becomes active
     setupCacheCleanup();
-    try {
-      getApiHelpersCleanup().start();
-    } catch (e) {
-      // Silently ignore - cleanup is best-effort
-    }
     if (IS_DEV()) {
-      log.debug('App foregrounded - cleanup intervals restarted');
+      log.debug('App foregrounded - cache cleanup restarted');
     }
   }
 };
@@ -696,14 +666,6 @@ export const memoryUtils = {
 export const cleanupAppConfig = () => {
   memoryUtils.clearCaches();
   stopCacheCleanup(); // Stop cache cleanup interval
-  
-  // CRASH FIX: Stop apiHelpers cleanup interval to prevent stale timer crashes
-  try {
-    getApiHelpersCleanup().stop();
-  } catch (e) {
-    // Silently ignore - cleanup is best-effort
-  }
-  
   cleanupAppStateListener(); // Remove AppState listener
   isInitialized = false;
   initializationPromise = null;
