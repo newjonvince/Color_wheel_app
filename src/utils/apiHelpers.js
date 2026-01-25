@@ -1,10 +1,8 @@
 // utils/apiHelpers.js - Shared API utility functions with request deduplication
 
 // CRASH FIX: Safe AbortController wrapper - not all React Native runtimes have AbortController
-const isAbortControllerAvailable = typeof AbortController !== 'undefined';
-
-const createSafeAbortController = () => {
-  if (isAbortControllerAvailable) {
+export const createSafeAbortController = () => {
+  if (typeof AbortController !== 'undefined') {
     return new AbortController();
   }
   // Polyfill for environments without AbortController
@@ -236,7 +234,7 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
   const { signal, maxAge = REQUEST_TIMEOUT } = options; // Accept cancellation signal and configurable max age
   // Check if already cancelled
   if (signal?.aborted) {
-    throw new Error(`Request cancelled: ${key}`);
+    return { success: false, cancelled: true, errorType: 'cancelled', userMessage: 'Request was cancelled.' };
   }
 
   // Check if same request is already in flight
@@ -331,14 +329,17 @@ const deduplicatedApiCall = async (key, apiCall, options = {}) => {
     if (result && result.cancelled) {
       return result;
     }
-    return unwrapSafeApiResult(result, key);
+    return result;
   } catch (error) {
     // Handle cancellation gracefully
-    if (signal?.aborted && error.message?.includes('cancelled')) {
+    if (signal?.aborted || error?.message?.includes('cancelled') || error?.message?.includes('aborted')) {
       logger.debug(`Request cancelled gracefully: ${key}`);
-      return { cancelled: true };
+      return { success: false, cancelled: true, errorType: 'cancelled', error, userMessage: 'Request was cancelled.' };
     }
-    throw error;
+    if (error?.message?.includes('timeout')) {
+      return { success: false, errorType: 'timeout', error, userMessage: 'Request timed out. Please try again.', shouldShowAlert: false };
+    }
+    return { success: false, errorType: 'unknown', error, userMessage: error?.message || `Request failed${key ? ` for ${key}` : ''}`, shouldShowAlert: true };
   } finally {
     // GUARANTEED CLEANUP: Always clean up, even if promise is still pending
     if (!settled) {
@@ -448,7 +449,7 @@ export const safeApiCall = async (apiCall, options = {}) => {
           signal?.aborted // Cancelled
         ) {
           logger.debug(`Not retrying error (${error.status || error.message}): Won't succeed on retry`);
-          throw error; // Don't retry these
+          break; // Don't retry these; return structured error info below
         }
 
         // If not last attempt, wait before retry
@@ -848,4 +849,4 @@ export const forceImmediateCleanup = () => {
   logger.info('Forced immediate API cleanup');
 };
 
-export { deduplicatedApiCall, safeApiCall, batchApiCalls };
+export { deduplicatedApiCall };

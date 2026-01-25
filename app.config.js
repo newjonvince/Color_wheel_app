@@ -1,4 +1,6 @@
 // app.config.js - Dynamic configuration for different environments
+const EAS_PROJECT_ID = "3ac50c4a-9445-4311-a36c-b3c7f9466fbb";
+
 export default {
   expo: {
     name: "Fashion Color Wheel",
@@ -69,9 +71,11 @@ export default {
     extra: {
       // ✅ EAS Build Configuration
       eas: {
-        projectId: "3ac50c4a-9445-4311-a36c-b3c7f9466fbb"
+        projectId: EAS_PROJECT_ID
       },
       
+      EXPO_PUBLIC_NODE_ENV: process.env.NODE_ENV || 'production',
+
       // ✅ Dynamic API configuration based on environment
       EXPO_PUBLIC_API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL || 
         'https://colorwheelapp-production.up.railway.app',
@@ -92,7 +96,10 @@ export default {
       EXPO_PUBLIC_LOG_LEVEL: process.env.EXPO_PUBLIC_LOG_LEVEL || 'warn',
     },
     updates: {
-      fallbackToCacheTimeout: 0
+      fallbackToCacheTimeout: 0,
+      enabled: true,
+      checkAutomatically: "ON_LOAD",
+      url: `https://u.expo.dev/${EAS_PROJECT_ID}`
     },
     runtimeVersion: {
       policy: "sdkVersion"

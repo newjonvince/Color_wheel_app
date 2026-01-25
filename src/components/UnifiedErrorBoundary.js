@@ -24,7 +24,7 @@ const getIsDebugMode = () => {
   }
   return _isDebugModeValue;
 };
-const IS_DEBUG_MODE = getIsDebugMode;
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 /**
  * Categorize errors based on their type and message
@@ -92,7 +92,7 @@ class UnifiedErrorBoundary extends React.Component {
 
     // Log error in development
     // CRASH FIX: Use typeof check to prevent ReferenceError in production
-    if (IS_DEBUG_MODE || (typeof __DEV__ !== 'undefined' && __DEV__)) {
+    if (IS_DEBUG_MODE() || (typeof __DEV__ !== 'undefined' && __DEV__)) {
       console.error('UnifiedErrorBoundary caught error:', error);
       console.error('Component stack:', errorInfo?.componentStack);
     }
@@ -147,7 +147,7 @@ class UnifiedErrorBoundary extends React.Component {
               We encountered an unexpected error. Please try again or restart the app.
             </Text>
 
-            {(IS_DEBUG_MODE || (typeof __DEV__ !== 'undefined' && __DEV__)) && error && (
+            {(IS_DEBUG_MODE() || (typeof __DEV__ !== 'undefined' && __DEV__)) && error && (
               <View style={styles.debugContainer}>
                 <Text style={styles.debugTitle}>Debug Info:</Text>
                 <Text style={styles.debugText}>

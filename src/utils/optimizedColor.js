@@ -126,7 +126,7 @@ function computeColorData(hex) {
   const brightness = computeBrightness(rgb.r, rgb.g, rgb.b, luminance);
   
   // Compute color analysis once
-  const analysis = computeColorAnalysis(rgb, hsl, brightness);
+  const analysis = computeColorAnalysis(rgb, hsl, brightness, luminance);
 
   // Use flat structure to reduce object depth and property count
   return {
@@ -269,7 +269,7 @@ function getBrightnessLabel(luminance) {
 /**
  * Compute comprehensive color analysis
  */
-function computeColorAnalysis(rgb, hsl, brightness) {
+function computeColorAnalysis(rgb, hsl, brightness, luminance) {
   const { r, g, b } = rgb;
   const { h, s, l } = hsl;
   
@@ -280,10 +280,17 @@ function computeColorAnalysis(rgb, hsl, brightness) {
   const category = getColorCategory(h, s, l);
   
   // Accessibility info
+  const safeLuminance = isFinite(luminance) ? Math.max(0, Math.min(1, luminance)) : 0;
+  const contrastWithBlack = (safeLuminance + 0.05) / 0.05;
+  const contrastWithWhite = 1.05 / (safeLuminance + 0.05);
+  const bestContrast = Math.max(contrastWithBlack, contrastWithWhite);
+  const recommendedTextColor = contrastWithBlack >= contrastWithWhite ? '#000000' : '#FFFFFF';
+  const wcagLevel = bestContrast >= 7 ? 'AAA' : bestContrast >= 4.5 ? 'AA' : 'fail';
+
   const accessibility = {
-    isHighContrast: brightness.luminance > 200 || brightness.luminance < 55,
-    recommendedTextColor: brightness.isLight ? '#000000' : '#FFFFFF',
-    wcagLevel: brightness.isLight ? 'AA' : 'AAA'
+    isHighContrast: bestContrast >= 7,
+    recommendedTextColor,
+    wcagLevel
   };
   
   // Color harmony info

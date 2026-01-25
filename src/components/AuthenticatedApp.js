@@ -1,11 +1,8 @@
 // components/AuthenticatedApp.js - Authenticated user flow with navigation
 import React, { useCallback, useMemo } from 'react';
 import { View, TouchableOpacity, Text, StyleSheet, Platform } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import PropTypes from 'prop-types';
-// Use shared helper to avoid duplicate code
-import { isDebugMode } from '../utils/expoConfigHelper';
 
 // Screen imports
 import ColorWheelScreen from '../screens/ColorWheelScreen';
@@ -17,14 +14,6 @@ import UserSettingsScreen from '../screens/UserSettingsScreen';
 import TabIcon from './TabIcon';
 
 const Tab = createBottomTabNavigator();
-
-let _isDebugModeValue = null;
-const IS_DEBUG_MODE = () => {
-  if (_isDebugModeValue === null) {
-    _isDebugModeValue = isDebugMode();
-  }
-  return _isDebugModeValue;
-};
 
 /**
  * AuthenticatedApp - Main app navigation for authenticated users
@@ -78,48 +67,71 @@ const AuthenticatedApp = ({ user, handleLogout }) => {
   ), []);
 
   return (
-    <NavigationContainer>
-      <Tab.Navigator screenOptions={screenOptions}>
-        <Tab.Screen
-          name="ColorWheel"
-          component={ColorWheelScreen}
-          options={{
-            title: 'Color Wheel',
-            headerTitle: 'Fashion Color Wheel',
-            tabBarIcon: renderTabIcon('ColorWheel'),
-          }}
-        />
-        <Tab.Screen
-          name="Boards"
-          component={BoardsScreen}
-          options={{
-            title: 'Boards',
-            headerTitle: 'My Boards',
-            tabBarIcon: renderTabIcon('Boards'),
-          }}
-        />
-        <Tab.Screen
-          name="Community"
-          component={CommunityFeedScreen}
-          options={{
-            title: 'Community',
-            headerTitle: 'Community',
-            tabBarIcon: renderTabIcon('Community'),
-          }}
-        />
-        <Tab.Screen
-          name="Settings"
-          options={{
-            title: 'Settings',
-            headerTitle: 'Settings',
-            tabBarIcon: renderTabIcon('Settings'),
-            headerRight: renderLogoutButton,
-          }}
-        >
-          {(props) => <UserSettingsScreen {...props} user={user} onLogout={handleLogout} />}
-        </Tab.Screen>
-      </Tab.Navigator>
-    </NavigationContainer>
+    <Tab.Navigator screenOptions={screenOptions}>
+      <Tab.Screen
+        name="ColorWheel"
+        options={{
+          title: 'Color Wheel',
+          headerTitle: 'Fashion Color Wheel',
+          tabBarIcon: renderTabIcon('ColorWheel'),
+        }}
+      >
+        {(props) => (
+          <ColorWheelScreen
+            {...props}
+            currentUser={user}
+            onLogout={handleLogout}
+          />
+        )}
+      </Tab.Screen>
+      <Tab.Screen
+        name="Boards"
+        options={{
+          title: 'Boards',
+          headerTitle: 'My Boards',
+          tabBarIcon: renderTabIcon('Boards'),
+        }}
+      >
+        {(props) => (
+          <BoardsScreen
+            {...props}
+            currentUser={user}
+          />
+        )}
+      </Tab.Screen>
+      <Tab.Screen
+        name="Community"
+        options={{
+          title: 'Community',
+          headerTitle: 'Community',
+          tabBarIcon: renderTabIcon('Community'),
+        }}
+      >
+        {(props) => (
+          <CommunityFeedScreen
+            {...props}
+            currentUser={user}
+          />
+        )}
+      </Tab.Screen>
+      <Tab.Screen
+        name="Settings"
+        options={{
+          title: 'Settings',
+          headerTitle: 'Settings',
+          tabBarIcon: renderTabIcon('Settings'),
+          headerRight: renderLogoutButton,
+        }}
+      >
+        {(props) => (
+          <UserSettingsScreen
+            {...props}
+            currentUser={user}
+            onLogout={handleLogout}
+          />
+        )}
+      </Tab.Screen>
+    </Tab.Navigator>
   );
 };
 

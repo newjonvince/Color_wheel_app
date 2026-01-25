@@ -37,8 +37,20 @@ const Ionicons = ({ name, size, color, style }) => {
 };
 
 import ApiService from '../services/safeApiService';
-import { safeStorage } from '../utils/safeStorage';
 import { safeApiCall } from '../utils/apiHelpers';
+
+let _safeStorage = null;
+const getSafeStorage = () => {
+  if (_safeStorage) return _safeStorage;
+  try {
+    const mod = require('../utils/safeStorage');
+    _safeStorage = mod?.safeStorage || mod?.default || null;
+  } catch (error) {
+    console.warn('UserSettingsScreen: safeStorage load failed', error?.message || error);
+    _safeStorage = { clearAuth: async () => {} };
+  }
+  return _safeStorage;
+};
 
 function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
   const [isDeleting, setIsDeleting] = useState(false);
@@ -128,7 +140,7 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
               // SAFETY: Secure account deletion with error handling
               try {
                 // Clear all auth data after successful account deletion
-                await safeStorage.clearAuth();
+                await getSafeStorage().clearAuth();
                 await ApiService.logout();
                 
                 // Call the callback to update UI

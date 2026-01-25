@@ -6,7 +6,17 @@
  */
 export class LRUCache {
   constructor(capacity = 100) {
-    this.capacity = capacity;
+    const resolvedCapacity = (() => {
+      if (capacity && typeof capacity === 'object') {
+        const maxSize = capacity.maxSize ?? capacity.capacity;
+        if (typeof maxSize === 'number' && isFinite(maxSize) && maxSize > 0) return maxSize;
+        return 100;
+      }
+      if (typeof capacity === 'number' && isFinite(capacity) && capacity > 0) return capacity;
+      return 100;
+    })();
+
+    this.capacity = resolvedCapacity;
     this.cache = new Map();
   }
 

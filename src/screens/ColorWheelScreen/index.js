@@ -4,7 +4,7 @@ import React, { useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { ScrollView, View, Text, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import PropTypes from 'prop-types';
-import { AppErrorBoundary } from '../../components/AppErrorBoundary';
+import AppErrorBoundary from '../../components/AppErrorBoundary';
 import { isValidHex6 } from '../../utils/colorValidation';
 
 // CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization

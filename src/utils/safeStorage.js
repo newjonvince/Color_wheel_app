@@ -369,7 +369,7 @@ class OptimizedSafeStorage {
       }
 
       // Start AsyncStorage initialization
-      safeAsyncStorage.init()
+      safeAsyncStorage.init(signal)
         .then((result) => {
           if (!settled) {
             settled = true;

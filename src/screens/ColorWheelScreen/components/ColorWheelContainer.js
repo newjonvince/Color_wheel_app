@@ -1,6 +1,6 @@
 // screens/ColorWheelScreen/components/ColorWheelContainer.js
 import React, { useState, useEffect } from 'react';
-import { View, TouchableOpacity } from 'react-native';
+import { View, TouchableOpacity, InteractionManager } from 'react-native';
 import PropTypes from 'prop-types';
 // CRASH FIX: Lazy-load @expo/vector-icons to prevent native bridge access at module load time
 let _vectorIcons = null;
@@ -36,8 +36,20 @@ const Feather = ({ name, size, color, style }) => {
   return <View style={[{ width: size, height: size }, style]} />;
 };
 
-import FullColorWheel from '../../../components/FullColorWheel';
 import { styles, WHEEL_SIZE, colorWheelColors } from '../styles';
+
+let _FullColorWheel = null;
+const getFullColorWheel = () => {
+  if (_FullColorWheel) return _FullColorWheel;
+  try {
+    const mod = require('../../../components/FullColorWheel');
+    _FullColorWheel = mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelContainer: FullColorWheel load failed', error?.message);
+    _FullColorWheel = null;
+  }
+  return _FullColorWheel;
+};
 
 export const ColorWheelContainer = React.memo(({ 
   wheelRef,
@@ -52,6 +64,26 @@ export const ColorWheelContainer = React.memo(({
   onOpenCamera,
   onOpenGallery,
 }) => {
+  const [canRenderWheel, setCanRenderWheel] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const interactionHandle = InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+      setCanRenderWheel(true);
+    });
+
+    return () => {
+      cancelled = true;
+      interactionHandle?.cancel?.();
+    };
+  }, []);
+
+  const isWheelHardDisabled = String(
+    (typeof process !== 'undefined' ? process?.env?.EXPO_PUBLIC_DISABLE_WHEEL : '') || ''
+  ).toLowerCase() === 'true';
+
   // Always use FullColorWheel - no fallback needed
   const wheelProps = {
     ref: wheelRef,
@@ -64,10 +96,16 @@ export const ColorWheelContainer = React.memo(({
     onHexChange,
     onActiveHandleChange,
   };
+
+  const FullColorWheel = (!isWheelHardDisabled && canRenderWheel) ? getFullColorWheel() : null;
   
   return (
     <View style={styles.wheelContainer}>
-      <FullColorWheel {...wheelProps} />
+      {FullColorWheel ? (
+        <FullColorWheel {...wheelProps} />
+      ) : (
+        <View style={{ width: WHEEL_SIZE, height: WHEEL_SIZE, borderRadius: WHEEL_SIZE / 2, backgroundColor: baseHex }} />
+      )}
 
       <View style={styles.cameraButtonsContainer}>
         <TouchableOpacity 

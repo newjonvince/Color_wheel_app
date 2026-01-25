@@ -181,6 +181,8 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [state, dispatch] = useReducer(authReducer, initialAuthState);
   const initializationRef = useRef(false);
+  const initializationPromiseRef = useRef(null);
+  const initializationResultRef = useRef(null);
   // MEMORY LEAK FIX: Track mounted state to prevent state updates after unmount
   const isMountedRef = useRef(true);
 
@@ -226,46 +228,85 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // INITIALIZATION: Check for existing auth on app start
-  const initializeAuth = useCallback(async () => {
+  const initializeAuth = useCallback(async ({ signal } = {}) => {
+    if (signal?.aborted) {
+      return { success: false, skipped: true, reason: 'aborted' };
+    }
+
+    // If an initialization is already in-flight, return the same promise.
+    if (initializationPromiseRef.current) {
+      return initializationPromiseRef.current;
+    }
+
+    // If we already completed initialization, return the cached result.
     if (initializationRef.current) {
       devLog('Auth already initialized, skipping...');
-      return;
+      return initializationResultRef.current || { success: true, skipped: true, reason: 'already_initialized' };
     }
 
-    initializationRef.current = true;
-    
-    try {
-      devLog('Initializing authentication...');
-      dispatch({ type: AUTH_ACTIONS.INITIALIZE_START });
+    initializationPromiseRef.current = (async () => {
+      try {
+        if (signal?.aborted) {
+          const abortedResult = { success: false, skipped: true, reason: 'aborted' };
+          initializationResultRef.current = abortedResult;
+          return abortedResult;
+        }
 
-      // Check for stored user
-      const storedUser = await getStoredUser();
-      
-      if (storedUser) {
-        // TODO: Validate stored user token/session
-        devLog('Restored user from storage');
-        dispatch({ 
-          type: AUTH_ACTIONS.INITIALIZE_SUCCESS, 
-          payload: { user: storedUser } 
-        });
-      } else {
-        devLog('No stored user, starting fresh');
-        dispatch({ 
-          type: AUTH_ACTIONS.INITIALIZE_SUCCESS, 
-          payload: { user: null } 
-        });
+        initializationRef.current = true;
+
+        devLog('Initializing authentication...');
+        dispatch({ type: AUTH_ACTIONS.INITIALIZE_START });
+
+        if (signal?.aborted) {
+          throw new Error('Auth initialization aborted');
+        }
+
+        // Check for stored user
+        const storedUser = await getStoredUser();
+
+        if (signal?.aborted) {
+          throw new Error('Auth initialization aborted');
+        }
+
+        const user = storedUser || null;
+
+        // CRASH FIX: Only dispatch if still mounted
+        if (isMountedRef.current) {
+          dispatch({
+            type: AUTH_ACTIONS.INITIALIZE_SUCCESS,
+            payload: { user }
+          });
+        }
+
+        const result = { success: true, skipped: false, user };
+        initializationResultRef.current = result;
+        return result;
+      } catch (error) {
+        getLogger().error('Auth initialization failed:', error);
+
+        // IMPORTANT: Reset on any error (not only abort) so we don't get stuck forever.
+        initializationRef.current = false;
+
+        const errorMessage = error?.message || 'Auth initialization failed';
+        const result = { success: false, skipped: false, error: errorMessage };
+        initializationResultRef.current = result;
+
+        // CRASH FIX: Only dispatch if still mounted
+        if (isMountedRef.current) {
+          dispatch({
+            type: AUTH_ACTIONS.INITIALIZE_ERROR,
+            payload: { error: errorMessage }
+          });
+        }
+
+        // Do not throw: callers should not crash the app if auth restore fails.
+        return result;
+      } finally {
+        initializationPromiseRef.current = null;
       }
-    } catch (error) {
-      getLogger().error('Auth initialization failed:', error);
-      // CRASH FIX: Only dispatch if still mounted
-      if (isMountedRef.current) {
-        dispatch({ 
-          type: AUTH_ACTIONS.INITIALIZE_ERROR, 
-          // FIX: Serialize error message instead of full error object
-          payload: { error: error?.message || 'Auth initialization failed' } 
-        });
-      }
-    }
+    })();
+
+    return initializationPromiseRef.current;
   }, [getStoredUser]); // FIX: Remove logger from deps - it's a stable module import
 
   // LOGIN: Handle user login
@@ -287,6 +328,8 @@ export const AuthProvider = ({ children }) => {
       
       // CRASH FIX: Check mounted before dispatching after async
       if (isMountedRef.current) {
+        initializationRef.current = true;
+        initializationResultRef.current = { success: true, skipped: false, user };
         dispatch({ 
           type: AUTH_ACTIONS.LOGIN_SUCCESS, 
           payload: { user } 
@@ -316,6 +359,8 @@ export const AuthProvider = ({ children }) => {
       
       // CRASH FIX: Check mounted before dispatching after async
       if (isMountedRef.current) {
+        initializationRef.current = true;
+        initializationResultRef.current = { success: true, skipped: false, user: null };
         dispatch({ type: AUTH_ACTIONS.LOGOUT });
         getLogger().info('Logout successful');
       }
@@ -324,6 +369,8 @@ export const AuthProvider = ({ children }) => {
       // Still dispatch logout even if storage clear fails
       // CRASH FIX: Check mounted before dispatching
       if (isMountedRef.current) {
+        initializationRef.current = true;
+        initializationResultRef.current = { success: true, skipped: false, user: null };
         dispatch({ type: AUTH_ACTIONS.LOGOUT });
       }
     }
@@ -342,19 +389,17 @@ export const AuthProvider = ({ children }) => {
     });
   }, []);
 
+  const getCurrentUser = useCallback(() => state.user, [state.user]);
+
   // MEMOIZED DISPATCH ACTIONS: Prevent unnecessary re-renders
   const dispatchActions = React.useMemo(() => ({
     initializeAuth,
     handleLoginSuccess,
     handleLogout,
     clearError,
-    setUser
-  }), [initializeAuth, handleLoginSuccess, handleLogout, clearError, setUser]);
-
-  // AUTO-INITIALIZE: Initialize auth on mount
-  useEffect(() => {
-    initializeAuth();
-  }, [initializeAuth]);
+    setUser,
+    getCurrentUser
+  }), [initializeAuth, handleLoginSuccess, handleLogout, clearError, setUser, getCurrentUser]);
 
   devLog('AuthProvider rendering, state:', {
     hasUser: !!state.user,

@@ -21,26 +21,109 @@ const IS_DEBUG_MODE = () => getIsDebugMode();
 // CRASH FIX: Removed top-level IS_DEBUG_MODE() call that was pulling expoConfigHelper
 // during module load (before native bridge is ready). Build tag logging moved to component mount.
 
-import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
-import { View, Platform, Text } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  runOnJS,
-} from 'react-native-reanimated';
+import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle, useCallback, useState } from 'react';
+import { View, Platform, Text, InteractionManager } from 'react-native';
 
-// Safe iOS check - avoid accessing potentially undefined globals at module load
-// CRASH FIX: Removed IS_DEBUG_MODE() call from catch block to avoid pulling expoConfigHelper at module load
-const REANIMATED_READY = (() => {
+// CRASH FIX: Lazy-load gesture-handler and reanimated to prevent native module initialization
+// during the early import chain (before RN bridge is ready ~300ms after launch).
+// This fixes the Thread 3 SIGABRT crash on startup.
+let _gestureHandlerModule = null;
+let _gestureHandlerLoadAttempted = false;
+
+const loadGestureHandler = () => {
+  if (_gestureHandlerLoadAttempted) return _gestureHandlerModule;
+  _gestureHandlerLoadAttempted = true;
   try {
-    return typeof global?.__reanimatedWorkletInit === 'function';
+    const mod = require('react-native-gesture-handler');
+    _gestureHandlerModule = {
+      Gesture: mod.Gesture,
+      GestureDetector: mod.GestureDetector,
+    };
   } catch (e) {
-    // Silently fail - don't call IS_DEBUG_MODE() here as it pulls expoConfigHelper at module load
-    return false;
+    console.warn('FullColorWheel: react-native-gesture-handler load failed:', e?.message);
+    _gestureHandlerModule = null;
   }
-})();
+  return _gestureHandlerModule;
+};
+
+let _reanimatedModule = null;
+let _reanimatedLoadAttempted = false;
+
+const loadReanimated = () => {
+  if (_reanimatedLoadAttempted) return _reanimatedModule;
+  _reanimatedLoadAttempted = true;
+  try {
+    const mod = require('react-native-reanimated');
+    _reanimatedModule = {
+      Animated: mod.default,
+      useSharedValue: mod.useSharedValue,
+      useAnimatedStyle: mod.useAnimatedStyle,
+      withTiming: mod.withTiming,
+      runOnJS: mod.runOnJS,
+    };
+  } catch (e) {
+    console.warn('FullColorWheel: react-native-reanimated load failed:', e?.message);
+    _reanimatedModule = null;
+  }
+  return _reanimatedModule;
+};
+
+// CRASH FIX: Check reanimated readiness lazily, not at module load time
+// This prevents native module initialization during the import chain
+let _reanimatedReady = null;
+const isReanimatedReady = () => {
+  if (_reanimatedReady !== null) return _reanimatedReady;
+  try {
+    // First check if worklet init is available (quick check, no native access)
+    const hasWorkletInit = typeof global?.__reanimatedWorkletInit === 'function';
+    if (!hasWorkletInit) {
+      _reanimatedReady = false;
+      return false;
+    }
+    // Only load the module if worklet init is available
+    const reanimated = loadReanimated();
+    const gestureHandler = loadGestureHandler();
+    _reanimatedReady = !!(reanimated && gestureHandler);
+  } catch (e) {
+    _reanimatedReady = false;
+  }
+  return _reanimatedReady;
+};
+
+// Safe hook wrappers that use lazy-loaded modules or fallbacks
+const useSharedValueSafe = (initialValue) => {
+  const reanimated = loadReanimated();
+  if (reanimated?.useSharedValue) {
+    return reanimated.useSharedValue(initialValue);
+  }
+  // Fallback: simple ref-like object (won't animate but won't crash)
+  return useRef({ value: initialValue }).current;
+};
+
+const useAnimatedStyleSafe = (updater, deps) => {
+  const reanimated = loadReanimated();
+  if (reanimated?.useAnimatedStyle) {
+    return reanimated.useAnimatedStyle(updater, deps);
+  }
+  // Fallback: return empty style
+  return useMemo(() => ({}), deps || []);
+};
+
+const withTimingSafe = (value, config) => {
+  const reanimated = loadReanimated();
+  if (reanimated?.withTiming) {
+    return reanimated.withTiming(value, config);
+  }
+  return value;
+};
+
+const runOnJSSafe = (fn) => {
+  const reanimated = loadReanimated();
+  if (reanimated?.runOnJS) {
+    return reanimated.runOnJS(fn);
+  }
+  return fn;
+};
 
 import { hslToHex, hexToHsl } from '../utils/optimizedColor';
 
@@ -135,11 +218,17 @@ const addFreedIndexCallback = (freedRef) => (idx) => {
 };
 
 // Helper: run callback on JS when invoked from a worklet
+// Uses lazy-loaded runOnJS to prevent early native module access
 const callJS = (fn, ...args) => {
   'worklet';
   if (typeof fn !== 'function') return;
   if (typeof __WORKLET__ !== 'undefined' && __WORKLET__) {
-    runOnJS(fn)(...args);
+    const runOnJS = loadReanimated()?.runOnJS;
+    if (runOnJS) {
+      runOnJS(fn)(...args);
+    } else {
+      fn(...args);
+    }
   } else {
     fn(...args);
   }
@@ -168,34 +257,50 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   onHexChange,
   onActiveHandleChange,
 }, ref) {
+  const [isSkiaAllowed, setIsSkiaAllowed] = useState(false);
+
+  const MAX_HANDLES = 5;
+
+  useEffect(() => {
+    let cancelled = false;
+    InteractionManager.runAfterInteractions(() => {
+      if (cancelled) return;
+      setIsSkiaAllowed(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const radius = size / 2;
   const cx = radius, cy = radius;
 
-  const followActive = useSharedValue(selectedFollowsActive ? 1 : 0);
+  // CRASH FIX: Use safe hook wrappers that lazy-load reanimated
+  const followActive = useSharedValueSafe(selectedFollowsActive ? 1 : 0);
   useEffect(() => {
     followActive.value = selectedFollowsActive ? 1 : 0;
-    emitPalette();
+    emitPaletteJS();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedFollowsActive]);
 
-  const count = SCHEME_COUNTS[scheme] || 1;
+  const count = Math.min(SCHEME_COUNTS[scheme] || 1, MAX_HANDLES);
   const offsets = SCHEME_OFFSETS[scheme] || [0];
-  const schemeCount = useSharedValue(count);
+  const schemeCount = useSharedValueSafe(count);
   useEffect(() => { schemeCount.value = count; }, [count]);
 
   // Handle state (angle 0..360, sat 0..1, light 0..100)
-  const handleAngles = [useSharedValue(0), useSharedValue(30), useSharedValue(120), useSharedValue(210)];
-  const handleSats   = [useSharedValue(1), useSharedValue(1), useSharedValue(1), useSharedValue(1)];
-  const handleLights = [useSharedValue(50),useSharedValue(50),useSharedValue(50),useSharedValue(50)];
-  const activeIdx = useSharedValue(0);
+  const handleAngles = [useSharedValueSafe(0), useSharedValueSafe(30), useSharedValueSafe(120), useSharedValueSafe(210), useSharedValueSafe(300)];
+  const handleSats   = [useSharedValueSafe(1), useSharedValueSafe(1), useSharedValueSafe(1), useSharedValueSafe(1), useSharedValueSafe(1)];
+  const handleLights = [useSharedValueSafe(50),useSharedValueSafe(50),useSharedValueSafe(50),useSharedValueSafe(50),useSharedValueSafe(50)];
+  const activeIdx = useSharedValueSafe(0);
   const freed = useRef(new Set(freedIndices || []));                      // JS-only
-  const freedIdxSV = useSharedValue((freedIndices || []).slice());        // UI-thread safe (array)
+  const freedIdxSV = useSharedValueSafe((freedIndices || []).slice());        // UI-thread safe (array)
   
   // Create callback that doesn't pass ref to worklet
   const addFreedIndex = useCallback(addFreedIndexCallback(freed), []);
   
   // Throttling for worklet memory leak prevention
-  const lastEmitTime = useSharedValue(0);
+  const lastEmitTime = useSharedValueSafe(0);
 
   // Precomputed hue sweep
   const hueSweepColors = useMemo(() => {
@@ -218,7 +323,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       }
       handleLights[i].value = l;
     }
-    emitPalette();
+    emitPaletteJS();
   }, [initialHex]);
 
   // Reset freed when scheme changes
@@ -236,7 +341,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       handleLights[i].value = l;
     }
     
-    emitPalette();
+    emitPaletteJS();
   }, [scheme, count, offsets, initialHex]);
 
   // Sync prop → state
@@ -280,7 +385,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       }
     }
     
-    emitPalette();
+    emitPaletteJS();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linked, scheme, count, offsets]);
 
@@ -299,7 +404,22 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
     }
   };
 
-  const emitPalette = (phase = 'change') => {
+  const emitPaletteJS = (phase = 'change') => {
+    try {
+      const c = count;
+      const triples = [];
+      for (let i = 0; i < c; i++) {
+        triples.push([handleAngles[i].value, handleSats[i].value, handleLights[i].value]);
+      }
+      const activePref = selectedFollowsActive ? Math.max(0, Math.min(activeIdx.value, c - 1)) : 0;
+      jsEmitPalette(triples, activePref, phase);
+    } catch (error) {
+      console.warn('FullColorWheel: emitPaletteJS failed:', error.message);
+      console.error('FullColorWheel: emitPaletteJS error details:', error);
+    }
+  };
+
+  const emitPaletteWorklet = (phase = 'change') => {
     'worklet';
     try {
       // THROTTLING: Prevent excessive emissions for worklet memory leak prevention
@@ -325,7 +445,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   };
 
   // ===== Marker visuals (Canva look) =====
-  const markerStyle = (idx) => useAnimatedStyle(() => {
+  const markerStyle = (idx) => useAnimatedStyleSafe(() => {
     'worklet';
     const rad = ((handleAngles[idx].value - 90) * Math.PI) / 180;
     const r = radius * clamp01(handleSats[idx].value);
@@ -352,12 +472,14 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   const m1 = markerStyle(1);
   const m2 = markerStyle(2);
   const m3 = markerStyle(3);
+  const m4 = markerStyle(4);
 
   // Choose nearest handle
   const nearestHandle = (x, y) => {
     'worklet';
     // WORKLET FIX: Safe access to constants in worklet context
-    const c = (typeof SCHEME_COUNTS !== 'undefined' && SCHEME_COUNTS && SCHEME_COUNTS[scheme]) ? SCHEME_COUNTS[scheme] : 1;
+    const rawCount = (typeof SCHEME_COUNTS !== 'undefined' && SCHEME_COUNTS && SCHEME_COUNTS[scheme]) ? SCHEME_COUNTS[scheme] : 1;
+    const c = rawCount > 5 ? 5 : rawCount;
     let best = 0, bestDist = 1e9;
     for (let i=0;i<c;i++) {
       const ang = ((handleAngles[i].value - 90) * Math.PI)/180;
@@ -370,21 +492,26 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
     return best;
   };
 
-  const tap = Gesture.Tap().onStart((e) => {
+  // CRASH FIX: Load gesture handler lazily to prevent early native module access
+  const gestureModule = loadGestureHandler();
+  const GestureClass = gestureModule?.Gesture;
+  
+  // Create gestures only if gesture handler is available
+  const tap = GestureClass ? GestureClass.Tap().onStart((e) => {
     'worklet';
     const idx = nearestHandle(e.x, e.y);
     activeIdx.value = idx;
     if (typeof onActiveHandleChange === 'function') callJS(onActiveHandleChange, idx);
-    emitPalette();
-  });
+    emitPaletteWorklet();
+  }) : null;
 
-  const pan = Gesture.Pan()
+  const pan = GestureClass ? GestureClass.Pan()
     .onBegin((e) => {
       'worklet';
       const idx = nearestHandle(e.x, e.y);
       activeIdx.value = idx;
       if (typeof onActiveHandleChange === 'function') callJS(onActiveHandleChange, idx);
-      emitPalette();
+      emitPaletteWorklet();
     })
     .onChange((e) => {
       'worklet';
@@ -408,7 +535,8 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
         const baseAngle = deg;
         // WORKLET FIX: Capture constants in worklet-safe way
         const schemeOffsets = (typeof SCHEME_OFFSETS !== 'undefined' && SCHEME_OFFSETS && SCHEME_OFFSETS[scheme]) ? SCHEME_OFFSETS[scheme] : [0];
-        const handleCount = (typeof SCHEME_COUNTS !== 'undefined' && SCHEME_COUNTS && SCHEME_COUNTS[scheme]) ? SCHEME_COUNTS[scheme] : 1;
+        const rawHandleCount = (typeof SCHEME_COUNTS !== 'undefined' && SCHEME_COUNTS && SCHEME_COUNTS[scheme]) ? SCHEME_COUNTS[scheme] : 1;
+        const handleCount = rawHandleCount > 5 ? 5 : rawHandleCount;
         
         for (let k = 0; k < handleCount; k++) {
           if (k !== idx) { // Don't update the handle being dragged
@@ -432,18 +560,20 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
         }
       } else if (linked && idx !== 0) {
         // Mark non-primary handles as freed when dragged independently
-        const arr = Array.isArray(freedIdxSV.value) ? freedIdxSV.value.slice() : [];
-        if (arr.indexOf(idx) === -1) {
-          handleAngles[idx].value = withTiming(deg, { duration: 100 });
+        const currentFreed = Array.isArray(freedIdxSV.value) ? freedIdxSV.value : [];
+        if (currentFreed.indexOf(idx) === -1) {
+          freedIdxSV.value = currentFreed.concat([idx]);
+          callJS(addFreedIndex, idx);
         }
+        handleAngles[idx].value = withTimingSafe(deg, { duration: 100 });
       }
       
-      emitPalette();
-    });
+      emitPaletteWorklet();
+    }) : null;
 
   // Public setters live on JS: safe to consult JS Set + props
   const setHandleHSL = (idx, h, s, l) => {
-    const c = SCHEME_COUNTS[scheme] || 1;
+    const c = Math.min(SCHEME_COUNTS[scheme] || 1, MAX_HANDLES);
     const i = Math.max(0, Math.min(idx, c - 1));
     handleAngles[i].value = mod(h, 360);
     handleSats[i].value = clamp01(s / 100);
@@ -483,7 +613,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
       }
     }
     
-    emitPalette();
+    emitPaletteJS();
   };
 
   useImperativeHandle(ref, () => ({
@@ -513,15 +643,42 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
 
   // CRASH FIX: Load Skia at render time, not module load time
   // This ensures the app has mounted before Skia native init runs
-  const skia = loadSkia();
+  const skia = isSkiaAllowed ? loadSkia() : null;
   const Canvas = skia?.Canvas || FallbackCanvas;
   const SkiaCircle = skia?.Circle || FallbackCircle;
   const SweepGradient = skia?.SweepGradient || FallbackGradient;
   const RadialGradient = skia?.RadialGradient || FallbackGradient;
   const vec = skia?.vec || fallbackVec;
 
+  // CRASH FIX: Get Gesture and GestureDetector from lazy-loaded module
+  const gestureHandler = loadGestureHandler();
+  const Gesture = gestureHandler?.Gesture;
+  const GestureDetector = gestureHandler?.GestureDetector || View;
+  
+  // CRASH FIX: Get Animated from lazy-loaded module
+  const reanimated = loadReanimated();
+  const AnimatedView = reanimated?.Animated?.View || View;
+
+  // If gesture handler isn't available, return simple view without gestures
+  if (!Gesture) {
+    return (
+      <View style={{ width: size, height: size }}>
+        <Canvas style={{ width: size, height: size }}>
+          <SkiaCircle cx={cx} cy={cy} r={radius} color="#1A3A3F" />
+          <SkiaCircle cx={cx} cy={cy} r={radius - outerRim} color="#F8F8F8" />
+          <SkiaCircle cx={cx} cy={cy} r={radius - outerRim - innerSpacer}>
+            <SweepGradient c={vec(cx, cy)} colors={hueSweepColors} />
+          </SkiaCircle>
+        </Canvas>
+      </View>
+    );
+  }
+
+  // Create combined gesture using lazy-loaded GestureClass
+  const combinedGesture = (GestureClass && tap && pan) ? GestureClass.Simultaneous(tap, pan) : null;
+  
   return (
-    <GestureDetector gesture={Gesture.Simultaneous(tap, pan)}>
+    <GestureDetector gesture={combinedGesture}>
       <View style={{ width: size, height: size }}>
         <Canvas style={{ width: size, height: size }}>
           {/* Outer gradient rim (dark teal -> cyan) */}
@@ -542,10 +699,11 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
         </Canvas>
 
         {/* Handles */}
-        <Animated.View pointerEvents="none" style={[m0, { zIndex: 4 }]} />
-        <Animated.View pointerEvents="none" style={[m1, { zIndex: 3, opacity: count >= 2 ? 1 : 0 }]} />
-        <Animated.View pointerEvents="none" style={[m2, { zIndex: 2, opacity: count >= 3 ? 1 : 0 }]} />
-        <Animated.View pointerEvents="none" style={[m3, { zIndex: 1, opacity: count >= 4 ? 1 : 0 }]} />
+        <AnimatedView pointerEvents="none" style={[m0, { zIndex: 4 }]} />
+        <AnimatedView pointerEvents="none" style={[m1, { zIndex: 3, opacity: count >= 2 ? 1 : 0 }]} />
+        <AnimatedView pointerEvents="none" style={[m2, { zIndex: 2, opacity: count >= 3 ? 1 : 0 }]} />
+        <AnimatedView pointerEvents="none" style={[m3, { zIndex: 1, opacity: count >= 4 ? 1 : 0 }]} />
+        <AnimatedView pointerEvents="none" style={[m4, { zIndex: 0, opacity: count >= 5 ? 1 : 0 }]} />
       </View>
     </GestureDetector>
   );
@@ -566,4 +724,6 @@ const FallbackWheel = forwardRef(function FallbackWheel({ size, initialHex }, re
   );
 });
 
-export default REANIMATED_READY ? FullColorWheelImpl : FallbackWheel;
+// CRASH FIX: Use lazy check instead of module-load-time check
+// The component will use fallbacks internally if modules aren't available
+export default FullColorWheelImpl;

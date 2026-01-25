@@ -5,7 +5,7 @@ export const LAYOUT = {
   // Performance timing
   THROTTLE_FPS: 30,
   IMMEDIATE_FPS: 60,
-  DEBOUNCE_MS: 300,
+  DEBOUNCE_MS: 150,
   
   // Animation timing
   ANIMATION_DURATION: {

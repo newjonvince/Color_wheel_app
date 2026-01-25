@@ -90,7 +90,8 @@ const getApiBaseUrl = () => {
     console.error('Expo Constants error details:', error);
   }
   
-  return process.env.EXPO_PUBLIC_API_BASE_URL || process.env.API_BASE_URL || 'https://colorwheelapp-production.up.railway.app';
+  const env = (typeof process !== 'undefined' ? process?.env : undefined) || {};
+  return env.EXPO_PUBLIC_API_BASE_URL || env.API_BASE_URL || 'https://colorwheelapp-production.up.railway.app';
 };
 
 // Safe URL construction with validation

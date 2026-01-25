@@ -11,7 +11,6 @@ import {
   Dimensions
 } from 'react-native';
 import { StyleSheet } from 'react-native';
-import { safeStorage } from '../utils/safeStorage';
 // CRASH FIX: Use lazy getter to avoid calling isDebugMode() at module load time
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
@@ -26,7 +25,7 @@ const getIsDebugMode = () => {
   }
   return _isDebugModeValue;
 };
-const IS_DEBUG_MODE = getIsDebugMode;
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 class AppErrorBoundary extends React.Component {
   static MAX_ERRORS_PER_MINUTE = 5;
@@ -109,7 +108,7 @@ class AppErrorBoundary extends React.Component {
 
   componentDidCatch(error, errorInfo) {
     // Only log detailed error info in debug mode
-    if (IS_DEBUG_MODE) {
+    if (IS_DEBUG_MODE()) {
       console.error('AppErrorBoundary caught error:', error);
       console.error('Error info:', errorInfo);
     } else {
@@ -300,7 +299,7 @@ class AppErrorBoundary extends React.Component {
               ))}
             </View>
             
-            {IS_DEBUG_MODE && this.state.error && (
+            {IS_DEBUG_MODE() && this.state.error && (
               <View style={styles.debugSection}>
                 <Text style={styles.debugTitle}>Debug Info:</Text>
                 <ScrollView style={styles.stackTrace}>

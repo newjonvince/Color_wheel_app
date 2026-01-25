@@ -14,7 +14,61 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { View, Text, Image, TouchableOpacity, Alert, StyleSheet, Dimensions, PanResponder } from 'react-native';
 // CRASH FIX: Lazy-load expo modules to prevent native bridge access at module load time
-import ApiService from '../services/safeApiService';
+
+let _apiServiceInstance = null;
+let _apiServiceLoadAttempted = false;
+let _apiServiceLoadError = null;
+
+const getApiServiceInstance = () => {
+  if (_apiServiceLoadAttempted) return _apiServiceInstance;
+  _apiServiceLoadAttempted = true;
+  try {
+    const mod = require('../services/safeApiService');
+    _apiServiceInstance = mod?.default || mod;
+  } catch (error) {
+    _apiServiceLoadError = error;
+    console.warn('CoolorsColorExtractor: safeApiService load failed', error?.message);
+    _apiServiceInstance = null;
+  }
+  return _apiServiceInstance;
+};
+
+const ApiService = {
+  extractColorsFromImage: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.extractColorsFromImage === 'function') return inst.extractColorsFromImage(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+  sampleColorAt: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.sampleColorAt === 'function') return inst.sampleColorAt(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+  closeImageSession: (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.closeImageSession === 'function') return inst.closeImageSession(...args);
+  },
+  getToken: () => {
+    const inst = getApiServiceInstance();
+    return typeof inst?.getToken === 'function' ? inst.getToken() : undefined;
+  },
+};
+
+Object.defineProperty(ApiService, 'baseURL', {
+  enumerable: true,
+  get: () => {
+    const inst = getApiServiceInstance();
+    return inst?.baseURL;
+  },
+});
+
+Object.defineProperty(ApiService, 'ready', {
+  enumerable: true,
+  get: () => {
+    const inst = getApiServiceInstance();
+    return inst?.ready || Promise.resolve();
+  },
+});
 
 // Lazy expo-image-picker getter
 let _ImagePicker = null;
@@ -77,7 +131,7 @@ const getIsDebugMode = () => {
   }
   return _isDebugModeValue;
 };
-const IS_DEBUG_MODE = getIsDebugMode;
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 // Safe wrapper to log real errors + stack traces from component layer
 const safe = (fn, context = 'unknown') => (...args) => {
@@ -262,7 +316,7 @@ export default function CoolorsColorExtractor({
     try {
       setSelectedImage(asset);
       // Log image processing only in debug mode
-      if (IS_DEBUG_MODE) {
+      if (IS_DEBUG_MODE()) {
         console.log('CoolorsColorExtractor: Processing image with ApiService.extractColorsFromImage');
       }
       
@@ -277,7 +331,7 @@ export default function CoolorsColorExtractor({
         ApiService.extractColorsFromImage(assetSafe.uri, {
           onProgress: (progress) => {
             // Log upload progress only in debug mode
-            if (IS_DEBUG_MODE) {
+            if (IS_DEBUG_MODE()) {
               console.log(`Upload progress: ${progress}%`);
             }
           }
@@ -302,7 +356,7 @@ export default function CoolorsColorExtractor({
       setLiveColor(dominant || basePalette[0]);
       
       // Log successful image processing only in debug mode
-      if (IS_DEBUG_MODE) {
+      if (IS_DEBUG_MODE()) {
         console.log('CoolorsColorExtractor: Image processed successfully, dominant:', dominant);
       }
     } catch (e) {

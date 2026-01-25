@@ -1,12 +1,17 @@
 // CRASH FIX: Lazy-load AsyncStorage to prevent native bridge access at module load time
 let _AsyncStorage = null;
+let _isNativeAsyncStorage = null;
+let _nativeAsyncStorageLoadError = null;
 const getAsyncStorage = () => {
   if (_AsyncStorage) return _AsyncStorage;
   try {
     const mod = require('@react-native-async-storage/async-storage');
     _AsyncStorage = mod.default || mod;
+    _isNativeAsyncStorage = true;
   } catch (error) {
     console.warn('safeAsyncStorage: AsyncStorage load failed', error?.message);
+    _isNativeAsyncStorage = false;
+    _nativeAsyncStorageLoadError = error;
     _AsyncStorage = {
       getItem: () => Promise.resolve(null),
       setItem: () => Promise.resolve(),
@@ -147,7 +152,7 @@ class SafeAsyncStorage {
     this.initPromise = (async () => {
       try {
         await this._performInit(signal);
-        this.isAvailable = true;
+        this.isAvailable = this.isAvailable === true;
       } catch (error) {
         this.isAvailable = false;
         throw error;
@@ -161,59 +166,38 @@ class SafeAsyncStorage {
 
   async _performInit(signal) {
     try {
-      console.log('Initializing SafeAsyncStorage...');
+      if (_isNativeAsyncStorage === null) {
+        getAsyncStorage();
+      }
 
       // ABORT SIGNAL: Check if aborted before starting
       if (signal?.aborted) {
         throw new Error('SafeAsyncStorage initialization aborted');
       }
 
-      const testKey = '__safe_storage_test__';
-      const testValue = 'test_' + Date.now();
+      if (_isNativeAsyncStorage === false) {
+        this.isAvailable = false;
+        console.warn('Using in-memory fallback storage');
+        return;
+      }
 
-      console.log('Testing AsyncStorage operations...');
-      const asyncTest = (async () => {
-        // ABORT SIGNAL: Check before each operation
+      const probeKey = '__safe_storage_probe__';
+      const asyncProbe = (async () => {
         if (signal?.aborted) {
-          throw new Error('AsyncStorage test aborted');
+          throw new Error('AsyncStorage probe aborted');
         }
-        
-        console.log('  - Testing setItem...');
-        await getAsyncStorage().setItem(testKey, testValue);
-        
-        if (signal?.aborted) {
-          throw new Error('AsyncStorage test aborted');
-        }
-        
-        console.log('  - Testing getItem...');
-        const retrieved = await getAsyncStorage().getItem(testKey);
-        
-        if (signal?.aborted) {
-          throw new Error('AsyncStorage test aborted');
-        }
-        
-        console.log('  - Testing removeItem...');
-        await getAsyncStorage().removeItem(testKey);
-        
-        if (signal?.aborted) {
-          throw new Error('AsyncStorage test aborted');
-        }
-        
-        console.log('  - Verifying data integrity...');
-        return retrieved === testValue;
+        await getAsyncStorage().getItem(probeKey);
+        return true;
       })();
 
-      const success = await this._safeTimeout(asyncTest, 5000, 'AsyncStorage test', signal);
+      const success = await this._safeTimeout(asyncProbe, 5000, 'AsyncStorage probe', signal);
       
       if (success) {
         this.isAvailable = true;
         // Clear shadow fallback data on successful init to avoid stale state
         this.fallbackStorage.clear();
-        if (getIsDebugMode()) {
-          console.log('AsyncStorage is available and working');
-        }
       } else {
-        throw new Error('AsyncStorage test failed - retrieved value mismatch');
+        throw new Error('AsyncStorage probe failed');
       }
 
     } catch (error) {
@@ -570,5 +554,76 @@ class SafeAsyncStorage {
   }
 }
 
-export const safeAsyncStorage = SafeAsyncStorage.getInstance();
+let _safeAsyncStorageInstance = null;
+let _safeAsyncStorageInstanceLoadAttempted = false;
+let _safeAsyncStorageInstanceLoadError = null;
+
+const getSafeAsyncStorageInstance = () => {
+  if (_safeAsyncStorageInstanceLoadAttempted) return _safeAsyncStorageInstance;
+  _safeAsyncStorageInstanceLoadAttempted = true;
+  try {
+    _safeAsyncStorageInstance = SafeAsyncStorage.getInstance();
+  } catch (error) {
+    _safeAsyncStorageInstanceLoadError = error;
+    console.warn('safeAsyncStorage: SafeAsyncStorage.getInstance failed', error?.message);
+    _safeAsyncStorageInstance = {
+      init: async () => {},
+      getItem: async () => null,
+      setItem: async () => {},
+      removeItem: async () => {},
+      multiGet: async () => [],
+      multiSet: async () => {},
+      multiRemove: async () => {},
+      getAllKeys: async () => [],
+      clear: async () => {},
+      isAsyncStorageAvailable: () => false,
+      getStorageInfo: () => ({
+        isAsyncStorageAvailable: false,
+        fallbackStorageSize: 0,
+        usingFallback: true,
+        error: _safeAsyncStorageInstanceLoadError?.message
+      }),
+    };
+  }
+  return _safeAsyncStorageInstance;
+};
+
+const callAsync = (methodName, defaultValue) => async (...args) => {
+  const instance = getSafeAsyncStorageInstance();
+  const method = instance && instance[methodName];
+  if (typeof method === 'function') {
+    return method.apply(instance, args);
+  }
+  return defaultValue;
+};
+
+export const safeAsyncStorage = {
+  init: callAsync('init'),
+  getItem: callAsync('getItem', null),
+  setItem: callAsync('setItem'),
+  removeItem: callAsync('removeItem'),
+  multiGet: callAsync('multiGet', []),
+  multiSet: callAsync('multiSet'),
+  multiRemove: callAsync('multiRemove'),
+  getAllKeys: callAsync('getAllKeys', []),
+  clear: callAsync('clear'),
+  isAsyncStorageAvailable: () => {
+    const instance = getSafeAsyncStorageInstance();
+    return typeof instance?.isAsyncStorageAvailable === 'function'
+      ? instance.isAsyncStorageAvailable()
+      : false;
+  },
+  getStorageInfo: () => {
+    const instance = getSafeAsyncStorageInstance();
+    return typeof instance?.getStorageInfo === 'function'
+      ? instance.getStorageInfo()
+      : {
+          isAsyncStorageAvailable: false,
+          fallbackStorageSize: 0,
+          usingFallback: true,
+          error: _safeAsyncStorageInstanceLoadError?.message
+        };
+  },
+};
+
 export default safeAsyncStorage;

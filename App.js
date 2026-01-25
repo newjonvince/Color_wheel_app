@@ -1,5 +1,6 @@
 ﻿// App.js - Simplified Fashion Color Wheel App
-import 'react-native-gesture-handler';
+// CRASH FIX: react-native-gesture-handler import moved to index.js
+// It must be initialized at the entry point with try-catch protection
 
 // Configure LogBox FIRST - before any other imports or code
 import { LogBox } from 'react-native';
@@ -32,13 +33,41 @@ LogBox.ignoreLogs([
 ]);
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, Animated, Platform, InteractionManager } from 'react-native';
+import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, Animated, Platform, InteractionManager, SafeAreaView } from 'react-native';
 
 // Navigation and UI imports (non-native, safe at module load)
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+
+// CRASH FIX: Lazy-load gesture handler and safe-area-context to prevent early native access
+let _GestureHandlerRootView = null;
+const getGestureHandlerRootView = () => {
+  if (_GestureHandlerRootView) return _GestureHandlerRootView;
+  try {
+    const mod = require('react-native-gesture-handler');
+    _GestureHandlerRootView = mod.GestureHandlerRootView;
+  } catch (error) {
+    console.warn('App: GestureHandlerRootView load failed', error?.message);
+    _GestureHandlerRootView = View; // Fallback to View
+  }
+  return _GestureHandlerRootView;
+};
+
+let _SafeAreaProvider = null;
+let _SafeAreaView = null;
+const getSafeAreaComponents = () => {
+  if (_SafeAreaProvider && _SafeAreaView) return { SafeAreaProvider: _SafeAreaProvider, SafeAreaView: _SafeAreaView };
+  try {
+    const mod = require('react-native-safe-area-context');
+    _SafeAreaProvider = mod.SafeAreaProvider;
+    _SafeAreaView = mod.SafeAreaView;
+  } catch (error) {
+    console.warn('App: safe-area-context load failed', error?.message);
+    _SafeAreaProvider = View; // Fallback to View
+    _SafeAreaView = View;
+  }
+  return { SafeAreaProvider: _SafeAreaProvider, SafeAreaView: _SafeAreaView };
+};
 
 // CRASH FIX: Lazy-load native modules to prevent bridge access at module load time
 let _StatusBar = null;
@@ -93,6 +122,46 @@ const devLog = (...args) => (typeof __DEV__ !== 'undefined' && __DEV__) && conso
 const devWarn = (...args) => (typeof __DEV__ !== 'undefined' && __DEV__) && console.warn(...args);
 const devError = (...args) => (typeof __DEV__ !== 'undefined' && __DEV__) && console.error(...args);
 
+const createAbortController = () => {
+  try {
+    const helpers = require('./src/utils/apiHelpers');
+    if (typeof helpers?.createSafeAbortController === 'function') {
+      return helpers.createSafeAbortController();
+    }
+  } catch (_) {
+  }
+  let aborted = false;
+  const listeners = new Set();
+  return {
+    signal: {
+      get aborted() {
+        return aborted;
+      },
+      addEventListener: (type, handler) => {
+        if (type === 'abort' && typeof handler === 'function') {
+          listeners.add(handler);
+        }
+      },
+      removeEventListener: (type, handler) => {
+        if (type === 'abort') {
+          listeners.delete(handler);
+        }
+      },
+    },
+    abort: () => {
+      if (aborted) return;
+      aborted = true;
+      for (const handler of listeners) {
+        try {
+          handler();
+        } catch (_) {
+        }
+      }
+      listeners.clear();
+    },
+  };
+};
+
 // LAZY LOADING: Avoid circular dependency with config/appconfig.js
 let appConfig = null;
 let statusBarStyleFn = null;
@@ -140,12 +209,36 @@ try {
 }
 
 // Screen imports - let error boundary catch failures instead of faking screens
-import AuthenticatedApp from './src/components/AuthenticatedApp';
-import UnauthenticatedApp from './src/components/UnauthenticatedApp';
 import UnifiedErrorBoundary from './src/components/UnifiedErrorBoundary';
 import { AuthProvider, useAuthState, useAuthDispatch } from './src/contexts/AuthContext';
 import { validateEnv } from './src/config/env';
 import { initializeCrashReporting, reportError, setUserContext, addBreadcrumb } from './src/utils/crashReporting';
+
+let _AuthenticatedApp = null;
+const getAuthenticatedApp = () => {
+  if (_AuthenticatedApp) return _AuthenticatedApp;
+  try {
+    const mod = require('./src/components/AuthenticatedApp');
+    _AuthenticatedApp = mod?.default || mod;
+  } catch (error) {
+    console.warn('App: AuthenticatedApp load failed', error?.message || error);
+    _AuthenticatedApp = () => null;
+  }
+  return _AuthenticatedApp;
+};
+
+let _UnauthenticatedApp = null;
+const getUnauthenticatedApp = () => {
+  if (_UnauthenticatedApp) return _UnauthenticatedApp;
+  try {
+    const mod = require('./src/components/UnauthenticatedApp');
+    _UnauthenticatedApp = mod?.default || mod;
+  } catch (error) {
+    console.warn('App: UnauthenticatedApp load failed', error?.message || error);
+    _UnauthenticatedApp = () => null;
+  }
+  return _UnauthenticatedApp;
+};
 
 // FIX: Lazy load AppLogger to avoid circular dependency
 // App.js → config/appconfig.js → AppLogger.js → App.js (CIRCULAR!)
@@ -243,10 +336,20 @@ function FashionColorWheelApp() {
   const { initializeAuth, handleLoginSuccess, handleLogout } = useAuthDispatch();
   devLog('FashionColorWheelApp: Auth state:', { user: !!user, authLoading, isInitialized });
 
+  const authStateRef = useRef({ user: null, isInitialized: false });
+  useEffect(() => {
+    authStateRef.current = { user, isInitialized };
+  }, [user, isInitialized]);
+
   // Additional validation: Ensure auth functions are actually functions
   const safeInitializeAuth = typeof initializeAuth === 'function' 
     ? initializeAuth 
     : DEFAULT_AUTH_HANDLERS.initializeAuth;
+
+  const authInitializerRef = useRef(safeInitializeAuth);
+  useEffect(() => {
+    authInitializerRef.current = safeInitializeAuth;
+  }, [safeInitializeAuth]);
   
   const safeHandleLoginSuccess = typeof handleLoginSuccess === 'function' 
     ? handleLoginSuccess 
@@ -306,7 +409,7 @@ function FashionColorWheelApp() {
     }
 
     let isMounted = true;
-    const controller = new AbortController();
+    const controller = createAbortController();
     let initSequenceTimerId = null; // Track initialization setTimeout for cleanup
 
     // BACKGROUND INITIALIZATION: Initialize features without blocking UI
@@ -363,47 +466,33 @@ function FashionColorWheelApp() {
           getLogger().debug('Initialization aborted after crash reporting setup');
           return;
         }
-        
-        // FIX: Explicit auth initialization with proper error handling
-        getLogger().debug('Initializing authentication...');
-        setLoadingStateSafe({ stage: 'auth', progress: 15, message: 'Setting up authentication...' });
-        
-        try {
-          await safeInitializeAuth();
-          getLogger().info('Auth initialization completed successfully');
-          
-          // ABORT CHECK: After auth initialization
-          if (controller.signal.aborted || !isMounted) {
-            getLogger().debug('Initialization aborted after auth setup');
-            return;
-          }
-        } catch (error) {
-          getLogger().error('Auth initialization failed:', error);
-          
-          if (isMounted) {
-            const authErrorMsg = error?.message || 'Unknown authentication error';
-            const authError = new Error(`Authentication failed: ${authErrorMsg}`);
-            authError.cause = error;
-            authError.category = 'AuthError';
-            
-            safeSetInitializationState('error', authError);
-            setInitError(authError);
-            setIsReady(false);
-            
-            addBreadcrumb('Auth initialization failed', 'auth', 'error', {
-              originalError: authErrorMsg,
-              errorType: error?.name || 'Error'
-            });
-            
-            throw authError; // authError is guaranteed to exist now
-          }
-          
-          throw error; // Fallback if not mounted
-        }
-        
-        // CRITICAL FIX: Set auth initializer BEFORE calling initialize() to prevent race condition
+
+        // Set auth initializer BEFORE calling initialize() to prevent race condition
+        // IMPORTANT: Do not call auth initialization directly here; it must run via AppInitializer
+        // so that storage/native readiness ordering is preserved.
         devLog('Setting auth initializer in AppInitializer...');
-        appInitializer.setAuthInitializer(safeInitializeAuth);
+        appInitializer.setAuthInitializer(async (options) => {
+          try {
+            const { user: currentUser, isInitialized: authIsInitialized } = authStateRef.current || {};
+            if (authIsInitialized && currentUser) {
+              getLogger().debug('Auth already initialized with user, skipping auth init');
+              return { success: true, skipped: true, reason: 'already_authenticated' };
+            }
+            const result = await authInitializerRef.current(options);
+            if (!result) {
+              return { success: true, skipped: true, reason: 'auth_init_no_result' };
+            }
+            if (typeof result === 'object' && result.error) {
+              const err = result.error;
+              const serializedError = typeof err === 'string' ? err : err?.message || String(err);
+              return { ...result, error: serializedError };
+            }
+            return result;
+          } catch (error) {
+            getLogger().warn('Auth initialization failed (non-fatal):', error?.message || error);
+            return { skipped: true, reason: 'auth_init_failed', error: error?.message || String(error) };
+          }
+        });
         
         // Use centralized initialization with progressive loading
         devLog('Starting AppInitializer.initialize...');
@@ -417,9 +506,6 @@ function FashionColorWheelApp() {
             await new Promise(resolve => setTimeout(resolve, 0));
             
             const basicChecks = {
-              hasConstants: !!getExpoConstants(),
-              hasAsyncStorage: !!getAsyncStorage(),
-              hasNetInfo: !!getNetInfo(),
               platform: Platform.OS,
               memory: typeof performance !== 'undefined' && performance.memory ? {
                 used: Math.round(performance.memory.usedJSHeapSize / 1024 / 1024),
@@ -447,7 +533,7 @@ function FashionColorWheelApp() {
         await appInitializer.initialize({
           signal: controller?.signal,
           onProgress: (progress) => {
-            if (isMounted) {
+            if (isMounted && !controller?.signal?.aborted) {
               getLogger().info(`Background init: ${progress.step} (${Math.round(progress.progress * 100)}%)`);
               
               // BACKGROUND PROGRESS: Update loading state for background initialization
@@ -499,9 +585,11 @@ function FashionColorWheelApp() {
         // - API calls with invalid tokens
         // - Security vulnerabilities
         if (isMounted) {
-          setInitializationState('error', error);
-          setInitError(error);
-          setIsReady(false);
+          const didTransition = setInitializationState('error', error);
+          if (didTransition) {
+            setInitError(error);
+            setIsReady(false);
+          }
         }
       } finally {
         // Wrap finally block in try-catch to prevent any cleanup errors
@@ -614,7 +702,19 @@ function FashionColorWheelApp() {
     // Start initialization sequence
     let interactionHandle = null;
     const scheduleInit = () => {
-      initSequenceTimerId = setTimeout(initializeSequentially, 100);
+      initSequenceTimerId = setTimeout(() => {
+        initializeSequentially().catch((error) => {
+          if (!isMounted || controller?.signal?.aborted || initializationRef.current.state === 'success') {
+            return;
+          }
+          if (setInitializationState('error', error)) {
+            getLogger().error('Initialization error (unhandled escape):', error);
+            setInitError(error);
+            setIsReady(false);
+            setLoadingStateSafe({ stage: 'error', progress: 0, message: 'Initialization failed' });
+          }
+        });
+      }, 100);
     };
     try {
       if (InteractionManager?.runAfterInteractions) {
@@ -733,7 +833,14 @@ function FashionColorWheelApp() {
   const performStateReset = useCallback(() => {
     getLogger().warn('No platform restart available, performing state reset...');
     
-    setInitializationState('pending');
+    const didTransition = setInitializationState('pending');
+    if (!didTransition) {
+      initializationRef.current = {
+        state: 'pending',
+        timestamp: Date.now(),
+        error: null,
+      };
+    }
     progressAnimatedValue.setValue(0);
     setInitError(null);
     setIsReady(false);
@@ -744,6 +851,30 @@ function FashionColorWheelApp() {
     restartTimersRef.current.restart = setTimeout(() => {
       restartTimersRef.current.restart = null;
       if (appInitializer?.initialize && initializationRef.current.state === 'pending') {
+        if (appInitializer?.setAuthInitializer) {
+          appInitializer.setAuthInitializer(async (options) => {
+            try {
+              const { user: currentUser, isInitialized: authIsInitialized } = authStateRef.current || {};
+              if (authIsInitialized && currentUser) {
+                getLogger().debug('Auth already initialized with user, skipping auth init');
+                return { success: true, skipped: true, reason: 'already_authenticated' };
+              }
+              const result = await authInitializerRef.current(options);
+              if (!result) {
+                return { success: true, skipped: true, reason: 'auth_init_no_result' };
+              }
+              if (typeof result === 'object' && result.error) {
+                const err = result.error;
+                const serializedError = typeof err === 'string' ? err : err?.message || String(err);
+                return { ...result, error: serializedError };
+              }
+              return result;
+            } catch (error) {
+              getLogger().warn('Auth initialization failed (non-fatal):', error?.message || error);
+              return { skipped: true, reason: 'auth_init_failed', error: error?.message || String(error) };
+            }
+          });
+        }
         appInitializer.initialize().catch((error) => {
           getLogger().error('Restart initialization failed:', error);
           setInitializationState('error', error);
@@ -895,26 +1026,34 @@ function FashionColorWheelApp() {
             style={[styles.restartButton, { backgroundColor: '#3498db', marginTop: 10 }]}
             onPress={async () => {
               try {
-                devLog('Running basic system check...');
-                
-                // FIXED: Replaced require() with basic system validation
-                const systemCheck = {
-                  timestamp: new Date().toISOString(),
-                  memoryUsage: typeof performance !== 'undefined' ? performance.memory : 'unavailable',
-                  userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unavailable',
-                  platform: typeof Platform !== 'undefined' ? Platform.OS : 'unknown',
-                  constants: getExpoConstants() ? 'available' : 'missing'
-                };
-                
-                const hasIssues = systemCheck.constants === 'missing';
-                
-                Alert.alert(
-                  'System Check Results',
-                  hasIssues 
-                    ? 'Some system components may be unavailable. Try restarting the app.'
-                    : 'Basic system check passed. If issues persist, try restarting the app.',
-                  [{ text: 'OK' }]
-                );
+                devLog('Running initialization diagnostics...');
+
+                const initializerStatus = (appInitializer && typeof appInitializer.getStatus === 'function')
+                  ? appInitializer.getStatus()
+                  : null;
+
+                const errorName = initError?.name || 'Error';
+                const errorMessage = initError?.message || 'Unknown initialization error';
+
+                const lines = [];
+                lines.push(`Error: ${errorName}: ${errorMessage}`);
+                lines.push(`Platform: ${typeof Platform !== 'undefined' ? Platform.OS : 'unknown'}`);
+                lines.push(`Expo constants: ${getExpoConstants() ? 'available' : 'missing'}`);
+
+                if (initializerStatus) {
+                  lines.push(`Initializer state: ${initializerStatus.state || 'unknown'}`);
+                  if (Array.isArray(initializerStatus.failedSteps) && initializerStatus.failedSteps.length > 0) {
+                    lines.push(`Failed steps: ${initializerStatus.failedSteps.join(', ')}`);
+                  }
+                  if (Array.isArray(initializerStatus.completedSteps) && initializerStatus.completedSteps.length > 0) {
+                    lines.push(`Completed steps: ${initializerStatus.completedSteps.join(', ')}`);
+                  }
+                  if (initializerStatus.stateData?.lastError) {
+                    lines.push(`Last error: ${initializerStatus.stateData.lastError}`);
+                  }
+                }
+
+                Alert.alert('Initialization Diagnostics', lines.filter(Boolean).join('\n'), [{ text: 'OK' }]);
               } catch (error) {
                 Alert.alert('System Check Error', `Could not run system check: ${error.message}`);
               }
@@ -1031,11 +1170,22 @@ function FashionColorWheelApp() {
           userKeys: user ? Object.keys(user) : []
         });
       }
+      const UnauthenticatedApp = getUnauthenticatedApp();
       return <UnauthenticatedApp handleLoginSuccess={safeHandleLoginSuccess} />;
     }
 
     // Main authenticated app - user is validated
-    return <AuthenticatedApp user={user} handleLogout={safeHandleLogout} />;
+    try {
+      const AuthenticatedApp = getAuthenticatedApp();
+      if (!AuthenticatedApp) {
+        throw new Error('AuthenticatedApp component failed to load');
+      }
+      return <AuthenticatedApp user={user} handleLogout={safeHandleLogout} />;
+    } catch (error) {
+      getLogger().error('Failed to render AuthenticatedApp:', error);
+      const UnauthenticatedApp = getUnauthenticatedApp();
+      return <UnauthenticatedApp handleLoginSuccess={safeHandleLoginSuccess} />;
+    }
   }, [
     initError,
     navigationError,    // NEW: Navigation error state
@@ -1097,25 +1247,37 @@ function FashionColorWheelApp() {
         // Could use Updates.reloadAsync() here
       }}
     >
-      <SafeAreaProvider>
-        <GestureHandlerRootView style={styles.fullScreen}>
-          {(() => { const SB = getStatusBar(); return SB ? <SB style={getStatusBarStyle()} /> : null; })()}
-          <NavigationContainer 
-            linking={getAppConfig().linking}
-            fallback={
-              <SafeAreaView style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#e74c3c" />
-                <Text style={styles.loadingText}>Loading navigation...</Text>
-              </SafeAreaView>
-            }
-            onError={handleNavigationError}
-            // Conditionally add prop only in debug mode
-            {...((typeof __DEV__ !== 'undefined' && __DEV__) ? { onStateChange: (state) => getLogger().debug('Nav state:', state) } : {})}
-          >
-            {renderContent}
-          </NavigationContainer>
-        </GestureHandlerRootView>
-      </SafeAreaProvider>
+      {(() => {
+        // Load native UI wrappers only after core init completes
+        // Before isReady, stick to View-only wrappers to avoid early native module initialization.
+        const GestureHandlerRootView = getGestureHandlerRootView();
+        const { SafeAreaProvider, SafeAreaView } = isReady
+          ? getSafeAreaComponents()
+          : { SafeAreaProvider: View, SafeAreaView: View };
+        const StatusBar = isReady ? getStatusBar() : null;
+        
+        return (
+          <SafeAreaProvider>
+            <GestureHandlerRootView style={styles.fullScreen}>
+              {StatusBar ? <StatusBar style={getStatusBarStyle()} /> : null}
+              <NavigationContainer 
+                linking={getAppConfig().linking}
+                fallback={
+                  <SafeAreaView style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#e74c3c" />
+                    <Text style={styles.loadingText}>Loading navigation...</Text>
+                  </SafeAreaView>
+                }
+                onError={handleNavigationError}
+                // Conditionally add prop only in debug mode
+                {...((typeof __DEV__ !== 'undefined' && __DEV__) ? { onStateChange: (state) => getLogger().debug('Nav state:', state) } : {})}
+              >
+                {renderContent}
+              </NavigationContainer>
+            </GestureHandlerRootView>
+          </SafeAreaProvider>
+        );
+      })()}
     </UnifiedErrorBoundary>
   );
 }

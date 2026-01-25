@@ -42,6 +42,16 @@ try {
   console.warn('[STARTUP] react-native-screens failed:', e?.message);
 }
 
+// Step 2.5: CRASH FIX - Initialize gesture handler BEFORE App.js import
+// This must happen at the entry point, before any component uses gestures
+// Wrapped in try-catch to prevent native crashes from killing the app
+try {
+  require('react-native-gesture-handler');
+  console.log('[STARTUP] react-native-gesture-handler initialized');
+} catch (e) {
+  console.warn('[STARTUP] react-native-gesture-handler failed:', e?.message);
+}
+
 // Step 3: Load and register the app (after all safety measures are in place)
 try {
   const { registerRootComponent } = require('expo');

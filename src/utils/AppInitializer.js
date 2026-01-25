@@ -2,10 +2,8 @@
 // Replaces mixed initialization strategies with predictable, sequential initialization
 
 // CRASH FIX: Safe AbortController wrapper - not all React Native runtimes have AbortController
-const isAbortControllerAvailable = typeof AbortController !== 'undefined';
-
 const createSafeAbortController = () => {
-  if (isAbortControllerAvailable) {
+  if (typeof AbortController !== 'undefined') {
     return new AbortController();
   }
   // Polyfill for environments without AbortController
@@ -315,34 +313,36 @@ class AppInitializer {
         return await getInitializeAppConfig()();
       }, {
         critical: true,
-        timeout: 3000,
+        timeout: 5000,
         retries: 1,
         dependencies: ['env']
       }),
       
       new InitializationStep('storage', ({ signal }) => getSafeStorage().init({ signal }), {
         critical: true,
-        timeout: 4000,
+        timeout: 10000,
         retries: 2,
         dependencies: ['config']
       }),
       
       new InitializationStep('api', ({ signal }) => getSafeApiService().initialize({ signal }), {
         critical: true,
-        timeout: 3000,
+        timeout: 8000,
         retries: 3,
         dependencies: ['storage']
       }),
       
       new InitializationStep('auth', async ({ signal }) => {
+        if (signal?.aborted) throw new Error('Auth initialization aborted');
         // CRITICAL FIX: Fail explicitly if auth initializer wasn't set
         if (!this.authInitializer) {
-          throw new Error('Auth initializer not set - call setAuthInitializer() before initialize()');
+          getLogger().warn('Auth initializer not set - skipping auth step');
+          return { skipped: true, reason: 'authInitializer_not_set' };
         }
         return this.authInitializer({ signal });
       }, {
         critical: false,
-        timeout: 2000,
+        timeout: 8000,
         retries: 1,
         dependencies: ['storage', 'api']
       })
@@ -807,7 +807,7 @@ class AppInitializer {
   async _performInitialization(options = {}) {
     const { signal, onProgress } = options;
     
-    const GLOBAL_TIMEOUT = 15000;
+    const GLOBAL_TIMEOUT = 30000;
     let globalTimeoutId = null;
     
     // FIX: Create AbortController for global timeout that actually aborts operations
