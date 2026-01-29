@@ -208,34 +208,135 @@ try {
   };
 }
 
-// Screen imports - let error boundary catch failures instead of faking screens
-import UnifiedErrorBoundary from './src/components/UnifiedErrorBoundary';
-import { AuthProvider, useAuthState, useAuthDispatch } from './src/contexts/AuthContext';
-import { validateEnv } from './src/config/env';
-import { initializeCrashReporting, reportError, setUserContext, addBreadcrumb } from './src/utils/crashReporting';
+// CRASH FIX: Lazy-load critical modules to prevent early native bridge access
+let _UnifiedErrorBoundary = null;
+const getUnifiedErrorBoundary = () => {
+  if (_UnifiedErrorBoundary) return _UnifiedErrorBoundary;
+  try {
+    const mod = require('./src/components/UnifiedErrorBoundary');
+    _UnifiedErrorBoundary = mod?.default || mod;
+  } catch (error) {
+    console.warn('App: UnifiedErrorBoundary load failed', error?.message);
+    // Fallback error boundary that just renders children
+    _UnifiedErrorBoundary = class FallbackErrorBoundary extends React.Component {
+      componentDidCatch(error, errorInfo) {
+        console.error('Fallback error boundary caught:', error, errorInfo);
+      }
+      render() {
+        return this.props.children;
+      }
+    };
+  }
+  return _UnifiedErrorBoundary;
+};
+
+let _AuthContext = null;
+const getAuthContext = () => {
+  if (_AuthContext) return _AuthContext;
+  try {
+    _AuthContext = require('./src/contexts/AuthContext');
+  } catch (error) {
+    console.warn('App: AuthContext load failed', error?.message);
+    // Fallback auth context with no-op functions
+    _AuthContext = {
+      AuthProvider: ({ children }) => children,
+      useAuthState: () => ({ user: null, loading: false, isInitialized: false, error: null }),
+      useAuthDispatch: () => ({
+        initializeAuth: async () => ({ success: true, skipped: true }),
+        handleLoginSuccess: () => {},
+        handleLogout: () => {},
+      }),
+    };
+  }
+  return _AuthContext;
+};
+
+let _validateEnv = null;
+const getValidateEnv = () => {
+  if (_validateEnv) return _validateEnv;
+  try {
+    const mod = require('./src/config/env');
+    _validateEnv = mod?.validateEnv || mod?.default?.validateEnv;
+  } catch (error) {
+    console.warn('App: env validation load failed', error?.message);
+    _validateEnv = () => ({ isValid: true, warnings: [], errors: [] });
+  }
+  return _validateEnv;
+};
+
+let _crashReporting = null;
+const getCrashReporting = () => {
+  if (_crashReporting) return _crashReporting;
+  try {
+    _crashReporting = require('./src/utils/crashReporting');
+  } catch (error) {
+    console.warn('App: crashReporting load failed', error?.message);
+    // Fallback crash reporting with no-op functions
+    _crashReporting = {
+      initializeCrashReporting: async () => ({ success: true, skipped: true }),
+      reportError: (error, context) => console.error('reportError fallback:', error, context),
+      setUserContext: (user) => console.log('setUserContext fallback:', user),
+      addBreadcrumb: (message, category, level, data) => console.log('addBreadcrumb fallback:', message, category, level, data),
+    };
+  }
+  return _crashReporting;
+};
+
+// Safe getters for individual functions
+const getAuthProvider = () => getAuthContext().AuthProvider;
+// IMPORTANT: Wrap hooks in functions to delay getAuthContext() call until hook is actually used
+const useAuthState = () => {
+  const hook = getAuthContext().useAuthState;
+  return hook();
+};
+const useAuthDispatch = () => {
+  const hook = getAuthContext().useAuthDispatch;
+  return hook();
+};
+const validateEnv = () => getValidateEnv()();
+const initializeCrashReporting = async (options) => getCrashReporting().initializeCrashReporting(options);
+const reportError = (error, context) => getCrashReporting().reportError(error, context);
+const setUserContext = (user) => getCrashReporting().setUserContext(user);
+const addBreadcrumb = (message, category, level, data) => getCrashReporting().addBreadcrumb(message, category, level, data);
 
 let _AuthenticatedApp = null;
+let _AuthenticatedAppLoadAttempted = false;
+let _AuthenticatedAppLoadError = null;
 const getAuthenticatedApp = () => {
   if (_AuthenticatedApp) return _AuthenticatedApp;
+  if (_AuthenticatedAppLoadAttempted) return _AuthenticatedApp;
+  _AuthenticatedAppLoadAttempted = true;
   try {
     const mod = require('./src/components/AuthenticatedApp');
     _AuthenticatedApp = mod?.default || mod;
   } catch (error) {
+    _AuthenticatedAppLoadError = error;
     console.warn('App: AuthenticatedApp load failed', error?.message || error);
-    _AuthenticatedApp = () => null;
+    const message = error?.message || String(error);
+    _AuthenticatedApp = function AuthenticatedAppLoadFailure() {
+      throw new Error(`AuthenticatedApp load failed: ${message}`);
+    };
   }
   return _AuthenticatedApp;
 };
 
 let _UnauthenticatedApp = null;
+let _UnauthenticatedAppLoadAttempted = false;
+let _UnauthenticatedAppLoadError = null;
 const getUnauthenticatedApp = () => {
   if (_UnauthenticatedApp) return _UnauthenticatedApp;
+  if (_UnauthenticatedAppLoadAttempted) return _UnauthenticatedApp;
+  _UnauthenticatedAppLoadAttempted = true;
   try {
     const mod = require('./src/components/UnauthenticatedApp');
     _UnauthenticatedApp = mod?.default || mod;
   } catch (error) {
+    _UnauthenticatedAppLoadError = error;
     console.warn('App: UnauthenticatedApp load failed', error?.message || error);
-    _UnauthenticatedApp = () => null;
+    const message = error?.message || String(error);
+    _UnauthenticatedApp = function UnauthenticatedAppLoadFailure() {
+      throw new Error(`UnauthenticatedApp load failed: ${message}`);
+    };
   }
   return _UnauthenticatedApp;
 };
@@ -271,6 +372,8 @@ function FashionColorWheelApp() {
   const [isReady, setIsReady] = useState(false);
   const [initError, setInitError] = useState(null);
   const [navigationError, setNavigationError] = useState(null);
+
+  const lastUnifiedErrorRef = useRef(null);
   
   // Progressive loading states for better UX
   const [loadingState, setLoadingState] = useState({
@@ -332,11 +435,16 @@ function FashionColorWheelApp() {
   
   // SPLIT CONTEXT: Use separate hooks for state and dispatch to prevent unnecessary re-renders
   devLog('FashionColorWheelApp: Calling useAuthState and useAuthDispatch hooks');
-  const { user, loading: authLoading, isInitialized, error: authError } = useAuthState();
-  const { initializeAuth, handleLoginSuccess, handleLogout } = useAuthDispatch();
+  const authState = useAuthState();
+  const authDispatch = useAuthDispatch();
+  const { user, loading: authLoading, isInitialized, error: authError } = authState || {};
+  const { initializeAuth, handleLoginSuccess, handleLogout } = authDispatch || {};
   devLog('FashionColorWheelApp: Auth state:', { user: !!user, authLoading, isInitialized });
 
   const authStateRef = useRef({ user: null, isInitialized: false });
+  // IMPORTANT: Keep the ref in sync immediately on render (not only in an effect)
+  // so background initializers always see the latest auth state right after login.
+  authStateRef.current = { user, isInitialized };
   useEffect(() => {
     authStateRef.current = { user, isInitialized };
   }, [user, isInitialized]);
@@ -347,6 +455,8 @@ function FashionColorWheelApp() {
     : DEFAULT_AUTH_HANDLERS.initializeAuth;
 
   const authInitializerRef = useRef(safeInitializeAuth);
+  // Keep initializer ref current immediately on render as well.
+  authInitializerRef.current = safeInitializeAuth;
   useEffect(() => {
     authInitializerRef.current = safeInitializeAuth;
   }, [safeInitializeAuth]);
@@ -1004,6 +1114,9 @@ function FashionColorWheelApp() {
           <Text style={styles.errorSubtext}>
             Critical app components failed to initialize properly. This could be due to:
           </Text>
+          <Text style={styles.errorSubtext}>
+            Error: {initError?.message || 'Unknown initialization error'}
+          </Text>
           <View style={styles.errorDetailsList}>
             <Text style={styles.errorDetail}>• Network connectivity issues</Text>
             <Text style={styles.errorDetail}>• Storage system problems</Text>
@@ -1039,6 +1152,20 @@ function FashionColorWheelApp() {
                 lines.push(`Error: ${errorName}: ${errorMessage}`);
                 lines.push(`Platform: ${typeof Platform !== 'undefined' ? Platform.OS : 'unknown'}`);
                 lines.push(`Expo constants: ${getExpoConstants() ? 'available' : 'missing'}`);
+
+                if (lastUnifiedErrorRef.current?.componentStack) {
+                  const stack = String(lastUnifiedErrorRef.current.componentStack);
+                  const trimmed = stack.trim();
+                  lines.push('Component stack:');
+                  lines.push(trimmed.length > 2000 ? `${trimmed.slice(0, 2000)}…` : trimmed);
+                }
+
+                if (_AuthenticatedAppLoadError) {
+                  lines.push(`AuthenticatedApp load error: ${_AuthenticatedAppLoadError?.message || String(_AuthenticatedAppLoadError)}`);
+                }
+                if (_UnauthenticatedAppLoadError) {
+                  lines.push(`UnauthenticatedApp load error: ${_UnauthenticatedAppLoadError?.message || String(_UnauthenticatedAppLoadError)}`);
+                }
 
                 if (initializerStatus) {
                   lines.push(`Initializer state: ${initializerStatus.state || 'unknown'}`);
@@ -1170,20 +1297,33 @@ function FashionColorWheelApp() {
           userKeys: user ? Object.keys(user) : []
         });
       }
-      const UnauthenticatedApp = getUnauthenticatedApp();
-      return <UnauthenticatedApp handleLoginSuccess={safeHandleLoginSuccess} />;
+      try {
+        const UnauthenticatedApp = getUnauthenticatedApp();
+        if (!UnauthenticatedApp) {
+          const details = _UnauthenticatedAppLoadError?.message || 'UnauthenticatedApp component failed to load';
+          throw new Error(`UnauthenticatedApp load failed: ${details}`);
+        }
+        return <UnauthenticatedApp handleLoginSuccess={safeHandleLoginSuccess} />;
+      } catch (error) {
+        getLogger().error('Failed to render UnauthenticatedApp:', error);
+        throw error;
+      }
     }
 
     // Main authenticated app - user is validated
     try {
       const AuthenticatedApp = getAuthenticatedApp();
       if (!AuthenticatedApp) {
-        throw new Error('AuthenticatedApp component failed to load');
+        const details = _AuthenticatedAppLoadError?.message || 'AuthenticatedApp component failed to load';
+        throw new Error(`AuthenticatedApp load failed: ${details}`);
       }
       return <AuthenticatedApp user={user} handleLogout={safeHandleLogout} />;
     } catch (error) {
       getLogger().error('Failed to render AuthenticatedApp:', error);
       const UnauthenticatedApp = getUnauthenticatedApp();
+      if (!UnauthenticatedApp) {
+        throw error;
+      }
       return <UnauthenticatedApp handleLoginSuccess={safeHandleLoginSuccess} />;
     }
   }, [
@@ -1204,12 +1344,20 @@ function FashionColorWheelApp() {
 
   // Top-level wrapper with comprehensive error boundaries
   devLog('FashionColorWheelApp: Rendering final UI, isReady:', isReady, 'user:', !!user, 'initError:', !!initError);
+  const UnifiedErrorBoundary = getUnifiedErrorBoundary();
   return (
     // Single comprehensive error boundary
     <UnifiedErrorBoundary 
       onError={(error, errorInfo, category) => {
         // Categorize and handle based on error type
         getLogger().error(`${category} Error:`, error);
+
+        lastUnifiedErrorRef.current = {
+          name: error?.name,
+          message: error?.message,
+          category,
+          componentStack: errorInfo?.componentStack,
+        };
         
         // ADDED: Report to crash reporting
         reportError(error, {
@@ -1414,6 +1562,7 @@ const styles = StyleSheet.create({
 
 // CONTEXT WRAPPER: Wrap the main app with AuthProvider for split context pattern
 function App() {
+  const AuthProvider = getAuthProvider();
   return (
     <AuthProvider>
       <FashionColorWheelApp />

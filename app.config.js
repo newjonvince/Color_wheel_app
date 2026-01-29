@@ -96,9 +96,15 @@ export default {
       EXPO_PUBLIC_LOG_LEVEL: process.env.EXPO_PUBLIC_LOG_LEVEL || 'warn',
     },
     updates: {
-      fallbackToCacheTimeout: 0,
+      // CRASH FIX: Changed from 0 to 30000ms (30 seconds)
+      // fallbackToCacheTimeout: 0 causes immediate crash if updates can't be fetched
+      // 30 seconds gives reasonable time for network requests without blocking app startup
+      fallbackToCacheTimeout: 30000,
       enabled: true,
-      checkAutomatically: "ON_LOAD",
+      // CRASH FIX: Changed from "ON_LOAD" to "ON_ERROR_RECOVERY"
+      // ON_LOAD checks for updates at every launch, causing crashes on network issues
+      // ON_ERROR_RECOVERY only checks after a crash, preventing crash loops
+      checkAutomatically: "ON_ERROR_RECOVERY",
       url: `https://u.expo.dev/${EAS_PROJECT_ID}`
     },
     runtimeVersion: {

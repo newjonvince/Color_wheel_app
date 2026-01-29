@@ -6,6 +6,68 @@ import { useFocusEffect } from '@react-navigation/native';
 import PropTypes from 'prop-types';
 import AppErrorBoundary from '../../components/AppErrorBoundary';
 import { isValidHex6 } from '../../utils/colorValidation';
+import { SchemeSelector } from './components/SchemeSelector';
+import { ColorWheelContainer } from './components/ColorWheelContainer';
+import { ColorControls } from './components/ColorControls';
+import { HSLInputs } from './components/HSLInputs';
+import { ColorSwatches } from './components/ColorSwatches';
+import { useOptimizedColorWheelState } from './useOptimizedColorWheelState';
+import { styles } from './styles';
+import { apiPatterns } from '../../utils/apiHelpers';
+
+let _optimizedColorModule = null;
+let _optimizedColorLoadAttempted = false;
+const getOptimizedColorModule = () => {
+  if (_optimizedColorLoadAttempted) return _optimizedColorModule;
+  _optimizedColorLoadAttempted = true;
+  try {
+    _optimizedColorModule = require('../../utils/optimizedColor');
+  } catch (error) {
+    console.warn('ColorWheelScreen: optimizedColor load failed', error?.message || error);
+    _optimizedColorModule = null;
+  }
+  return _optimizedColorModule;
+};
+
+const getColorSchemeSafe = (baseColor, scheme, index) => {
+  const mod = getOptimizedColorModule();
+  const fn = mod?.getColorScheme;
+  if (typeof fn === 'function') return fn(baseColor, scheme, index);
+  return typeof baseColor === 'string' ? [baseColor] : [];
+};
+
+let _apiServiceInstance = null;
+let _apiServiceLoadAttempted = false;
+let _apiServiceLoadError = null;
+
+const getApiServiceInstance = () => {
+  if (_apiServiceLoadAttempted) return _apiServiceInstance;
+  _apiServiceLoadAttempted = true;
+  try {
+    const mod = require('../../services/safeApiService');
+    _apiServiceInstance = mod?.default || mod;
+  } catch (error) {
+    _apiServiceLoadError = error;
+    console.warn('ColorWheelScreen: safeApiService load failed', error?.message || error);
+    _apiServiceInstance = null;
+  }
+  return _apiServiceInstance;
+};
+
+const ApiService = {
+  getToken: () => {
+    const inst = getApiServiceInstance();
+    return typeof inst?.getToken === 'function' ? inst.getToken() : undefined;
+  },
+};
+
+Object.defineProperty(ApiService, 'ready', {
+  enumerable: true,
+  get: () => {
+    const inst = getApiServiceInstance();
+    return inst?.ready || Promise.resolve();
+  },
+});
 
 // CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
 let _isDebugModeValue = null;
@@ -22,13 +84,6 @@ const getIsDebugMode = () => {
   return _isDebugModeValue;
 };
 const IS_DEBUG_MODE = () => getIsDebugMode();
-
-// Core components (required)
-import { SchemeSelector } from './components/SchemeSelector';
-import { ColorWheelContainer } from './components/ColorWheelContainer';
-import { ColorControls } from './components/ColorControls';
-import { HSLInputs } from './components/HSLInputs';
-import { ColorSwatches } from './components/ColorSwatches';
 
 // Optional components (lazy load with fallbacks)
 let CoolorsColorExtractor = null;
@@ -50,42 +105,43 @@ try {
   ApiIntegrationStatus = () => null;
 }
 
-// Hooks and utilities
-import { useOptimizedColorWheelState } from './useOptimizedColorWheelState';
-import { getColorScheme } from '../../utils/optimizedColor';
-import { styles } from './styles';
-import ApiService from '../../services/safeApiService';
-import { apiPatterns } from '../../utils/apiHelpers';
-
 const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch }) => {
   const wheelRef = useRef(null);
   
-  // State management through custom hook
+  // CRASH FIX: Safe hook destructuring to prevent crash if hook returns undefined
+  let colorWheelState;
+  try {
+    colorWheelState = useOptimizedColorWheelState({ wheelRef }) || {};
+  } catch (error) {
+    console.error('useOptimizedColorWheelState hook failed:', error);
+    colorWheelState = {};
+  }
+  
   const {
-    selectedScheme,
-    setSelectedScheme,
-    palette,
-    selectedColor,
-    baseHex,
-    linked,
-    activeIdx,
-    selectedFollowsActive,
-    showExtractor,
-    hslInputs,
-    updateHslInput,
-    applyHslInputs,
-    updateColorWheelLive,
-    resetScheme,
-    randomize,
-    toggleLinked,
-    toggleSelectedFollowsActive,
-    openExtractor,
-    closeExtractor,
-    handleExtractorComplete,
-    handleColorsChange,
-    handleHexChange,
-    handleActiveHandleChange,
-  } = useOptimizedColorWheelState({ wheelRef });
+    selectedScheme = 'monochromatic',
+    setSelectedScheme = () => console.warn('setSelectedScheme not available'),
+    palette = [],
+    selectedColor = '#FF0000',
+    baseHex = '#FF0000',
+    linked = false,
+    activeIdx = 0,
+    selectedFollowsActive = false,
+    showExtractor = false,
+    hslInputs = { h: 0, s: 100, l: 50 },
+    updateHslInput = () => console.warn('updateHslInput not available'),
+    applyHslInputs = () => console.warn('applyHslInputs not available'),
+    updateColorWheelLive = () => console.warn('updateColorWheelLive not available'),
+    resetScheme = () => console.warn('resetScheme not available'),
+    randomize = () => console.warn('randomize not available'),
+    toggleLinked = () => console.warn('toggleLinked not available'),
+    toggleSelectedFollowsActive = () => console.warn('toggleSelectedFollowsActive not available'),
+    openExtractor = () => console.warn('openExtractor not available'),
+    closeExtractor = () => console.warn('closeExtractor not available'),
+    handleExtractorComplete = () => console.warn('handleExtractorComplete not available'),
+    handleColorsChange = () => console.warn('handleColorsChange not available'),
+    handleHexChange = () => console.warn('handleHexChange not available'),
+    handleActiveHandleChange = () => console.warn('handleActiveHandleChange not available'),
+  } = colorWheelState;
 
   // Load user data with proper error handling using apiHelpers
   const loadUserData = useCallback(async () => {
@@ -143,7 +199,7 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     if (Array.isArray(palette) && palette.length > 0) {
       colors = palette;
     } else {
-      colors = getColorScheme(selectedColor, selectedScheme, 0);
+      colors = getColorSchemeSafe(selectedColor, selectedScheme, 0);
     }
     
     const duration = Date.now() - startTime;

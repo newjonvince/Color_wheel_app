@@ -1,17 +1,84 @@
 // components/AuthenticatedApp.js - Authenticated user flow with navigation
-import React, { useCallback, useMemo } from 'react';
-import { View, TouchableOpacity, Text, StyleSheet, Platform } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { View, TouchableOpacity, Text, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import PropTypes from 'prop-types';
-
-// Screen imports
-import ColorWheelScreen from '../screens/ColorWheelScreen';
-import BoardsScreen from '../screens/BoardsScreen';
-import CommunityFeedScreen from '../screens/CommunityFeedScreen';
-import UserSettingsScreen from '../screens/UserSettingsScreen';
-
-// Tab icon component
 import TabIcon from './TabIcon';
+
+// CRASH FIX: Lazy-load all screen imports to prevent early module initialization
+let _BoardsScreen = null;
+let _BoardsScreenLoadAttempted = false;
+const getBoardsScreen = () => {
+  if (_BoardsScreen) return _BoardsScreen;
+  if (_BoardsScreenLoadAttempted) return _BoardsScreen;
+  _BoardsScreenLoadAttempted = true;
+  try {
+    const mod = require('../screens/BoardsScreen');
+    _BoardsScreen = mod?.default || mod;
+  } catch (error) {
+    console.warn('AuthenticatedApp: BoardsScreen load failed', error?.message);
+    _BoardsScreen = function BoardsScreenLoadFailure() {
+      throw new Error(`BoardsScreen load failed: ${error?.message || String(error)}`);
+    };
+  }
+  return _BoardsScreen;
+};
+
+let _CommunityFeedScreen = null;
+let _CommunityFeedScreenLoadAttempted = false;
+const getCommunityFeedScreen = () => {
+  if (_CommunityFeedScreen) return _CommunityFeedScreen;
+  if (_CommunityFeedScreenLoadAttempted) return _CommunityFeedScreen;
+  _CommunityFeedScreenLoadAttempted = true;
+  try {
+    const mod = require('../screens/CommunityFeedScreen');
+    _CommunityFeedScreen = mod?.default || mod;
+  } catch (error) {
+    console.warn('AuthenticatedApp: CommunityFeedScreen load failed', error?.message);
+    _CommunityFeedScreen = function CommunityFeedScreenLoadFailure() {
+      throw new Error(`CommunityFeedScreen load failed: ${error?.message || String(error)}`);
+    };
+  }
+  return _CommunityFeedScreen;
+};
+
+let _UserSettingsScreen = null;
+let _UserSettingsScreenLoadAttempted = false;
+const getUserSettingsScreen = () => {
+  if (_UserSettingsScreen) return _UserSettingsScreen;
+  if (_UserSettingsScreenLoadAttempted) return _UserSettingsScreen;
+  _UserSettingsScreenLoadAttempted = true;
+  try {
+    const mod = require('../screens/UserSettingsScreen');
+    _UserSettingsScreen = mod?.default || mod;
+  } catch (error) {
+    console.warn('AuthenticatedApp: UserSettingsScreen load failed', error?.message);
+    _UserSettingsScreen = function UserSettingsScreenLoadFailure() {
+      throw new Error(`UserSettingsScreen load failed: ${error?.message || String(error)}`);
+    };
+  }
+  return _UserSettingsScreen;
+};
+
+let _ColorWheelScreen = null;
+let _ColorWheelScreenLoadAttempted = false;
+let _ColorWheelScreenLoadError = null;
+const getColorWheelScreen = () => {
+  if (_ColorWheelScreen) return _ColorWheelScreen;
+  if (_ColorWheelScreenLoadAttempted) return _ColorWheelScreen;
+  _ColorWheelScreenLoadAttempted = true;
+  try {
+    const mod = require('../screens/ColorWheelScreen');
+    _ColorWheelScreen = mod?.default || mod;
+  } catch (error) {
+    _ColorWheelScreenLoadError = error;
+    const message = error?.message || String(error);
+    _ColorWheelScreen = function ColorWheelScreenLoadFailure() {
+      throw new Error(`ColorWheelScreen load failed: ${message}`);
+    };
+  }
+  return _ColorWheelScreen;
+};
 
 const Tab = createBottomTabNavigator();
 
@@ -20,6 +87,15 @@ const Tab = createBottomTabNavigator();
  * This component renders the bottom tab navigation with all main screens
  */
 const AuthenticatedApp = ({ user, handleLogout }) => {
+  const [colorWheelReady, setColorWheelReady] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setColorWheelReady(true);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Memoize screen options for performance
   const screenOptions = useMemo(() => ({
     headerShown: true,
@@ -66,6 +142,13 @@ const AuthenticatedApp = ({ user, handleLogout }) => {
     <TabIcon name={tabName} focused={focused} color={color} size={size} />
   ), []);
 
+  const LoadingPlaceholder = useCallback(() => (
+    <View style={styles.loadingPlaceholder}>
+      <ActivityIndicator size="large" color="#e74c3c" />
+      <Text style={styles.loadingPlaceholderText}>Loading...</Text>
+    </View>
+  ), []);
+
   return (
     <Tab.Navigator screenOptions={screenOptions}>
       <Tab.Screen
@@ -77,11 +160,18 @@ const AuthenticatedApp = ({ user, handleLogout }) => {
         }}
       >
         {(props) => (
-          <ColorWheelScreen
-            {...props}
-            currentUser={user}
-            onLogout={handleLogout}
-          />
+          colorWheelReady
+            ? (() => {
+              const ColorWheelScreen = getColorWheelScreen();
+              return (
+                <ColorWheelScreen
+                  {...props}
+                  currentUser={user}
+                  onLogout={handleLogout}
+                />
+              );
+            })()
+            : <LoadingPlaceholder />
         )}
       </Tab.Screen>
       <Tab.Screen
@@ -92,12 +182,15 @@ const AuthenticatedApp = ({ user, handleLogout }) => {
           tabBarIcon: renderTabIcon('Boards'),
         }}
       >
-        {(props) => (
-          <BoardsScreen
-            {...props}
-            currentUser={user}
-          />
-        )}
+        {(props) => {
+          const BoardsScreen = getBoardsScreen();
+          return (
+            <BoardsScreen
+              {...props}
+              currentUser={user}
+            />
+          );
+        }}
       </Tab.Screen>
       <Tab.Screen
         name="Community"
@@ -107,12 +200,15 @@ const AuthenticatedApp = ({ user, handleLogout }) => {
           tabBarIcon: renderTabIcon('Community'),
         }}
       >
-        {(props) => (
-          <CommunityFeedScreen
-            {...props}
-            currentUser={user}
-          />
-        )}
+        {(props) => {
+          const CommunityFeedScreen = getCommunityFeedScreen();
+          return (
+            <CommunityFeedScreen
+              {...props}
+              currentUser={user}
+            />
+          );
+        }}
       </Tab.Screen>
       <Tab.Screen
         name="Settings"
@@ -123,13 +219,16 @@ const AuthenticatedApp = ({ user, handleLogout }) => {
           headerRight: renderLogoutButton,
         }}
       >
-        {(props) => (
-          <UserSettingsScreen
-            {...props}
-            currentUser={user}
-            onLogout={handleLogout}
-          />
-        )}
+        {(props) => {
+          const UserSettingsScreen = getUserSettingsScreen();
+          return (
+            <UserSettingsScreen
+              {...props}
+              currentUser={user}
+              onLogout={handleLogout}
+            />
+          );
+        }}
       </Tab.Screen>
     </Tab.Navigator>
   );
@@ -147,6 +246,16 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     fontSize: 14,
+  },
+  loadingPlaceholder: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingPlaceholderText: {
+    marginTop: 10,
+    color: '#666',
+    fontWeight: '500',
   },
 });
 
