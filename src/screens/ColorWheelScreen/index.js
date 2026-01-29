@@ -145,10 +145,23 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
 
   // Load user data with proper error handling using apiHelpers
   const loadUserData = useCallback(async () => {
-    if (!currentUser) return;
+    // DEBUG: Log auth status before API call
+    console.log('🔍 ColorWheelScreen - Loading user data:', {
+      hasCurrentUser: !!currentUser,
+      userId: currentUser?.id || 'none',
+      hasToken: !!ApiService.getToken(),
+      timestamp: new Date().toISOString()
+    });
+    
+    if (!currentUser) {
+      console.warn('⚠️ No currentUser - skipping loadUserData');
+      return;
+    }
 
     try {
+      console.log('📡 Calling apiPatterns.loadUserData()...');
       const result = await apiPatterns.loadUserData();
+      console.log('✅ API call completed:', { success: result.success });
 
       if (result.success) {
         // Log API integration status only in debug mode
