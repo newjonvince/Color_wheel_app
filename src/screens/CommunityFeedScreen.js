@@ -29,6 +29,104 @@ IMPROVEMENTS MADE:
     TextInput,
     ScrollView,
   } from 'react-native';
+
+  // CRASH FIX: Lazy-load CommunityModal to prevent early module initialization
+  let _CommunityModal = null;
+  let _CommunityModalLoadAttempted = false;
+  const getCommunityModal = () => {
+    if (_CommunityModalLoadAttempted) return _CommunityModal;
+    _CommunityModalLoadAttempted = true;
+    try {
+      const mod = require('../components/CommunityModal');
+      _CommunityModal = mod?.default || mod;
+    } catch (error) {
+      console.warn('CommunityFeedScreen: CommunityModal load failed', error?.message);
+      _CommunityModal = () => null;
+    }
+    return _CommunityModal;
+  };
+
+  // CRASH FIX: Lazy-load apiPatterns to prevent early module initialization
+  let _apiPatterns = null;
+  let _apiPatternsLoadAttempted = false;
+  const getApiPatterns = () => {
+    if (_apiPatternsLoadAttempted) return _apiPatterns;
+    _apiPatternsLoadAttempted = true;
+    try {
+      const mod = require('../utils/apiHelpers');
+      _apiPatterns = mod?.apiPatterns || {};
+    } catch (error) {
+      console.warn('CommunityFeedScreen: apiPatterns load failed', error?.message);
+      _apiPatterns = {
+        loadCommunityPosts: async () => ({ success: false, error: 'apiPatterns not available' }),
+      };
+    }
+    return _apiPatterns;
+  };
+
+  // CRASH FIX: Lazy-load safePostId to prevent early module initialization
+  let _safePostId = null;
+  let _safePostIdLoadAttempted = false;
+  const getSafePostId = () => {
+    if (_safePostIdLoadAttempted) return _safePostId;
+    _safePostIdLoadAttempted = true;
+    try {
+      const mod = require('../utils/keyExtractors');
+      _safePostId = mod?.safePostId || ((item, index) => String(index));
+    } catch (error) {
+      console.warn('CommunityFeedScreen: safePostId load failed', error?.message);
+      _safePostId = (item, index) => String(index);
+    }
+    return _safePostId;
+  };
+
+  let _apiServiceInstance = null;
+  let _apiServiceLoadAttempted = false;
+  let _apiServiceLoadError = null;
+
+  const getApiServiceInstance = () => {
+    if (_apiServiceLoadAttempted) return _apiServiceInstance;
+    _apiServiceLoadAttempted = true;
+    try {
+      const mod = require('../services/safeApiService');
+      _apiServiceInstance = mod?.default || mod;
+    } catch (error) {
+      _apiServiceLoadError = error;
+      console.warn('CommunityFeedScreen: safeApiService load failed', error?.message || error);
+      _apiServiceInstance = null;
+    }
+    return _apiServiceInstance;
+  };
+
+  const ApiService = {
+    get: async (...args) => {
+      const inst = getApiServiceInstance();
+      if (typeof inst?.get === 'function') return inst.get(...args);
+      throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+    },
+    post: async (...args) => {
+      const inst = getApiServiceInstance();
+      if (typeof inst?.post === 'function') return inst.post(...args);
+      throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+    },
+    delete: async (...args) => {
+      const inst = getApiServiceInstance();
+      if (typeof inst?.delete === 'function') return inst.delete(...args);
+      throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+    },
+    getToken: () => {
+      const inst = getApiServiceInstance();
+      return typeof inst?.getToken === 'function' ? inst.getToken() : undefined;
+    },
+  };
+
+  Object.defineProperty(ApiService, 'ready', {
+    enumerable: true,
+    get: () => {
+      const inst = getApiServiceInstance();
+      return inst?.ready || Promise.resolve();
+    },
+  });
   // CRASH FIX: Lazy-load @expo/vector-icons to prevent native bridge access at module load time
   let _Ionicons = null;
   const getIonicons = () => {
@@ -52,16 +150,26 @@ IMPROVEMENTS MADE:
     return <View style={[{ width: size, height: size }, style]} />;
   };
 
-  import ApiService from '../services/safeApiService';
-  import CommunityModal from '../components/CommunityModal';
-  import { apiPatterns } from '../utils/apiHelpers';
-  import { safePostId } from '../utils/keyExtractors';
-
   // Double-tap like wrapper with heart burst animation
   const DoubleTapLike = ({ children, onDoubleTap, onLongPress }) => {
     const lastTap = useRef(null);
     const scale = useRef(new Animated.Value(0.6)).current;
     const opacity = useRef(new Animated.Value(0)).current;
+
+    useEffect(() => {
+      return () => {
+        try {
+          scale.stopAnimation?.();
+        } catch (_) {
+          // ignore
+        }
+        try {
+          opacity.stopAnimation?.();
+        } catch (_) {
+          // ignore
+        }
+      };
+    }, [opacity, scale]);
 
     const animate = useCallback(() => {
       scale.setValue(0.6);
@@ -122,6 +230,7 @@ IMPROVEMENTS MADE:
       
       // CRASH FIX: Add error handling even though safeApiCall shouldn't throw
       try {
+        const apiPatterns = getApiPatterns();
         const result = await apiPatterns.loadCommunityPosts(cursor);
         
         if (result.success) {
@@ -173,9 +282,20 @@ IMPROVEMENTS MADE:
     }, [fetchPage]);
 
     useEffect(() => {
-      if (!ApiService.getToken()) return; // ← wait for auth
-      loadInitial();
-    }, [loadInitial, ApiService.getToken()]);
+      let cancelled = false;
+      try {
+        const token = ApiService.getToken();
+        if (!token) return;
+        loadInitial();
+      } catch (e) {
+        if (!cancelled) {
+          console.warn('CommunityFeedScreen: token check failed', e?.message || e);
+        }
+      }
+      return () => {
+        cancelled = true;
+      };
+    }, [loadInitial]);
 
     const onRefresh = useCallback(async () => {
       setRefreshing(true);
@@ -284,7 +404,10 @@ ${post.image_url || ''}` : (post.image_url || ''),
       }
     }, []);
 
-    const keyExtractor = useCallback(safePostId, []);
+    const keyExtractor = useCallback((item, index) => {
+      const safePostId = getSafePostId();
+      return safePostId(item, index);
+    }, []);
 
     const renderPost = useCallback(({ item: post }) => (
       <View style={styles.postCard}>
@@ -522,7 +645,10 @@ ${post.image_url || ''}` : (post.image_url || ''),
         </View>
 
         {/* Community Modal */}
-        <CommunityModal visible={showCommunityModal} onClose={() => setShowCommunityModal(false)} currentUser={currentUser} />
+        {(() => {
+          const CommunityModal = getCommunityModal();
+          return <CommunityModal visible={showCommunityModal} onClose={() => setShowCommunityModal(false)} currentUser={currentUser} />;
+        })()}
       </View>
     );
   }

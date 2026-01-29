@@ -1,7 +1,145 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, FlatList, Dimensions, Alert, Modal, TextInput, ScrollView } from 'react-native';
-// CRASH FIX: Lazy-load expo-image-picker to prevent native bridge access at module load time
-import CoolorsColorExtractor from '../components/CoolorsColorExtractor';
+
+// CRASH FIX: Lazy-load getAllSchemes to prevent early module initialization
+let _getAllSchemes = null;
+let _getAllSchemesLoadAttempted = false;
+const getGetAllSchemes = () => {
+  if (_getAllSchemesLoadAttempted) return _getAllSchemes;
+  _getAllSchemesLoadAttempted = true;
+  try {
+    const mod = require('../constants/colorSchemes');
+    _getAllSchemes = mod?.getAllSchemes || (() => []);
+  } catch (error) {
+    console.warn('BoardsScreen: getAllSchemes load failed', error?.message);
+    _getAllSchemes = () => [];
+  }
+  return _getAllSchemes;
+};
+
+// CRASH FIX: Lazy-load apiPatterns to prevent early module initialization
+let _apiPatterns = null;
+let _apiPatternsLoadAttempted = false;
+const getApiPatterns = () => {
+  if (_apiPatternsLoadAttempted) return _apiPatterns;
+  _apiPatternsLoadAttempted = true;
+  try {
+    const mod = require('../utils/apiHelpers');
+    _apiPatterns = mod?.apiPatterns || {};
+  } catch (error) {
+    console.warn('BoardsScreen: apiPatterns load failed', error?.message);
+    _apiPatterns = {
+      loadColorMatches: async () => ({ success: false, error: 'apiPatterns not available' }),
+    };
+  }
+  return _apiPatterns;
+};
+
+// CRASH FIX: Lazy-load safeId to prevent early module initialization
+let _safeId = null;
+let _safeIdLoadAttempted = false;
+const getSafeId = () => {
+  if (_safeIdLoadAttempted) return _safeId;
+  _safeIdLoadAttempted = true;
+  try {
+    const mod = require('../utils/keyExtractors');
+    _safeId = mod?.safeId || ((item, index) => String(index));
+  } catch (error) {
+    console.warn('BoardsScreen: safeId load failed', error?.message);
+    _safeId = (item, index) => String(index);
+  }
+  return _safeId;
+};
+
+ let _computeScheme = null;
+ let _optimizedColorLoadAttempted = false;
+ let _optimizedColorLoadError = null;
+
+ const getComputeScheme = () => {
+   if (_computeScheme) return _computeScheme;
+   if (_optimizedColorLoadAttempted) return _computeScheme;
+   _optimizedColorLoadAttempted = true;
+   try {
+     const mod = require('../utils/optimizedColor');
+     const fn = mod?.getColorScheme || mod?.default?.getColorScheme;
+     if (typeof fn !== 'function') {
+       throw new Error('optimizedColor.getColorScheme is not available');
+     }
+     _computeScheme = fn;
+   } catch (error) {
+     _optimizedColorLoadError = error;
+     console.warn('BoardsScreen: optimizedColor load failed', error?.message || error);
+     _computeScheme = (baseColor) => [baseColor].filter(Boolean);
+   }
+   return _computeScheme;
+ };
+
+ let _CoolorsColorExtractor = null;
+ let _coolorsExtractorLoadAttempted = false;
+ let _coolorsExtractorLoadError = null;
+
+ const getCoolorsColorExtractor = () => {
+   if (_CoolorsColorExtractor) return _CoolorsColorExtractor;
+   if (_coolorsExtractorLoadAttempted) return _CoolorsColorExtractor;
+   _coolorsExtractorLoadAttempted = true;
+   try {
+     const mod = require('../components/CoolorsColorExtractor');
+     _CoolorsColorExtractor = mod?.default || mod;
+   } catch (error) {
+     _coolorsExtractorLoadError = error;
+     console.warn('BoardsScreen: CoolorsColorExtractor load failed', error?.message || error);
+     _CoolorsColorExtractor = () => null;
+   }
+   return _CoolorsColorExtractor;
+ };
+
+ class ExtractorErrorBoundary extends React.Component {
+   constructor(props) {
+     super(props);
+     this.state = { hasError: false, error: null };
+   }
+
+   static getDerivedStateFromError(error) {
+     return { hasError: true, error };
+   }
+
+   componentDidCatch(error) {
+     try {
+       console.error('BoardsScreen: Color extractor crashed', error);
+     } catch (_) {
+       // ignore
+     }
+   }
+
+   handleRetry = () => {
+     this.setState({ hasError: false, error: null });
+   };
+
+   render() {
+     if (this.state.hasError) {
+       const message = this.state.error?.message || 'Unknown error';
+       return (
+         <View style={styles.extractorErrorContainer}>
+           <Text style={styles.extractorErrorTitle}>Color Extractor Error</Text>
+           <Text style={styles.extractorErrorMessage}>{message}</Text>
+           <View style={styles.extractorErrorActions}>
+             <TouchableOpacity style={styles.extractorErrorButton} onPress={this.handleRetry}>
+               <Text style={styles.extractorErrorButtonText}>Try Again</Text>
+             </TouchableOpacity>
+             <TouchableOpacity
+               style={[styles.extractorErrorButton, styles.extractorErrorCloseButton]}
+               onPress={this.props.onClose}
+             >
+               <Text style={[styles.extractorErrorButtonText, styles.extractorErrorCloseButtonText]}>Close</Text>
+             </TouchableOpacity>
+           </View>
+         </View>
+       );
+     }
+
+     return this.props.children;
+   }
+ }
 
 // Lazy expo-image-picker getter
 let _ImagePicker = null;
@@ -19,11 +157,44 @@ const getImagePicker = () => {
   }
   return _ImagePicker;
 };
-import ApiService from '../services/safeApiService';
-import { getColorScheme as computeScheme } from '../utils/optimizedColor';
-import { getAllSchemes } from '../constants/colorSchemes';
-import { apiPatterns } from '../utils/apiHelpers';
-import { safeId } from '../utils/keyExtractors';
+
+let _apiServiceInstance = null;
+let _apiServiceLoadAttempted = false;
+let _apiServiceLoadError = null;
+
+const getApiServiceInstance = () => {
+  if (_apiServiceLoadAttempted) return _apiServiceInstance;
+  _apiServiceLoadAttempted = true;
+  try {
+    const mod = require('../services/safeApiService');
+    _apiServiceInstance = mod?.default || mod;
+  } catch (error) {
+    _apiServiceLoadError = error;
+    console.warn('BoardsScreen: safeApiService load failed', error?.message || error);
+    _apiServiceInstance = null;
+  }
+  return _apiServiceInstance;
+};
+
+const ApiService = {
+  createColorMatch: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.createColorMatch === 'function') return inst.createColorMatch(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+  getToken: () => {
+    const inst = getApiServiceInstance();
+    return typeof inst?.getToken === 'function' ? inst.getToken() : undefined;
+  },
+};
+
+Object.defineProperty(ApiService, 'ready', {
+  enumerable: true,
+  get: () => {
+    const inst = getApiServiceInstance();
+    return inst?.ready || Promise.resolve();
+  },
+});
 
 const { width: screenWidth } = Dimensions.get('window');
 const boardWidth = (screenWidth - 45) / 2; // 2 columns with margins
@@ -46,12 +217,18 @@ const SCHEME_ICONS = {
   'split-complementary': ''
 };
 
-const SCHEME_FOLDERS = getAllSchemes().map(scheme => ({
-  id: scheme.key,
-  name: scheme.name,
-  icon: SCHEME_ICONS[scheme.key] || '',
-  description: scheme.description
-}));
+// Lazy-load SCHEME_FOLDERS to prevent early module initialization
+const getSchemeFolders = () => {
+  const getAllSchemes = getGetAllSchemes();
+  return getAllSchemes().map(scheme => ({
+    id: scheme.key,
+    name: scheme.name,
+    icon: SCHEME_ICONS[scheme.key] || '',
+    description: scheme.description
+  }));
+};
+
+const SCHEME_FOLDERS = getSchemeFolders();
 
 // Create lookup objects for consistent type handling
 const MAIN_FOLDERS_BY_ID = Object.fromEntries(MAIN_FOLDERS.map(f => [f.id, f]));
@@ -84,6 +261,7 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
     setLoading(true);
     
     // Use apiHelpers for better error handling
+    const apiPatterns = getApiPatterns();
     const matchesResult = await apiPatterns.loadColorMatches();
     
     if (matchesResult.success) {
@@ -119,7 +297,19 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
 
   const safeDate = (item) => item.timestamp || item.created_at || item.createdAt || null;
 
-  const getColorScheme = useCallback((baseColor, scheme) => computeScheme(baseColor, scheme), []);
+  const getColorScheme = useCallback((baseColor, scheme) => {
+    try {
+      const computeScheme = getComputeScheme();
+      if (typeof computeScheme !== 'function') {
+        return [baseColor].filter(Boolean);
+      }
+      const result = computeScheme(baseColor, scheme);
+      return Array.isArray(result) ? result : [baseColor].filter(Boolean);
+    } catch (error) {
+      console.warn('BoardsScreen: getColorScheme failed', error?.message || error);
+      return [baseColor].filter(Boolean);
+    }
+  }, []);
 
   const handleUploadImage = useCallback(async () => {
     if (!currentUser) {
@@ -300,7 +490,10 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
           <FlatList
             data={boardMatches}
             numColumns={2}
-            keyExtractor={safeId}
+            keyExtractor={(item, index) => {
+              const safeId = getSafeId();
+              return safeId(item, index);
+            }}
             contentContainerStyle={styles.colorMatchGrid}
             renderItem={({ item }) => (
               <View style={styles.colorMatchCard}>
@@ -576,12 +769,19 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
       {/* Color Extractor Modal */}
       {showExtractor && selectedImageUri && (
         <Modal visible={showExtractor} animationType="slide" presentationStyle="fullScreen">
-          <CoolorsColorExtractor
-            initialImageUri={selectedImageUri}
-            initialSlots={5}
-            onComplete={handleExtractorComplete}
-            onClose={handleExtractorClose}
-          />
+          <ExtractorErrorBoundary onClose={handleExtractorClose}>
+            {(() => {
+              const CoolorsColorExtractor = getCoolorsColorExtractor();
+              return (
+                <CoolorsColorExtractor
+                  initialImageUri={selectedImageUri}
+                  initialSlots={5}
+                  onComplete={handleExtractorComplete}
+                  onClose={handleExtractorClose}
+                />
+              );
+            })()}
+          </ExtractorErrorBoundary>
         </Modal>
       )}
     </>
@@ -932,6 +1132,49 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 2,
     elevation: 2,
+  },
+  extractorErrorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+    backgroundColor: '#fff',
+  },
+  extractorErrorTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#2c3e50',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  extractorErrorMessage: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  extractorErrorActions: {
+    width: '100%',
+    maxWidth: 320,
+  },
+  extractorErrorButton: {
+    backgroundColor: '#e9ecef',
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  extractorErrorButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  extractorErrorCloseButton: {
+    backgroundColor: '#e74c3c',
+  },
+  extractorErrorCloseButtonText: {
+    color: '#fff',
   },
 });
 

@@ -96,15 +96,15 @@ export default {
       EXPO_PUBLIC_LOG_LEVEL: process.env.EXPO_PUBLIC_LOG_LEVEL || 'warn',
     },
     updates: {
-      // CRASH FIX: Changed from 0 to 30000ms (30 seconds)
-      // fallbackToCacheTimeout: 0 causes immediate crash if updates can't be fetched
-      // 30 seconds gives reasonable time for network requests without blocking app startup
+      // CRASH FIX: Disabled automatic update checks to prevent ErrorRecovery crashes
+      // The ErrorRecovery system itself was crashing when update checks failed
+      // Updates must be triggered manually or via app restart
       fallbackToCacheTimeout: 30000,
       enabled: true,
-      // CRASH FIX: Changed from "ON_LOAD" to "ON_ERROR_RECOVERY"
-      // ON_LOAD checks for updates at every launch, causing crashes on network issues
-      // ON_ERROR_RECOVERY only checks after a crash, preventing crash loops
-      checkAutomatically: "ON_ERROR_RECOVERY",
+      // CRASH FIX: Set to NEVER to completely disable automatic update checks
+      // "ON_ERROR_RECOVERY" was still triggering crashes when the recovery check failed
+      // This prevents the ErrorRecovery.crash() loop seen in crashlogs
+      checkAutomatically: "NEVER",
       url: `https://u.expo.dev/${EAS_PROJECT_ID}`
     },
     runtimeVersion: {

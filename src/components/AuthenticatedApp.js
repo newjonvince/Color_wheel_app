@@ -3,7 +3,27 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, TouchableOpacity, Text, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import PropTypes from 'prop-types';
-import TabIcon from './TabIcon';
+
+// CRASH FIX: Lazy-load TabIcon to prevent early module initialization
+let _TabIcon = null;
+let _TabIconLoadAttempted = false;
+const getTabIcon = () => {
+  if (_TabIconLoadAttempted) return _TabIcon;
+  _TabIconLoadAttempted = true;
+  try {
+    const mod = require('./TabIcon');
+    _TabIcon = mod?.default || mod;
+  } catch (error) {
+    console.warn('AuthenticatedApp: TabIcon load failed', error?.message);
+    // Fallback to simple text-based icon
+    _TabIcon = ({ name, focused }) => {
+      const React = require('react');
+      const { Text } = require('react-native');
+      return React.createElement(Text, { style: { fontSize: 24 } }, focused ? '●' : '○');
+    };
+  }
+  return _TabIcon;
+};
 
 // CRASH FIX: Lazy-load all screen imports to prevent early module initialization
 let _BoardsScreen = null;
@@ -138,9 +158,10 @@ const AuthenticatedApp = ({ user, handleLogout }) => {
   ), [handleLogout]);
 
   // Tab icon renderer - uses tab name that matches TabIcon component's TAB_ICONS
-  const renderTabIcon = useCallback((tabName) => ({ focused, color, size }) => (
-    <TabIcon name={tabName} focused={focused} color={color} size={size} />
-  ), []);
+  const renderTabIcon = useCallback((tabName) => ({ focused, color, size }) => {
+    const TabIcon = getTabIcon();
+    return <TabIcon name={tabName} focused={focused} color={color} size={size} />;
+  }, []);
 
   const LoadingPlaceholder = useCallback(() => (
     <View style={styles.loadingPlaceholder}>
