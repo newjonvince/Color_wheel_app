@@ -96,14 +96,12 @@ export default {
       EXPO_PUBLIC_LOG_LEVEL: process.env.EXPO_PUBLIC_LOG_LEVEL || 'warn',
     },
     updates: {
-      // CRASH FIX: Disabled automatic update checks to prevent ErrorRecovery crashes
-      // The ErrorRecovery system itself was crashing when update checks failed
-      // Updates must be triggered manually or via app restart
+      // CRASH FIX: Completely disable Expo Updates to prevent ErrorRecovery crashes
+      // Even with checkAutomatically: "NEVER", ErrorRecovery.waitForRemoteLoaderToFinish()
+      // was still running and crashing when the remote loader failed
+      // Disabling updates entirely is the only way to prevent ALL ErrorRecovery crashes
       fallbackToCacheTimeout: 30000,
-      enabled: true,
-      // CRASH FIX: Set to NEVER to completely disable automatic update checks
-      // "ON_ERROR_RECOVERY" was still triggering crashes when the recovery check failed
-      // This prevents the ErrorRecovery.crash() loop seen in crashlogs
+      enabled: false, // ⚠️ DISABLED to prevent ErrorRecovery crash loop
       checkAutomatically: "NEVER",
       url: `https://u.expo.dev/${EAS_PROJECT_ID}`
     },
