@@ -34,25 +34,25 @@ class AppErrorBoundary extends React.Component {
   // Define action configs as static class properties
   static ERROR_CONFIGS = {
     network: {
-      emoji: '',
+      emoji: '🌐',
       title: 'Connection Problem',
       message: 'Unable to connect to our servers. Please check your internet connection and try again.',
       actions: ['retry', 'offline'] // Reference action names, not functions
     },
     storage: {
-      emoji: '',
+      emoji: '💾',
       title: 'Storage Issue',
       message: 'There was a problem accessing your saved data.',
       actions: ['retry', 'clearCache']
     },
     navigation: {
-      emoji: '',
+      emoji: '🧭',
       title: 'Navigation Error',
       message: 'There was a problem loading the screen. Let\'s get you back on track.',
       actions: ['goHome', 'restart']
     },
     unknown: {
-      emoji: '',
+      emoji: '❌',
       title: 'Something went wrong',
       message: 'An unexpected error occurred. We\'re working to fix it.',
       actions: ['retry', 'restart']
@@ -392,7 +392,11 @@ const styles = StyleSheet.create({
   },
   stackText: {
     fontSize: 12,
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({
+      ios: 'Courier',
+      android: 'monospace',
+      default: 'monospace',
+    }),
     color: '#495057',
     lineHeight: 16,
   },

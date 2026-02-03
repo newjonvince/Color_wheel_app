@@ -710,7 +710,11 @@ const styles = StyleSheet.create({
     color: '#FFFFFF', 
     fontSize: 14, 
     fontWeight: '600', 
-    fontFamily: 'monospace' 
+    fontFamily: Platform.select({
+      ios: 'Courier',
+      android: 'monospace',
+      default: 'monospace',
+    })
   },
 
   paletteBar: { backgroundColor: '#fff', paddingVertical: 16, paddingHorizontal: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e6e6e6' },

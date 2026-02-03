@@ -200,21 +200,21 @@ const { width: screenWidth } = Dimensions.get('window');
 const boardWidth = (screenWidth - 45) / 2; // 2 columns with margins
 
 const MAIN_FOLDERS = [
-  { id: 'private', name: 'Private', icon: '', description: 'Only visible to you' },
-  { id: 'public', name: 'Public', icon: '', description: 'Visible to everyone' },
+  { id: 'private', name: 'Private', icon: '🔒', description: 'Only visible to you' },
+  { id: 'public', name: 'Public', icon: '🌍', description: 'Visible to everyone' },
 ];
 
 // Generate scheme folders with proper icons from centralized definitions
 const SCHEME_ICONS = {
-  complementary: '',
-  analogous: '', 
-  triadic: '',
-  tetradic: '',
-  monochromatic: '',
-  compound: '',
-  shades: '',
-  tints: '',
-  'split-complementary': ''
+  complementary: '🔴🟢',
+  analogous: '🟡🟠', 
+  triadic: '🔵🔴🟡',
+  tetradic: '🟥🟦🟩🟨',
+  monochromatic: '⬛⬜',
+  compound: '🎨',
+  shades: '🌑',
+  tints: '💡',
+  'split-complementary': '🔀'
 };
 
 // Lazy-load SCHEME_FOLDERS to prevent early module initialization
@@ -974,7 +974,11 @@ const styles = StyleSheet.create({
   colorMatchBaseColor: {
     fontSize: 12,
     color: '#7f8c8d',
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({
+      ios: 'Courier',
+      android: 'monospace',
+      default: 'monospace',
+    }),
   },
   emptyBoard: {
     alignItems: 'center',

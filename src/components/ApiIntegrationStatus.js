@@ -3,7 +3,44 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
-import ApiService from '../services/safeApiService';
+
+let _apiServiceInstance = null;
+let _apiServiceLoadAttempted = false;
+let _apiServiceLoadError = null;
+
+const getApiServiceInstance = () => {
+  if (_apiServiceLoadAttempted) return _apiServiceInstance;
+  _apiServiceLoadAttempted = true;
+  try {
+    const mod = require('../services/safeApiService');
+    _apiServiceInstance = mod?.default || mod;
+  } catch (error) {
+    _apiServiceLoadError = error;
+    console.warn('ApiIntegrationStatus: safeApiService load failed', error?.message || error);
+    _apiServiceInstance = null;
+  }
+  return _apiServiceInstance;
+};
+
+const ApiService = {
+  getUserProfile: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.getUserProfile === 'function') return inst.getUserProfile(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+  getToken: () => {
+    const inst = getApiServiceInstance();
+    return typeof inst?.getToken === 'function' ? inst.getToken() : undefined;
+  },
+};
+
+Object.defineProperty(ApiService, 'ready', {
+  enumerable: true,
+  get: () => {
+    const inst = getApiServiceInstance();
+    return inst?.ready || Promise.resolve();
+  },
+});
 // Inline API test function (replaces removed apiIntegrationTest.js)
 const quickApiTest = async () => {
   try {
@@ -229,7 +266,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   token: {
-    fontFamily: 'monospace',
+    fontFamily: Platform.select({
+      ios: 'Courier',
+      android: 'monospace',
+      default: 'monospace',
+    }),
     fontSize: 12,
     color: '#6f42c1',
   },
