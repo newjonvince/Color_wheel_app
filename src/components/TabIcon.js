@@ -60,17 +60,17 @@ const TAB_ICONS = {
 
 // Emoji fallbacks (kept for compatibility)
 const EMOJI_FALLBACKS = {
-  Community: { focused: '', unfocused: '' },
-  ColorWheel: { focused: '', unfocused: '' },
-  Boards: { focused: '', unfocused: '' },
-  Profile: { focused: '', unfocused: '' },
-  Settings: { focused: '', unfocused: '' },
+  Community: { focused: '👥', unfocused: '👥' },
+  ColorWheel: { focused: '🎨', unfocused: '🎨' },
+  Boards: { focused: '📋', unfocused: '📋' },
+  Profile: { focused: '👤', unfocused: '👤' },
+  Settings: { focused: '⚙️', unfocused: '⚙️' },
 };
 
 const TabIcon = React.memo(({ name, focused, size = 24, color = '#666' }) => {
   const iconData = TAB_ICONS[name];
   if (!iconData) {
-    // Unknown tab name — fallback to emoji dot
+    // Unknown tab name — fallback to simple dot
     const emoji = focused ? '●' : '○';
     return (
       <View style={styles.iconContainer}>
