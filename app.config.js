@@ -64,7 +64,14 @@ export default {
           }
         }
       ],
-      "expo-font",
+      [
+        "expo-font",
+        {
+          // CRASH FIX: Prevent auto-loading of fonts at native module init
+          // Fonts will be loaded on-demand by components instead
+          fonts: []
+        }
+      ],
       "expo-secure-store",
       "expo-asset"
     ],
