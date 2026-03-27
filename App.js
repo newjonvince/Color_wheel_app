@@ -1396,12 +1396,11 @@ function FashionColorWheelApp() {
       }}
     >
       {(() => {
-        // Load native UI wrappers only after core init completes
-        // Before isReady, stick to View-only wrappers to avoid early native module initialization.
+        // CRASH FIX: Always load SafeAreaProvider eagerly to prevent View→SafeAreaProvider
+        // type change on isReady transition, which unmounts/remounts the entire subtree
+        // (including NavigationContainer) and causes an uncaught fatal JS error.
         const GestureHandlerRootView = getGestureHandlerRootView();
-        const { SafeAreaProvider, SafeAreaView } = isReady
-          ? getSafeAreaComponents()
-          : { SafeAreaProvider: View, SafeAreaView: View };
+        const { SafeAreaProvider, SafeAreaView } = getSafeAreaComponents();
         const StatusBar = isReady ? getStatusBar() : null;
         
         return (
@@ -1560,13 +1559,65 @@ const styles = StyleSheet.create({
 });
 
 
+// OUTER ERROR BOUNDARY: Catches any render errors from FashionColorWheelApp that
+// would otherwise escape UnifiedErrorBoundary (which is inside FashionColorWheelApp).
+// Also saves crash info to AsyncStorage for post-crash diagnosis.
+class AppCrashBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, errorMessage: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, errorMessage: error?.message || String(error) };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('[APP CRASH BOUNDARY] Caught fatal render error:', error?.message);
+    console.error('[APP CRASH BOUNDARY] Stack:', error?.stack?.substring(0, 1000));
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      AsyncStorage.setItem('@crash_debug', JSON.stringify({
+        message: error?.message || String(error),
+        stack: error?.stack?.substring(0, 2000),
+        componentStack: errorInfo?.componentStack?.substring(0, 1000),
+        timestamp: new Date().toISOString(),
+      })).catch(() => {});
+    } catch (_) {}
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: '#fff' }}>
+          <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#c0392b', marginBottom: 8, textAlign: 'center' }}>
+            App Error
+          </Text>
+          <Text style={{ fontSize: 13, color: '#555', textAlign: 'center', marginBottom: 24 }}>
+            {this.state.errorMessage || 'An unexpected error occurred. Please restart the app.'}
+          </Text>
+          <TouchableOpacity
+            style={{ backgroundColor: '#c0392b', paddingHorizontal: 28, paddingVertical: 14, borderRadius: 8 }}
+            onPress={() => this.setState({ hasError: false, errorMessage: null })}
+          >
+            <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // CONTEXT WRAPPER: Wrap the main app with AuthProvider for split context pattern
 function App() {
   const AuthProvider = getAuthProvider();
   return (
-    <AuthProvider>
-      <FashionColorWheelApp />
-    </AuthProvider>
+    <AppCrashBoundary>
+      <AuthProvider>
+        <FashionColorWheelApp />
+      </AuthProvider>
+    </AppCrashBoundary>
   );
 }
 
