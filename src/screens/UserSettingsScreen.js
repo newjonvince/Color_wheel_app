@@ -466,6 +466,9 @@ function UserSettingsScreen({ currentUser, onLogout, onAccountDeleted }) {
               placeholder="delete my account"
               autoCapitalize="none"
               autoCorrect={false}
+              spellCheck={false}
+              textContentType="none"
+              autoComplete="off"
             />
 
             <TouchableOpacity

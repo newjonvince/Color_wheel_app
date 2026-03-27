@@ -145,9 +145,13 @@ export const HSLInputs = React.memo(({
           onBlur={() => handleInputBlur('h')}
           keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'}
           style={styles.hslInput}
-          placeholder="0–360"
+          placeholder="0-360"
           accessibilityLabel="Hue degrees, 0 to 360"
           maxLength={3}
+          spellCheck={false}
+          autoCorrect={false}
+          textContentType="none"
+          autoComplete="off"
         />
       </View>
       
@@ -161,9 +165,13 @@ export const HSLInputs = React.memo(({
           onBlur={() => handleInputBlur('s')}
           keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'}
           style={styles.hslInput}
-          placeholder="0–100"
+          placeholder="0-100"
           accessibilityLabel="Saturation percentage, 0 to 100"
           maxLength={3}
+          spellCheck={false}
+          autoCorrect={false}
+          textContentType="none"
+          autoComplete="off"
         />
       </View>
       
@@ -177,9 +185,13 @@ export const HSLInputs = React.memo(({
           onBlur={() => handleInputBlur('l')}
           keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'}
           style={styles.hslInput}
-          placeholder="0–100"
+          placeholder="0-100"
           accessibilityLabel="Lightness percentage, 0 to 100"
           maxLength={3}
+          spellCheck={false}
+          autoCorrect={false}
+          textContentType="none"
+          autoComplete="off"
         />
       </View>
     </View>

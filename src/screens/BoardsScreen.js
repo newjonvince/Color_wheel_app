@@ -695,6 +695,10 @@ function BoardsScreen({ savedColorMatches = [], onSaveColorMatch, currentUser })
               onChangeText={setUploadTitle}
               placeholder="Enter title (optional)"
               placeholderTextColor="#999"
+              spellCheck={false}
+              autoCorrect={false}
+              textContentType="none"
+              autoComplete="off"
             />
             
             <Text style={styles.schemeLabel}>Privacy:</Text>
