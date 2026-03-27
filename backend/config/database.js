@@ -49,9 +49,10 @@ function parseMysqlUrl(urlString) {
 function resolveConfigFromEnv(env) {
   let cfg = null;
 
-  // 1) DATABASE_URL takes precedence if provided
-  if (env.DATABASE_URL && env.DATABASE_URL.startsWith('mysql://')) {
-    const u = parseMysqlUrl(env.DATABASE_URL);
+  // 1) DATABASE_URL or MYSQL_URL takes precedence if provided
+  const dbUrl = env.MYSQL_URL || env.DATABASE_URL;
+  if (dbUrl && dbUrl.startsWith('mysql://')) {
+    const u = parseMysqlUrl(dbUrl);
     cfg = {
       host: u.host,
       port: u.port,
