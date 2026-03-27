@@ -84,6 +84,7 @@ export default {
       EXPO_PUBLIC_NODE_ENV: process.env.NODE_ENV || 'production',
 
       // ✅ Dynamic API configuration based on environment
+      // Railway production backend URL
       EXPO_PUBLIC_API_BASE_URL: process.env.EXPO_PUBLIC_API_BASE_URL || 
         'https://colorwheelapp-production.up.railway.app',
       
