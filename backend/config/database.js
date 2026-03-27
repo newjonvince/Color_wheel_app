@@ -93,7 +93,17 @@ function resolveConfigFromEnv(env) {
   if (!cfg) {
     console.error('❌ CRITICAL: No database configuration found in environment variables!');
     console.error('Required: DB_HOST/MYSQLHOST or DATABASE_URL');
-    throw new Error('Database configuration missing - cannot start in production without valid DB config');
+    console.error('Server will start but database operations will fail until config is provided');
+    // Return minimal config to prevent module load crash - pool operations will fail gracefully
+    return {
+      host: 'localhost',
+      port: 3306,
+      user: 'root',
+      password: '',
+      database: 'railway',
+      waitForConnections: false,
+      connectionLimit: 1,
+    };
   }
 
   // Normalize SSL config for mysql2
