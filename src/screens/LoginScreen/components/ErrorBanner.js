@@ -4,21 +4,8 @@ import { View, Text, TouchableOpacity } from 'react-native';
 // CRASH FIX: Lazy-load @expo/vector-icons to prevent potential startup issues
 import { optimizedStyles as styles, optimizedColors } from '../styles';
 
-// Lazy MaterialIcons getter
-let _MaterialIcons = null;
-let _iconsChecked = false;
-const getMaterialIcons = () => {
-  if (_iconsChecked) return _MaterialIcons;
-  _iconsChecked = true;
-  try {
-    const mod = require('@expo/vector-icons');
-    _MaterialIcons = mod.MaterialIcons || null;
-  } catch (error) {
-    console.warn('ErrorBanner: @expo/vector-icons load failed', error?.message);
-    _MaterialIcons = null;
-  }
-  return _MaterialIcons;
-};
+// CRASH FIX: @expo/vector-icons DISABLED - triggers libFontParser.dylib SIGABRT on iOS
+const getMaterialIcons = () => null;
 
 // Lazy logger proxy to avoid circular import crashes
 let _loggerInstance = null;
@@ -78,7 +65,7 @@ const ErrorBanner = React.memo(
                   color={optimizedColors.textPrimary}
                 />
               ) : (
-                <Text style={{ fontSize: 18, color: optimizedColors.textPrimary }}>×</Text>
+                <Text style={{ fontSize: 18, color: optimizedColors.textPrimary }}>{'\u00D7'}</Text>
               );
             })()}
           </TouchableOpacity>

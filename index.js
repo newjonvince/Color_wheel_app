@@ -52,18 +52,11 @@ try {
   console.warn('[STARTUP] react-native-gesture-handler failed:', e?.message);
 }
 
-// Step 2.6: CRASH FIX - Catch font loading errors from @expo/vector-icons
-// FontLoaderModule can crash during initialization if font files are missing/corrupted
-// This prevents "registerFont" crashes from killing the app
-try {
-  // Intercept font loading errors by pre-loading vector icons module
-  const vectorIcons = require('@expo/vector-icons');
-  console.log('[STARTUP] @expo/vector-icons loaded successfully');
-} catch (e) {
-  console.warn('[STARTUP] @expo/vector-icons failed to load:', e?.message);
-  console.warn('[STARTUP] App will use fallback text icons instead of vector icons');
-  // App will continue with fallback icons - no need to throw
-}
+// Step 2.6: CRASH FIX - @expo/vector-icons is disabled at startup
+// Loading @expo/vector-icons triggers FontLoaderModule -> GSFontRegisterURL -> libFontParser.dylib
+// libFontParser crashes at the OS level - JS try-catch CANNOT stop this
+// Icons use text/emoji fallbacks instead (no font registration needed)
+console.log('[STARTUP] @expo/vector-icons skipped - using text/emoji fallbacks to prevent SIGABRT');
 
 // Step 3: Load and register the app (after all safety measures are in place)
 try {

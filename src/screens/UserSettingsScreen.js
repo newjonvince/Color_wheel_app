@@ -12,19 +12,11 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-// CRASH FIX: Lazy-load @expo/vector-icons to prevent native bridge access at module load time
-let _Ionicons = null;
-const getIonicons = () => {
-  if (_Ionicons) return _Ionicons;
-  try {
-    const mod = require('@expo/vector-icons');
-    _Ionicons = mod.Ionicons || null;
-  } catch (error) {
-    console.warn('UserSettingsScreen: @expo/vector-icons load failed', error?.message);
-    _Ionicons = null;
-  }
-  return _Ionicons;
-};
+import { safeApiCall } from '../utils/apiHelpers';
+// CRASH FIX: @expo/vector-icons DISABLED - triggers libFontParser.dylib SIGABRT on iOS
+// FontLoaderModule -> GSFontRegisterURL -> libFontParser crashes at OS level (uncatchable in JS)
+// Using empty view fallbacks instead
+const getIonicons = () => null;
 
 // Safe Ionicons wrapper component with fallback
 const Ionicons = ({ name, size, color, style }) => {
@@ -36,8 +28,63 @@ const Ionicons = ({ name, size, color, style }) => {
   return <View style={[{ width: size, height: size }, style]} />;
 };
 
-import ApiService from '../services/safeApiService';
-import { safeApiCall } from '../utils/apiHelpers';
+let _apiServiceInstance = null;
+let _apiServiceLoadAttempted = false;
+let _apiServiceLoadError = null;
+
+const getApiServiceInstance = () => {
+  if (_apiServiceLoadAttempted) return _apiServiceInstance;
+  _apiServiceLoadAttempted = true;
+  try {
+    const mod = require('../services/safeApiService');
+    _apiServiceInstance = mod?.default || mod;
+  } catch (error) {
+    _apiServiceLoadError = error;
+    console.warn('UserSettingsScreen: safeApiService load failed', error?.message || error);
+    _apiServiceInstance = null;
+  }
+  return _apiServiceInstance;
+};
+
+const ApiService = {
+  request: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.request === 'function') return inst.request(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+  updateSettings: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.updateSettings === 'function') return inst.updateSettings(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+  deleteAccount: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.deleteAccount === 'function') return inst.deleteAccount(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+  requestDataExport: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.requestDataExport === 'function') return inst.requestDataExport(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+  logout: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.logout === 'function') return inst.logout(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+  getToken: () => {
+    const inst = getApiServiceInstance();
+    return typeof inst?.getToken === 'function' ? inst.getToken() : undefined;
+  },
+};
+
+Object.defineProperty(ApiService, 'ready', {
+  enumerable: true,
+  get: () => {
+    const inst = getApiServiceInstance();
+    return inst?.ready || Promise.resolve();
+  },
+});
 
 let _safeStorage = null;
 const getSafeStorage = () => {

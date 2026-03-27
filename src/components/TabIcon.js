@@ -3,23 +3,8 @@ import React from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
 // CRASH FIX: Lazy-load @expo/vector-icons to prevent potential startup issues
 
-// Lazy icon library getters
-let _vectorIcons = null;
-const getVectorIcons = () => {
-  if (_vectorIcons) return _vectorIcons;
-  try {
-    const mod = require('@expo/vector-icons');
-    _vectorIcons = {
-      MaterialIcons: mod.MaterialIcons || null,
-      Feather: mod.Feather || null,
-      Ionicons: mod.Ionicons || null,
-    };
-  } catch (error) {
-    console.warn('TabIcon: @expo/vector-icons load failed', error?.message);
-    _vectorIcons = { MaterialIcons: null, Feather: null, Ionicons: null };
-  }
-  return _vectorIcons;
-};
+// CRASH FIX: @expo/vector-icons DISABLED - triggers libFontParser.dylib SIGABRT on iOS
+const getVectorIcons = () => ({ MaterialIcons: null, Feather: null, Ionicons: null });
 // Safe import with fallback
 let COLOR_WHEEL_CONFIG;
 try {

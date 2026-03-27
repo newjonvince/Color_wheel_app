@@ -3,19 +3,53 @@ import {
   StyleSheet, Text, View, Modal, TouchableOpacity, FlatList,
   Image, Alert, Dimensions, ActivityIndicator, SafeAreaView,
 } from 'react-native';
-// CRASH FIX: Lazy-load @expo/vector-icons to prevent native bridge access at module load time
-let _Ionicons = null;
-const getIonicons = () => {
-  if (_Ionicons) return _Ionicons;
+import { safeUserId } from '../utils/keyExtractors';
+
+let _apiServiceInstance = null;
+let _apiServiceLoadAttempted = false;
+let _apiServiceLoadError = null;
+
+const getApiServiceInstance = () => {
+  if (_apiServiceLoadAttempted) return _apiServiceInstance;
+  _apiServiceLoadAttempted = true;
   try {
-    const mod = require('@expo/vector-icons');
-    _Ionicons = mod.Ionicons || null;
+    const mod = require('../services/safeApiService');
+    _apiServiceInstance = mod?.default || mod;
   } catch (error) {
-    console.warn('CommunityModal: @expo/vector-icons load failed', error?.message);
-    _Ionicons = null;
+    _apiServiceLoadError = error;
+    console.warn('CommunityModal: safeApiService load failed', error?.message || error);
+    _apiServiceInstance = null;
   }
-  return _Ionicons;
+  return _apiServiceInstance;
 };
+
+const ApiService = {
+  get: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.get === 'function') return inst.get(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+  post: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.post === 'function') return inst.post(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+  delete: async (...args) => {
+    const inst = getApiServiceInstance();
+    if (typeof inst?.delete === 'function') return inst.delete(...args);
+    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
+  },
+};
+
+Object.defineProperty(ApiService, 'ready', {
+  enumerable: true,
+  get: () => {
+    const inst = getApiServiceInstance();
+    return inst?.ready || Promise.resolve();
+  },
+});
+// CRASH FIX: @expo/vector-icons DISABLED - triggers libFontParser.dylib SIGABRT on iOS
+const getIonicons = () => null;
 
 // Safe Ionicons wrapper component with fallback
 const Ionicons = ({ name, size, color, style }) => {
@@ -25,9 +59,6 @@ const Ionicons = ({ name, size, color, style }) => {
   }
   return <View style={[{ width: size, height: size }, style]} />;
 };
-
-import { safeUserId } from '../utils/keyExtractors';
-import ApiService from '../services/safeApiService';
 
 const { width: screenWidth } = Dimensions.get('window');
 

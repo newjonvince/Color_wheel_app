@@ -127,19 +127,8 @@ IMPROVEMENTS MADE:
       return inst?.ready || Promise.resolve();
     },
   });
-  // CRASH FIX: Lazy-load @expo/vector-icons to prevent native bridge access at module load time
-  let _Ionicons = null;
-  const getIonicons = () => {
-    if (_Ionicons) return _Ionicons;
-    try {
-      const mod = require('@expo/vector-icons');
-      _Ionicons = mod.Ionicons || null;
-    } catch (error) {
-      console.warn('CommunityFeedScreen: @expo/vector-icons load failed', error?.message);
-      _Ionicons = null;
-    }
-    return _Ionicons;
-  };
+  // CRASH FIX: @expo/vector-icons DISABLED - triggers libFontParser.dylib SIGABRT on iOS
+  const getIonicons = () => null;
 
   // Safe Ionicons wrapper component with fallback
   const Ionicons = ({ name, size, color, style }) => {
