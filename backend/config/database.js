@@ -120,8 +120,7 @@ function resolveConfigFromEnv(env) {
 
     // Timeouts (MySQL2 connection options only)
     connectTimeout: 10_000, // Time to wait for initial connection
-    timeout: 10_000, // Query execution timeout
-    // ❌ NOTE: acquireTimeout is NOT valid for MySQL2 (that's a generic pool option)
+    // Note: MySQL2 does not support 'timeout' option for query execution
 
     // Safety / QoL
     namedPlaceholders: true,  // native named placeholders
