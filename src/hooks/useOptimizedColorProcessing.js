@@ -1,9 +1,249 @@
 // hooks/useOptimizedColorProcessing.js - Practical caching implementation
 // Demonstrates your exact optimization strategy with reuse and caching
 
-import { useState, useCallback, useMemo, useRef } from 'react';
-import { hexToRgb, hexToHsl, hslToHex } from '../utils/optimizedColor';
-import { LRUCache } from '../utils/LRUCache';
+import { useCallback, useRef } from 'react';
+
+let _optimizedColorModule = null;
+let _optimizedColorLoadAttempted = false;
+const getOptimizedColorModule = () => {
+  if (_optimizedColorLoadAttempted) return _optimizedColorModule;
+  _optimizedColorLoadAttempted = true;
+  try {
+    _optimizedColorModule = require('../utils/optimizedColor');
+  } catch (e) {
+    console.warn('useOptimizedColorProcessing: optimizedColor load failed', e?.message || e);
+    _optimizedColorModule = null;
+  }
+  return _optimizedColorModule;
+};
+
+const clampNumber = (value, min, max) => {
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(n)) return min;
+  return Math.min(max, Math.max(min, n));
+};
+
+const parseHexToRgbFallback = (hex) => {
+  if (typeof hex !== 'string') return null;
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex.trim());
+  if (!m) return null;
+  const int = parseInt(m[1], 16);
+  return {
+    r: (int >> 16) & 255,
+    g: (int >> 8) & 255,
+    b: int & 255,
+  };
+};
+
+const rgbToHslFallback = ({ r, g, b }) => {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const delta = max - min;
+
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+
+  if (delta !== 0) {
+    s = delta / (1 - Math.abs(2 * l - 1));
+    switch (max) {
+      case rn:
+        h = ((gn - bn) / delta) % 6;
+        break;
+      case gn:
+        h = (bn - rn) / delta + 2;
+        break;
+      default:
+        h = (rn - gn) / delta + 4;
+        break;
+    }
+    h *= 60;
+    if (h < 0) h += 360;
+  }
+
+  return {
+    h,
+    s: s * 100,
+    l: l * 100,
+  };
+};
+
+const hslToHexFallback = (h, s, l) => {
+  const hh = ((clampNumber(h, 0, 360) % 360) + 360) % 360;
+  const ss = clampNumber(s, 0, 100) / 100;
+  const ll = clampNumber(l, 0, 100) / 100;
+
+  const c = (1 - Math.abs(2 * ll - 1)) * ss;
+  const x = c * (1 - Math.abs(((hh / 60) % 2) - 1));
+  const m = ll - c / 2;
+
+  let r1 = 0;
+  let g1 = 0;
+  let b1 = 0;
+
+  if (hh < 60) {
+    r1 = c;
+    g1 = x;
+  } else if (hh < 120) {
+    r1 = x;
+    g1 = c;
+  } else if (hh < 180) {
+    g1 = c;
+    b1 = x;
+  } else if (hh < 240) {
+    g1 = x;
+    b1 = c;
+  } else if (hh < 300) {
+    r1 = x;
+    b1 = c;
+  } else {
+    r1 = c;
+    b1 = x;
+  }
+
+  const to255 = (v) => Math.round((v + m) * 255);
+  const r = clampNumber(to255(r1), 0, 255);
+  const g = clampNumber(to255(g1), 0, 255);
+  const b = clampNumber(to255(b1), 0, 255);
+
+  const toHex2 = (n) => n.toString(16).padStart(2, '0');
+  return `#${toHex2(r)}${toHex2(g)}${toHex2(b)}`.toUpperCase();
+};
+
+const hexToRgbSafe = (hex) => {
+  const mod = getOptimizedColorModule();
+  const fn = mod?.hexToRgb;
+  if (typeof fn === 'function') {
+    try {
+      return fn(hex);
+    } catch (_e) {
+      return parseHexToRgbFallback(hex);
+    }
+  }
+  return parseHexToRgbFallback(hex);
+};
+
+const hexToHslSafe = (hex) => {
+  const mod = getOptimizedColorModule();
+  const fn = mod?.hexToHsl;
+  if (typeof fn === 'function') {
+    try {
+      return fn(hex);
+    } catch (_e) {
+      const rgb = parseHexToRgbFallback(hex);
+      return rgb ? rgbToHslFallback(rgb) : null;
+    }
+  }
+  const rgb = parseHexToRgbFallback(hex);
+  return rgb ? rgbToHslFallback(rgb) : null;
+};
+
+const hslToHexSafe = (h, s, l) => {
+  const mod = getOptimizedColorModule();
+  const fn = mod?.hslToHex;
+  if (typeof fn === 'function') {
+    try {
+      return fn(h, s, l);
+    } catch (_e) {
+      return hslToHexFallback(h, s, l);
+    }
+  }
+  return hslToHexFallback(h, s, l);
+};
+
+class FallbackLRUCache {
+  constructor(options = {}) {
+    this.maxSize = typeof options.maxSize === 'number' ? options.maxSize : 1000;
+    this.ttl = typeof options.ttl === 'number' ? options.ttl : 0;
+    this.map = new Map();
+    this.hits = 0;
+    this.misses = 0;
+    this.evictions = 0;
+    this.expired = 0;
+  }
+  _now() {
+    return Date.now();
+  }
+  _isExpired(entry) {
+    if (!entry) return true;
+    if (!this.ttl) return false;
+    return typeof entry.expiresAt === 'number' && entry.expiresAt <= this._now();
+  }
+  has(key) {
+    const entry = this.map.get(key);
+    if (!entry) return false;
+    if (this._isExpired(entry)) {
+      this.map.delete(key);
+      this.expired += 1;
+      return false;
+    }
+    return true;
+  }
+  get(key) {
+    const entry = this.map.get(key);
+    if (!entry) {
+      this.misses += 1;
+      return undefined;
+    }
+    if (this._isExpired(entry)) {
+      this.map.delete(key);
+      this.expired += 1;
+      this.misses += 1;
+      return undefined;
+    }
+    this.map.delete(key);
+    this.map.set(key, entry);
+    this.hits += 1;
+    return entry.value;
+  }
+  set(key, value) {
+    const expiresAt = this.ttl ? this._now() + this.ttl : null;
+    if (this.map.has(key)) this.map.delete(key);
+    this.map.set(key, { value, expiresAt });
+    while (this.map.size > this.maxSize) {
+      const firstKey = this.map.keys().next().value;
+      this.map.delete(firstKey);
+      this.evictions += 1;
+    }
+  }
+  clear() {
+    this.map.clear();
+  }
+  getStats() {
+    const total = this.hits + this.misses;
+    const hitRate = total ? this.hits / total : 0;
+    return {
+      size: this.map.size,
+      maxSize: this.maxSize,
+      hits: this.hits,
+      misses: this.misses,
+      hitRate,
+      evictions: this.evictions,
+      expired: this.expired,
+    };
+  }
+}
+
+let _lruCacheCtor = null;
+let _lruCacheLoadAttempted = false;
+const getLRUCacheCtor = () => {
+  if (_lruCacheLoadAttempted) return _lruCacheCtor;
+  _lruCacheLoadAttempted = true;
+  try {
+    const mod = require('../utils/LRUCache');
+    _lruCacheCtor = mod?.LRUCache || mod?.default || mod;
+  } catch (e) {
+    console.warn('useOptimizedColorProcessing: LRUCache load failed', e?.message || e);
+    _lruCacheCtor = null;
+  }
+  if (typeof _lruCacheCtor !== 'function') {
+    _lruCacheCtor = FallbackLRUCache;
+  }
+  return _lruCacheCtor;
+};
 
 /**
  * Custom hook that implements optimized caching strategy
@@ -15,12 +255,13 @@ import { LRUCache } from '../utils/LRUCache';
 
 export const useOptimizedColorProcessing = () => {
   // Use optimized LRU caches with TTL and performance monitoring
-  const colorCache = useRef(new LRUCache({ 
+  const LRUCacheCtor = getLRUCacheCtor();
+  const colorCache = useRef(new LRUCacheCtor({ 
     maxSize: 500, 
     ttl: 300000, // 5 minutes TTL for color analysis
     cleanupInterval: 60000 // 1 minute cleanup
   }));
-  const contrastCache = useRef(new LRUCache({ 
+  const contrastCache = useRef(new LRUCacheCtor({ 
     maxSize: 1000, // More contrast pairs than colors
     ttl: 600000, // 10 minutes TTL for contrast calculations
     cleanupInterval: 120000 // 2 minute cleanup
@@ -40,7 +281,25 @@ export const useOptimizedColorProcessing = () => {
     }
 
     // Single HEX→RGB conversion (not three!)
-    const rgb = hexToRgb(hex);
+    const rgb = hexToRgbSafe(hex);
+    if (!rgb) {
+      return {
+        hex,
+        rgb: { r: 0, g: 0, b: 0 },
+        hsl: { h: 0, s: 0, l: 0 },
+        brightness: 0,
+        brightnessLabel: 'very dark',
+        isLight: false,
+        isDark: true,
+        luminance: 0,
+        temperature: 'neutral',
+        category: 'grayscale',
+        accessibility: {
+          recommendedTextColor: '#FFFFFF',
+          contrastLevel: 'low'
+        }
+      };
+    }
     
     // Calculate brightness once and reuse (your exact suggestion)
     const brightnessValue = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
@@ -51,7 +310,7 @@ export const useOptimizedColorProcessing = () => {
     const isDark = !isLight;
     
     // Calculate other properties while we have RGB
-    const hsl = hexToHsl(hex);
+    const hsl = hexToHslSafe(hex) || { h: 0, s: 0, l: 0 };
     const luminance = calculateLuminance(rgb.r, rgb.g, rgb.b);
     
     const result = {
@@ -367,4 +626,3 @@ function generateRecommendations(analyses, scheme) {
   return recommendations;
 }
 
-export default useOptimizedColorProcessing;

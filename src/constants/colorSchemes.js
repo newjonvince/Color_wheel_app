@@ -1,101 +1,49 @@
-// constants/colorSchemes.js - Centralized color scheme definitions
+// constants/colorSchemes.js - Single source of truth for all color scheme data.
+// colorCount is derived from offsets.length — never edit them independently.
 
-/**
- * Color scheme definitions with display names and descriptions
- */
+const s = (key, name, description, offsets, accessibilityLabel) => ({
+  key, name, description, offsets,
+  colorCount: offsets.length,
+  accessibilityLabel,
+});
+
 export const COLOR_SCHEMES = {
-  complementary: {
-    key: 'complementary',
-    name: 'Complementary',
-    description: 'Colors opposite on the color wheel',
-    colorCount: 2,
-  },
-  analogous: {
-    key: 'analogous',
-    name: 'Analogous',
-    description: 'Colors adjacent on the color wheel',
-    colorCount: 3,
-  },
-  'split-complementary': {
-    key: 'split-complementary',
-    name: 'Split Complementary',
-    description: 'Base color plus two colors adjacent to its complement',
-    colorCount: 3,
-  },
-  triadic: {
-    key: 'triadic',
-    name: 'Triadic',
-    description: 'Three colors evenly spaced on the color wheel',
-    colorCount: 3,
-  },
-  tetradic: {
-    key: 'tetradic',
-    name: 'Tetradic',
-    description: 'Four colors forming a rectangle on the color wheel',
-    colorCount: 4,
-  },
-  monochromatic: {
-    key: 'monochromatic',
-    name: 'Monochromatic',
-    description: 'Variations of a single hue',
-    colorCount: 5,
-  },
-  compound: {
-    key: 'compound',
-    name: 'Compound',
-    description: 'Combination of complementary and analogous',
-    colorCount: 4,
-  },
-  shades: {
-    key: 'shades',
-    name: 'Shades',
-    description: 'Darker variations of a color',
-    colorCount: 5,
-  },
-  tints: {
-    key: 'tints',
-    name: 'Tints',
-    description: 'Lighter variations of a color',
-    colorCount: 5,
-  },
+  complementary:       s('complementary',       'Complementary',       'Colors opposite on the color wheel',                     [0, 180],              'Complementary color scheme with 2 opposite colors'),
+  analogous:           s('analogous',           'Analogous',           'Colors adjacent on the color wheel',                     [0, 30, -30],          'Analogous color scheme with 3 adjacent colors'),
+  'split-complementary': s('split-complementary', 'Split Complementary', 'Base color plus two colors adjacent to its complement', [0, 150, 210],         'Split complementary color scheme with 3 colors'),
+  triadic:             s('triadic',             'Triadic',             'Three colors evenly spaced on the color wheel',           [0, 120, 240],         'Triadic color scheme with 3 evenly spaced colors'),
+  tetradic:            s('tetradic',            'Tetradic',            'Four colors forming a rectangle on the color wheel',      [0, 90, 180, 270],     'Tetradic color scheme with 4 colors forming a rectangle'),
+  monochromatic:       s('monochromatic',       'Monochromatic',       'Variations of a single hue',                             [0, 0, 0],             'Monochromatic color scheme with variations of one color'),
+  compound:            s('compound',            'Compound',            'Combination of complementary and analogous',              [0, 30, 180, 210],     'Compound color scheme with split-complementary and complementary colors'),
+  shades:              s('shades',              'Shades',              'Darker variations of a color',                           [0, 0, 0, 0, 0],       'Shades color scheme with darker variations of the base color'),
+  tints:               s('tints',              'Tints',               'Lighter variations of a color',                          [0, 0, 0, 0, 0],       'Tints color scheme with lighter variations of the base color'),
 };
 
-/**
- * Get all available color schemes as an array
- * @returns {Array<{key: string, name: string, description: string, colorCount: number}>}
- */
-export const getAllSchemes = () => {
-  return Object.values(COLOR_SCHEMES);
-};
-
-/**
- * Get a specific scheme by key
- * @param {string} key - The scheme key
- * @returns {Object|null} The scheme object or null if not found
- */
-export const getSchemeByKey = (key) => {
-  return COLOR_SCHEMES[key] || null;
-};
-
-/**
- * Get scheme display name
- * @param {string} key - The scheme key
- * @returns {string} The display name or the key if not found
- */
-export const getSchemeDisplayName = (key) => {
-  const scheme = COLOR_SCHEMES[key];
-  return scheme?.name || key;
-};
-
-/**
- * List of scheme keys for iteration
- */
 export const SCHEME_KEYS = Object.keys(COLOR_SCHEMES);
+
+// Derived lookups — replaces the separate SCHEME_COUNTS / SCHEME_OFFSETS in colorWheelConstants.js
+export const SCHEME_OFFSETS = Object.fromEntries(
+  SCHEME_KEYS.map(k => [k, COLOR_SCHEMES[k].offsets])
+);
+
+export const SCHEME_COUNTS = Object.fromEntries(
+  SCHEME_KEYS.map(k => [k, COLOR_SCHEMES[k].colorCount])
+);
+
+export const getAllSchemes = () => Object.values(COLOR_SCHEMES);
+export const getSchemeByKey = (key) => COLOR_SCHEMES[key] || null;
+export const getSchemeDisplayName = (key) =>
+  COLOR_SCHEMES[key]?.name || (key ? key[0].toUpperCase() + key.slice(1) : 'Scheme');
+export const getAccessibilityLabel = (key) =>
+  COLOR_SCHEMES[key]?.accessibilityLabel || 'Color scheme selector';
 
 export default {
   COLOR_SCHEMES,
   getAllSchemes,
   getSchemeByKey,
   getSchemeDisplayName,
+  getAccessibilityLabel,
   SCHEME_KEYS,
+  SCHEME_OFFSETS,
+  SCHEME_COUNTS,
 };

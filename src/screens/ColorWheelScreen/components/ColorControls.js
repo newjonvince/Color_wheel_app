@@ -66,3 +66,5 @@ export const ColorControls = React.memo(({
     </View>
   );
 });
+
+ColorControls.displayName = 'ColorControls';

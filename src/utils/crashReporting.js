@@ -1,20 +1,8 @@
 // utils/crashReporting.js - Crash reporting utility with Sentry integration
 // CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
-let _isDebugMode = null;
 let _isProduction = null;
 
-const getIsDebugMode = () => {
-  if (_isDebugMode === null) {
-    try {
-      const helper = require('./expoConfigHelper');
-      _isDebugMode = helper.isDebugMode ? helper.isDebugMode() : false;
-    } catch (error) {
-      console.warn('crashReporting: expoConfigHelper load failed', error?.message);
-      _isDebugMode = false;
-    }
-  }
-  return _isDebugMode;
-};
+import { isDebugMode as getIsDebugMode } from './debugMode';
 
 const getIsProduction = () => {
   if (_isProduction === null) {

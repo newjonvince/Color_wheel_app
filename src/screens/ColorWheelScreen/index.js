@@ -4,16 +4,220 @@ import React, { useRef, useCallback, useMemo, lazy, Suspense } from 'react';
 import { ScrollView, View, Text, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import PropTypes from 'prop-types';
-import AppErrorBoundary from '../../components/AppErrorBoundary';
-import { isValidHex6 } from '../../utils/colorValidation';
-import { SchemeSelector } from './components/SchemeSelector';
-import { ColorWheelContainer } from './components/ColorWheelContainer';
-import { ColorControls } from './components/ColorControls';
-import { HSLInputs } from './components/HSLInputs';
-import { ColorSwatches } from './components/ColorSwatches';
-import { useOptimizedColorWheelState } from './useOptimizedColorWheelState';
-import { styles } from './styles';
-import { apiPatterns } from '../../utils/apiHelpers';
+// CRASH FIX: Lazy-load all imports to prevent early module initialization
+let _AppErrorBoundary = null;
+let _AppErrorBoundaryLoadAttempted = false;
+const getAppErrorBoundary = () => {
+  if (_AppErrorBoundaryLoadAttempted) return _AppErrorBoundary;
+  _AppErrorBoundaryLoadAttempted = true;
+  try {
+    const mod = require('../../components/AppErrorBoundary');
+    _AppErrorBoundary = mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelScreen: AppErrorBoundary load failed', error?.message);
+    _AppErrorBoundary = ({ children }) => children;
+  }
+  return _AppErrorBoundary;
+};
+
+let _colorValidation = null;
+let _colorValidationLoadAttempted = false;
+const getColorValidation = () => {
+  if (_colorValidationLoadAttempted) return _colorValidation;
+  _colorValidationLoadAttempted = true;
+  try {
+    _colorValidation = require('../../utils/colorValidation');
+  } catch (error) {
+    console.warn('ColorWheelScreen: colorValidation load failed', error?.message);
+    _colorValidation = { isValidHex6: () => false };
+  }
+  return _colorValidation;
+};
+const isValidHex6 = (hex) => {
+  const mod = getColorValidation();
+  return mod?.isValidHex6 ? mod.isValidHex6(hex) : false;
+};
+
+let _SchemeSelector = null;
+let _SchemeSelectorLoadAttempted = false;
+const getSchemeSelector = () => {
+  if (_SchemeSelectorLoadAttempted) return _SchemeSelector;
+  _SchemeSelectorLoadAttempted = true;
+  try {
+    const mod = require('./components/SchemeSelector');
+    _SchemeSelector = mod?.SchemeSelector || mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelScreen: SchemeSelector load failed', error?.message);
+    _SchemeSelector = () => <View><Text>SchemeSelector unavailable</Text></View>;
+  }
+  return _SchemeSelector;
+};
+
+let _ColorWheelContainer = null;
+let _ColorWheelContainerLoadAttempted = false;
+const getColorWheelContainer = () => {
+  if (_ColorWheelContainerLoadAttempted) return _ColorWheelContainer;
+  _ColorWheelContainerLoadAttempted = true;
+  try {
+    const mod = require('./components/ColorWheelContainer');
+    _ColorWheelContainer = mod?.ColorWheelContainer || mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelScreen: ColorWheelContainer load failed', error?.message);
+    _ColorWheelContainer = () => <View><Text>ColorWheelContainer unavailable</Text></View>;
+  }
+  return _ColorWheelContainer;
+};
+
+let _ColorControls = null;
+let _ColorControlsLoadAttempted = false;
+const getColorControls = () => {
+  if (_ColorControlsLoadAttempted) return _ColorControls;
+  _ColorControlsLoadAttempted = true;
+  try {
+    const mod = require('./components/ColorControls');
+    _ColorControls = mod?.ColorControls || mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelScreen: ColorControls load failed', error?.message);
+    _ColorControls = () => <View><Text>ColorControls unavailable</Text></View>;
+  }
+  return _ColorControls;
+};
+
+let _HSLInputs = null;
+let _HSLInputsLoadAttempted = false;
+const getHSLInputs = () => {
+  if (_HSLInputsLoadAttempted) return _HSLInputs;
+  _HSLInputsLoadAttempted = true;
+  try {
+    const mod = require('./components/HSLInputs');
+    _HSLInputs = mod?.HSLInputs || mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelScreen: HSLInputs load failed', error?.message);
+    _HSLInputs = () => <View><Text>HSLInputs unavailable</Text></View>;
+  }
+  return _HSLInputs;
+};
+
+let _HexInput = null;
+let _HexInputLoadAttempted = false;
+const getHexInput = () => {
+  if (_HexInputLoadAttempted) return _HexInput;
+  _HexInputLoadAttempted = true;
+  try {
+    const mod = require('./components/HexInput');
+    _HexInput = mod?.HexInput || mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelScreen: HexInput load failed', error?.message);
+    _HexInput = () => null;
+  }
+  return _HexInput;
+};
+
+let _ColorSliders = null;
+let _ColorSlidersLoadAttempted = false;
+const getColorSliders = () => {
+  if (_ColorSlidersLoadAttempted) return _ColorSliders;
+  _ColorSlidersLoadAttempted = true;
+  try {
+    const mod = require('./components/ColorSliders');
+    _ColorSliders = mod?.ColorSliders || mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelScreen: ColorSliders load failed', error?.message);
+    _ColorSliders = () => null;
+  }
+  return _ColorSliders;
+};
+
+let _PaletteActions = null;
+let _PaletteActionsLoadAttempted = false;
+const getPaletteActions = () => {
+  if (_PaletteActionsLoadAttempted) return _PaletteActions;
+  _PaletteActionsLoadAttempted = true;
+  try {
+    const mod = require('./components/PaletteActions');
+    _PaletteActions = mod?.PaletteActions || mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelScreen: PaletteActions load failed', error?.message);
+    _PaletteActions = () => null;
+  }
+  return _PaletteActions;
+};
+
+let _ColorSwatches = null;
+let _ColorSwatchesLoadAttempted = false;
+const getColorSwatches = () => {
+  if (_ColorSwatchesLoadAttempted) return _ColorSwatches;
+  _ColorSwatchesLoadAttempted = true;
+  try {
+    const mod = require('./components/ColorSwatches');
+    _ColorSwatches = mod?.ColorSwatches || mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelScreen: ColorSwatches load failed', error?.message);
+    _ColorSwatches = () => <View><Text>ColorSwatches unavailable</Text></View>;
+  }
+  return _ColorSwatches;
+};
+
+let _useOptimizedColorWheelState = null;
+let _useOptimizedColorWheelStateLoadAttempted = false;
+const getUseOptimizedColorWheelState = () => {
+  if (_useOptimizedColorWheelStateLoadAttempted) return _useOptimizedColorWheelState;
+  _useOptimizedColorWheelStateLoadAttempted = true;
+  try {
+    const mod = require('./useOptimizedColorWheelState');
+    _useOptimizedColorWheelState = mod?.useOptimizedColorWheelState || mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelScreen: useOptimizedColorWheelState load failed', error?.message);
+    _useOptimizedColorWheelState = () => ({});
+  }
+  return _useOptimizedColorWheelState;
+};
+const useOptimizedColorWheelState = (props) => {
+  const hook = getUseOptimizedColorWheelState();
+  return typeof hook === 'function' ? hook(props) : {};
+};
+
+let _styles = null;
+let _stylesLoadAttempted = false;
+const getStyles = () => {
+  if (_stylesLoadAttempted) return _styles;
+  _stylesLoadAttempted = true;
+  try {
+    const mod = require('./styles');
+    _styles = mod?.styles || mod?.default || mod;
+  } catch (error) {
+    console.warn('ColorWheelScreen: styles load failed', error?.message);
+    _styles = {};
+  }
+  return _styles;
+};
+const styles = new Proxy({}, {
+  get: (target, prop) => {
+    const styleModule = getStyles();
+    return styleModule?.[prop] || {};
+  }
+});
+
+let _apiPatterns = null;
+let _apiPatternsLoadAttempted = false;
+const getApiPatterns = () => {
+  if (_apiPatternsLoadAttempted) return _apiPatterns;
+  _apiPatternsLoadAttempted = true;
+  try {
+    const mod = require('../../utils/apiHelpers');
+    _apiPatterns = mod?.apiPatterns || {};
+  } catch (error) {
+    console.warn('ColorWheelScreen: apiPatterns load failed', error?.message);
+    _apiPatterns = { loadUserData: async () => ({ success: false }) };
+  }
+  return _apiPatterns;
+};
+const apiPatterns = new Proxy({}, {
+  get: (target, prop) => {
+    const patterns = getApiPatterns();
+    return patterns?.[prop] || (() => Promise.resolve({ success: false }));
+  }
+});
 
 let _optimizedColorModule = null;
 let _optimizedColorLoadAttempted = false;
@@ -69,21 +273,7 @@ Object.defineProperty(ApiService, 'ready', {
   },
 });
 
-// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
-let _isDebugModeValue = null;
-const getIsDebugMode = () => {
-  if (_isDebugModeValue === null) {
-    try {
-      const helper = require('../../utils/expoConfigHelper');
-      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
-    } catch (error) {
-      console.warn('ColorWheelScreen: expoConfigHelper load failed', error?.message);
-      _isDebugModeValue = false;
-    }
-  }
-  return _isDebugModeValue;
-};
-const IS_DEBUG_MODE = () => getIsDebugMode();
+import { isDebugMode as IS_DEBUG_MODE } from '../../utils/debugMode';
 
 // Optional components (lazy load with fallbacks)
 let CoolorsColorExtractor = null;
@@ -107,6 +297,18 @@ try {
 
 const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch }) => {
   const wheelRef = useRef(null);
+  const scrollViewRef = useRef(null);
+  
+  // Lazy-load components on first render
+  const AppErrorBoundary = getAppErrorBoundary();
+  const SchemeSelector = getSchemeSelector();
+  const ColorWheelContainer = getColorWheelContainer();
+  const ColorControls = getColorControls();
+  const HSLInputs = getHSLInputs();
+  const ColorSwatches = getColorSwatches();
+  const HexInput = getHexInput();
+  const ColorSliders = getColorSliders();
+  const PaletteActions = getPaletteActions();
   
   // CRASH FIX: Safe hook destructuring to prevent crash if hook returns undefined
   let colorWheelState;
@@ -127,16 +329,21 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     activeIdx = 0,
     selectedFollowsActive = false,
     showExtractor = false,
-    hslInputs = { h: 0, s: 100, l: 50 },
+    hslInputs = { h: '0', s: '100', l: '50' },
     updateHslInput = () => console.warn('updateHslInput not available'),
     applyHslInputs = () => console.warn('applyHslInputs not available'),
+    hsl = { h: 0, s: 100, l: 50 },
     updateColorWheelLive = () => console.warn('updateColorWheelLive not available'),
     resetScheme = () => console.warn('resetScheme not available'),
     randomize = () => console.warn('randomize not available'),
     toggleLinked = () => console.warn('toggleLinked not available'),
     toggleSelectedFollowsActive = () => console.warn('toggleSelectedFollowsActive not available'),
     openExtractor = () => console.warn('openExtractor not available'),
+    openCamera = () => console.warn('openCamera not available'),
+    openGallery = () => console.warn('openGallery not available'),
     closeExtractor = () => console.warn('closeExtractor not available'),
+    extractorMode = 'gallery',
+    extractorImageUri = null,
     handleExtractorComplete = () => console.warn('handleExtractorComplete not available'),
     handleColorsChange = () => console.warn('handleColorsChange not available'),
     handleHexChange = () => console.warn('handleHexChange not available'),
@@ -326,8 +533,19 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
     }
   }, [onSaveColorMatch, currentUser, colorMatchData]);
 
+  const handleSliderChange = useCallback((component, value) => {
+    updateHslInput(component, String(value));
+    updateColorWheelLive(component, String(value), wheelRef);
+  }, [updateHslInput, updateColorWheelLive, wheelRef]);
+
+  const handleSlidingComplete = useCallback((component, value) => {
+    updateHslInput(component, String(value));
+    applyHslInputs();
+  }, [updateHslInput, applyHslInputs]);
+
   return (
-    <ScrollView 
+    <ScrollView
+      ref={scrollViewRef}
       contentContainerStyle={styles.container}
       accessibilityLabel="Color wheel screen"
     >
@@ -347,8 +565,8 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
         onColorsChange={handleColorsChange}
         onHexChange={handleHexChange}
         onActiveHandleChange={handleActiveHandleChange}
-        onOpenCamera={openExtractor}
-        onOpenGallery={openExtractor}
+        onOpenCamera={openCamera}
+        onOpenGallery={openGallery}
       />
 
       <ColorControls
@@ -360,11 +578,26 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
         onRandomize={randomize}
       />
 
+      <HexInput
+        selectedColor={selectedColor}
+        onHexChange={handleHexChange}
+        wheelRef={wheelRef}
+      />
+
       <HSLInputs
         hslInputs={hslInputs}
         onUpdateInput={updateHslInput}
         onLiveUpdate={updateColorWheelLive}
         onApplyInputs={handleApplyInputs}
+        wheelRef={wheelRef}
+      />
+
+      <ColorSliders
+        hsl={hsl}
+        onSaturationChange={(v) => handleSliderChange('s', v)}
+        onLightnessChange={(v) => handleSliderChange('l', v)}
+        onSlidingComplete={handleSlidingComplete}
+        scrollViewRef={scrollViewRef}
       />
 
       <ColorSwatches
@@ -375,9 +608,16 @@ const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch 
         onSwatchPress={handleSwatchPress}
       />
 
+      <PaletteActions
+        palette={schemeColors}
+        selectedColor={selectedColor}
+      />
+
       {showExtractor && (
         <CoolorsColorExtractor
+          mode={extractorMode}
           initialSlots={5}
+          initialImageUri={extractorImageUri}
           onComplete={handleExtractorComplete}
           onClose={closeExtractor}
         />
@@ -405,10 +645,13 @@ ColorWheelScreen.defaultProps = {
 };
 
 // Wrap with error boundary for production safety
-const ColorWheelScreenWithErrorBoundary = (props) => (
-  <AppErrorBoundary>
-    <ColorWheelScreen {...props} />
-  </AppErrorBoundary>
-);
+const ColorWheelScreenWithErrorBoundary = (props) => {
+  const AppErrorBoundary = getAppErrorBoundary();
+  return (
+    <AppErrorBoundary>
+      <ColorWheelScreen {...props} />
+    </AppErrorBoundary>
+  );
+};
 
 export default React.memo(ColorWheelScreenWithErrorBoundary);

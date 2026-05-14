@@ -12,7 +12,7 @@
 //  - debugMode?: boolean (default false)
 //
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { View, Text, Image, TouchableOpacity, Alert, StyleSheet, Dimensions, PanResponder } from 'react-native';
+import { View, Text, Image, TouchableOpacity, Alert, StyleSheet, Dimensions, PanResponder, Platform, useWindowDimensions, ActivityIndicator } from 'react-native';
 // CRASH FIX: Lazy-load expo modules to prevent native bridge access at module load time
 
 let _apiServiceInstance = null;
@@ -117,21 +117,7 @@ const getHaptics = () => {
   }
   return _Haptics;
 };
-// CRASH FIX: Use lazy getter to avoid calling isDebugMode() at module load time
-let _isDebugModeValue = null;
-const getIsDebugMode = () => {
-  if (_isDebugModeValue === null) {
-    try {
-      const helper = require('../utils/expoConfigHelper');
-      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
-    } catch (error) {
-      console.warn('CoolorsColorExtractor: expoConfigHelper load failed', error?.message);
-      _isDebugModeValue = false;
-    }
-  }
-  return _isDebugModeValue;
-};
-const IS_DEBUG_MODE = () => getIsDebugMode();
+import { isDebugMode as IS_DEBUG_MODE } from '../utils/debugMode';
 
 // Safe wrapper to log real errors + stack traces from component layer
 const safe = (fn, context = 'unknown') => (...args) => {
@@ -214,27 +200,26 @@ export default function CoolorsColorExtractor({
   const [sampleRadius, setSampleRadius] = useState(0.02); // 2% of min dimension
 
   // layout and magnifier
+  const { width: windowWidth } = useWindowDimensions();
   const [imageLayout, setImageLayout] = useState({ width: 0, height: 0 });
-  const [magnifierPosition, setMagnifierPosition] = useState({ x: screenWidth / 2, y: screenHeight / 2 });
+  const [magnifierPosition, setMagnifierPosition] = useState(() => {
+    const { width, height } = Dimensions.get('window');
+    return { x: width / 2, y: height / 2 };
+  });
 
   // palette & slots
   const [slots, setSlots] = useState(Array.from({ length: initialSlots }, () => '#CCCCCC'));
   const [activeIndex, setActiveIndex] = useState(0);
 
-  // live color under magnifier
-  const [magnifierColor, setMagnifierColor] = useState('#FF6B6B');
+  // live color under magnifier (single source of truth)
   const [liveColor, setLiveColor] = useState('#FF6B6B');
   const [previousColor, setPreviousColor] = useState('#FF6B6B');
+  const [isSampling, setIsSampling] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const fallbackPalette = useMemo(() => (
     ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FECA57','#FF9FF3','#54A0FF','#5F27CD','#00D2D3','#FF9F43','#10AC84','#EE5A24','#0984E3','#A29BFE','#6C5CE7']
   ), []);
-
-  const fillSlots = useCallback((paletteArr) => {
-    const base = Array.from({ length: Math.max(initialSlots, 1) }, (_, i) => paletteArr[i % paletteArr.length] || '#CCCCCC');
-    setSlots(base);
-    setMagnifierColor(base[0] || '#808080');
-  }, [initialSlots]);
 
   // --- permissions and picking --------------------------------------------------
 
@@ -269,23 +254,18 @@ export default function CoolorsColorExtractor({
       console.error('Stack trace:', e.stack);
       console.error('Args:', { imageId, normX, normY, radius });
       
-      // Check for session expiration (404 error)
+      // Session expiry: auto-reprocess the current image to obtain a fresh token
       if (e.message && e.message.includes('404')) {
-        Alert.alert(
-          'Session expired',
-          'Session expired — Reopen image',
-          [
-            { text: 'OK', onPress: () => onClose?.() }
-          ]
-        );
-        return { hex: liveColor }; // Return current color to avoid UI flicker
+        setImageToken(null);
+        setSessionExpired(true);
+        return { hex: liveColor };
       }
       
       // fallback: snap to nearest server palette color
       const approx = nearestFromPalette(liveColor, serverPalette.length ? serverPalette : fallbackPalette);
       return { hex: approx };
     }
-  }, [fallbackPalette, liveColor, serverPalette, onClose]);
+  }, [fallbackPalette, liveColor, serverPalette]);
 
   const hexToRgb = (hex) => {
     const h = hex.replace('#','');
@@ -491,6 +471,14 @@ export default function CoolorsColorExtractor({
     };
   }, [imageToken]);
 
+  // Auto-reprocess the current image silently when the backend session expires (404)
+  useEffect(() => {
+    if (sessionExpired && selectedImage && !isLoading) {
+      setSessionExpired(false);
+      processImage(selectedImage);
+    }
+  }, [sessionExpired, selectedImage, isLoading, processImage]);
+
   // --- magnifier interactions ---------------------------------------------------
   const updateActiveSlot = useCallback((hex) => {
     setSlots(prev => {
@@ -503,28 +491,30 @@ export default function CoolorsColorExtractor({
 
   const throttledSample = useThrottle(async (nx, ny) => {
     if (!selectedImage) return;
-    const out = await callServerSample(imageToken, nx, ny, sampleRadius);
-    const hex = (out && out.hex) ? out.hex.toUpperCase() : liveColor;
-    
-    // Haptic feedback on significant color change (ΔE threshold)
-    const colorDelta = deltaE(hex, previousColor);
-    if (colorDelta > 30) { // Threshold for haptic tick (RGB distance ~30)
-      try {
-        await getHaptics().impactAsync(getHaptics().ImpactFeedbackStyle.Light);
-      } catch (_) {} // Ignore haptic errors
-      setPreviousColor(hex);
+    setIsSampling(true);
+    try {
+      const out = await callServerSample(imageToken, nx, ny, sampleRadius);
+      const hex = (out && out.hex) ? out.hex.toUpperCase() : liveColor;
+
+      // Haptic feedback on significant color change (ΔE threshold)
+      const colorDelta = deltaE(hex, previousColor);
+      if (colorDelta > 30) { // Threshold for haptic tick (RGB distance ~30)
+        try {
+          await getHaptics().impactAsync(getHaptics().ImpactFeedbackStyle.Light);
+        } catch (_) {} // Ignore haptic errors
+        setPreviousColor(hex);
+      }
+
+      // Update the live color and the active slot
+      setLiveColor(hex);
+      setSlots(prev => {
+        const next = [...prev];
+        next[activeIndex] = hex;
+        return next;
+      });
+    } finally {
+      setIsSampling(false);
     }
-    
-    // Update both the magnifier display color and the active slot
-    setMagnifierColor(hex);
-    setLiveColor(hex);
-    
-    // Update the active slot in the palette
-    setSlots(prev => {
-      const next = [...prev];
-      next[activeIndex] = hex;
-      return next;
-    });
   }, 125); // ~8Hz
 
   const extractAt = useCallback((x, y) => {
@@ -626,16 +616,20 @@ export default function CoolorsColorExtractor({
             >
               <View style={[styles.magnifierInner, { borderColor: '#FFFFFF', borderWidth: 6 }]}>
                 {/* Colored center circle showing the sampled color */}
-                <View style={[styles.magnifierCenter, { backgroundColor: magnifierColor }]}>
-                  <View style={styles.crosshair}>
-                    <View style={[styles.crosshairHorizontal, { backgroundColor: '#FFFFFF' }]} />
-                    <View style={[styles.crosshairVertical, { backgroundColor: '#FFFFFF' }]} />
-                  </View>
+                <View style={[styles.magnifierCenter, { backgroundColor: liveColor }]}>
+                  {isSampling ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <View style={styles.crosshair}>
+                      <View style={[styles.crosshairHorizontal, { backgroundColor: '#FFFFFF' }]} />
+                      <View style={[styles.crosshairVertical, { backgroundColor: '#FFFFFF' }]} />
+                    </View>
+                  )}
                 </View>
               </View>
               {/* Hex readout below magnifier */}
               <View style={styles.hexReadout}>
-                <Text style={styles.hexText}>{magnifierColor}</Text>
+                <Text style={styles.hexText}>{liveColor}</Text>
               </View>
             </View>
           </View>
@@ -647,7 +641,7 @@ export default function CoolorsColorExtractor({
         <View style={styles.slotsRow}>
           {slots.map((c, idx) => (
             <TouchableOpacity key={idx} onPress={() => setActiveIndex(idx)}>
-              <View style={[styles.slot, { backgroundColor: c }, activeIndex === idx ? styles.slotActive : null]}>
+              <View style={[styles.slot, { backgroundColor: c, width: (windowWidth - 32 - 100) / 5 }, activeIndex === idx ? styles.slotActive : null]}>
                 {activeIndex === idx && <View style={styles.slotDot} />}
               </View>
             </TouchableOpacity>
@@ -719,7 +713,7 @@ const styles = StyleSheet.create({
 
   paletteBar: { backgroundColor: '#fff', paddingVertical: 16, paddingHorizontal: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e6e6e6' },
   slotsRow: { flexDirection: 'row', alignItems: 'center' },
-  slot: { width: (screenWidth - 32 - 100) / 5, maxWidth: 80, height: 44, borderRadius: 10, marginRight: 8, borderWidth: 1, borderColor: '#e6e6e6', justifyContent: 'center', alignItems: 'center' },
+  slot: { maxWidth: 80, height: 44, borderRadius: 10, marginRight: 8, borderWidth: 1, borderColor: '#e6e6e6', justifyContent: 'center', alignItems: 'center' },
   slotActive: { borderColor: '#000' },
   slotDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#000' },
   slotActions: { flexDirection: 'row', position: 'absolute', right: 16, top: 12 },

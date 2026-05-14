@@ -6,17 +6,88 @@
  * Structure: { hex: { rgb, hsl, luminance, brightness, analysis } }
  * SAFER: Use LRU cache with size limit to prevent memory leaks
  */
-import { LRUCache } from './LRUCache';
 import { reportError, ERROR_EVENTS } from './errorTelemetry';
 
 // Industry-standard LRU cache configuration
 const MAX_CACHE_SIZE = 1000;
-const colorCache = new LRUCache({
-  maxSize: MAX_CACHE_SIZE,
-  ttl: 1800000, // 30 minutes TTL for color data
-  cleanupInterval: 300000, // 5 minutes cleanup
-  updateAgeOnGet: true // Update access time on get
-});
+
+let _LRUCacheCtor = null;
+let _LRUCacheLoadAttempted = false;
+const getLRUCacheCtor = () => {
+  if (_LRUCacheLoadAttempted) return _LRUCacheCtor;
+  _LRUCacheLoadAttempted = true;
+  try {
+    const mod = require('./LRUCache');
+    _LRUCacheCtor = mod?.LRUCache || mod?.default || mod;
+  } catch (_error) {
+    _LRUCacheCtor = null;
+  }
+  return _LRUCacheCtor;
+};
+
+let _colorCache = null;
+const getColorCacheInstance = () => {
+  if (_colorCache) return _colorCache;
+
+  const LRUCacheCtor = getLRUCacheCtor();
+  if (LRUCacheCtor) {
+    try {
+      const inst = new LRUCacheCtor({
+        maxSize: MAX_CACHE_SIZE,
+        ttl: 1800000,
+        cleanupInterval: 300000,
+        updateAgeOnGet: true,
+      });
+
+      _colorCache = {
+        get: (key) => inst?.get?.(key),
+        set: (key, value) => inst?.set?.(key, value),
+        clear: () => inst?.clear?.(),
+        keys: () => {
+          const ks = inst?.keys?.();
+          return Array.isArray(ks) ? ks : Array.from(ks || []);
+        },
+        getStats: () => inst?.getStats?.() || {
+          size: typeof inst?.size === 'number' ? inst.size : 0,
+          capacity: inst?.capacity ?? MAX_CACHE_SIZE,
+        },
+        getEntryInfo: (key) => inst?.getEntryInfo?.(key) || null,
+        prune: () => (typeof inst?.prune === 'function' ? inst.prune() : 0),
+      };
+
+      return _colorCache;
+    } catch (_error) {
+      _colorCache = null;
+    }
+  }
+
+  const map = new Map();
+  _colorCache = {
+    get: (key) => {
+      if (!map.has(key)) return undefined;
+      const value = map.get(key);
+      map.delete(key);
+      map.set(key, value);
+      return value;
+    },
+    set: (key, value) => {
+      if (map.has(key)) {
+        map.delete(key);
+      } else if (map.size >= MAX_CACHE_SIZE) {
+        const firstKey = map.keys().next().value;
+        map.delete(firstKey);
+      }
+      map.set(key, value);
+    },
+    clear: () => map.clear(),
+    keys: () => Array.from(map.keys()),
+    getStats: () => ({ size: map.size, capacity: MAX_CACHE_SIZE }),
+    getEntryInfo: () => null,
+    prune: () => 0,
+  };
+
+  return _colorCache;
+};
 
 /**
  * Normalize and validate hex color input
@@ -94,7 +165,8 @@ function getCachedColorData(hex) {
   }
 
   // Check LRU cache with automatic TTL and access tracking
-  const existing = colorCache.get(normalizedHex);
+  const cache = getColorCacheInstance();
+  const existing = cache.get(normalizedHex);
   if (existing) {
     // Advanced LRU cache handles access tracking and TTL automatically
     return existing;
@@ -104,7 +176,7 @@ function getCachedColorData(hex) {
   const colorData = computeColorData(normalizedHex);
   
   // LRU cache automatically handles size limits and eviction
-  colorCache.set(normalizedHex, colorData);
+  cache.set(normalizedHex, colorData);
   
   return colorData;
 }
@@ -745,6 +817,7 @@ export function hslToHex(h, s, l) {
  * Get comprehensive cache statistics (for debugging/monitoring)
  */
 export function getColorCache() {
+  const colorCache = getColorCacheInstance();
   const stats = colorCache.getStats();
   return {
     ...stats,
@@ -757,7 +830,7 @@ export function getColorCache() {
  * Clear color cache and reset statistics
  */
 export function clearColorCache() {
-  colorCache.clear();
+  getColorCacheInstance().clear();
 }
 
 /**
@@ -769,7 +842,7 @@ export function getColorCacheEntry(hex) {
   const normalizedHex = normalizeHex(hex);
   if (!normalizedHex) return null;
   
-  return colorCache.getEntryInfo(normalizedHex);
+  return getColorCacheInstance().getEntryInfo(normalizedHex);
 }
 
 /**
@@ -777,7 +850,7 @@ export function getColorCacheEntry(hex) {
  * @returns {number} Number of entries removed
  */
 export function pruneColorCache() {
-  return colorCache.prune();
+  return getColorCacheInstance().prune();
 }
 
 // Re-export optimized versions of common functions for backward compatibility

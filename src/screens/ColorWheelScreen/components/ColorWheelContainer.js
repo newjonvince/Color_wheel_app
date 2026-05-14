@@ -38,15 +38,15 @@ const getFullColorWheel = () => {
 };
 
 export const ColorWheelContainer = React.memo(({ 
-  wheelRef,
-  selectedFollowsActive,
+  wheelRef = null,
+  selectedFollowsActive = true,
   selectedScheme,
   baseHex,
-  linked,
-  onToggleLinked,
+  linked = true,
+  onToggleLinked = () => {},
   onColorsChange,
   onHexChange,
-  onActiveHandleChange,
+  onActiveHandleChange = () => {},
   onOpenCamera,
   onOpenGallery,
 }) => {
@@ -73,6 +73,7 @@ export const ColorWheelContainer = React.memo(({
   // Always use FullColorWheel - no fallback needed
   const wheelProps = {
     ref: wheelRef,
+    size: WHEEL_SIZE,
     scheme: selectedScheme,
     initialHex: baseHex,
     selectedFollowsActive: selectedFollowsActive,
@@ -130,10 +131,3 @@ ColorWheelContainer.propTypes = {
   onOpenGallery: PropTypes.func.isRequired,
 };
 
-ColorWheelContainer.defaultProps = {
-  wheelRef: null,
-  selectedFollowsActive: true,
-  linked: true,
-  onToggleLinked: () => {},
-  onActiveHandleChange: () => {},
-};

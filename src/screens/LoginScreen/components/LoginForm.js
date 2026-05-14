@@ -5,6 +5,12 @@ import { optimizedStyles as styles, optimizedColors } from '../styles';
 
 // Match the target design - solid translucent backgrounds instead of blur
 const InputContainer = ({ style, children }) => {
+  const safeChildren = React.Children.map(children, (child) => {
+    if (typeof child === 'string' || typeof child === 'number') {
+      return <Text>{child}</Text>;
+    }
+    return child;
+  });
   return (
     <View style={[{
       backgroundColor: 'rgba(100, 220, 210, 0.25)', // Teal/cyan tint
@@ -23,7 +29,7 @@ const InputContainer = ({ style, children }) => {
         }
       })
     }, style]}>
-      {children}
+      {safeChildren}
     </View>
   );
 };
@@ -32,7 +38,7 @@ const LoginForm = React.memo(({
   email,
   password,
   showPassword,
-  errors,
+  errors = {},
   focusedField,
   emailRef,
   passwordRef,

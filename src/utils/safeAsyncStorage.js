@@ -26,20 +26,7 @@ const getAsyncStorage = () => {
   return _AsyncStorage;
 };
 
-// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
-let _isDebugMode = null;
-const getIsDebugMode = () => {
-  if (_isDebugMode === null) {
-    try {
-      const helper = require('./expoConfigHelper');
-      _isDebugMode = helper.isDebugMode ? helper.isDebugMode() : false;
-    } catch (error) {
-      console.warn('safeAsyncStorage: expoConfigHelper load failed', error?.message);
-      _isDebugMode = false;
-    }
-  }
-  return _isDebugMode;
-};
+import { isDebugMode as getIsDebugMode } from './debugMode';
 
 const FALLBACK_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const FALLBACK_MAX_ENTRIES = 100;

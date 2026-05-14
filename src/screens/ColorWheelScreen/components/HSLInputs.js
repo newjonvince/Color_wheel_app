@@ -1,25 +1,11 @@
 // screens/ColorWheelScreen/components/HSLInputs.js
-import React, { useState, useCallback, useMemo, memo, useRef, useEffect } from 'react';
+import React, { useCallback, useRef, useEffect } from 'react';
 import { View, Text, TextInput, StyleSheet, Platform } from 'react-native';
 import PropTypes from 'prop-types';
 import { debounce } from '../../../utils/throttledCallbacks';
 import { LAYOUT } from '../../../constants/layout';
 
-// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
-let _isDebugModeValue = null;
-const getIsDebugMode = () => {
-  if (_isDebugModeValue === null) {
-    try {
-      const helper = require('../../../utils/expoConfigHelper');
-      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
-    } catch (error) {
-      console.warn('HSLInputs: expoConfigHelper load failed', error?.message);
-      _isDebugModeValue = false;
-    }
-  }
-  return _isDebugModeValue;
-};
-const IS_DEBUG_MODE = () => getIsDebugMode();
+import { isDebugMode as IS_DEBUG_MODE } from '../../../utils/debugMode';
 
 import { styles } from '../styles';
 

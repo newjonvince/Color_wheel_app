@@ -25,20 +25,7 @@ const getSafeStorage = () => {
   return _safeStorageInstance;
 };
 
-// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
-let _isDebugModeValue = null;
-const getIsDebugMode = () => {
-  if (_isDebugModeValue === null) {
-    try {
-      const helper = require('../utils/expoConfigHelper');
-      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
-    } catch (error) {
-      console.warn('safeApiService: expoConfigHelper load failed', error?.message);
-      _isDebugModeValue = false;
-    }
-  }
-  return _isDebugModeValue;
-};
+import { isDebugMode as IS_DEBUG_MODE } from '../utils/debugMode';
 
 // Lazy logger proxy to avoid circular import crashes
 let _loggerInstance = null;
@@ -61,8 +48,6 @@ const logger = {
   error: (...args) => getLogger()?.error?.(...args),
 };
 
-// CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
-const IS_DEBUG_MODE = () => getIsDebugMode();
 
 // Request cancellation support
 const CancelToken = axios.CancelToken;
@@ -149,6 +134,7 @@ class SafeApiService {
     this.refreshPromise = null;
     this.failedQueue = [];
     this.MAX_QUEUE_SIZE = 50;  // Add limit to prevent unbounded queue growth
+    this.QUEUE_TIMEOUT_MS = 30000; // Max wait for token refresh before rejecting queued requests
   }
 
   async _initializeAsync() {
@@ -488,7 +474,8 @@ class SafeApiService {
 
   // Process queued requests after token refresh
   processFailedQueue(error, token) {
-    this.failedQueue.forEach(({ resolve, reject }) => {
+    this.failedQueue.forEach(({ resolve, reject, timeoutId }) => {
+      clearTimeout(timeoutId); // Cancel the per-entry expiry timer
       if (error) {
         reject(error);
       } else {
@@ -605,7 +592,12 @@ class SafeApiService {
               }
               
               return new Promise((resolve, reject) => {
-                this.failedQueue.push({ resolve, reject });
+                const timeoutId = setTimeout(() => {
+                  // Evict this entry and reject so the caller doesn't hang indefinitely
+                  this.failedQueue = this.failedQueue.filter(e => e.timeoutId !== timeoutId);
+                  reject(new Error('Authentication refresh timed out. Please try again.'));
+                }, this.QUEUE_TIMEOUT_MS);
+                this.failedQueue.push({ resolve, reject, timeoutId });
               }).then((token) => {
                 // Retry original request with new token
                 const newOptions = {
