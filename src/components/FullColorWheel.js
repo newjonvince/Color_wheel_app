@@ -2,7 +2,21 @@
 // Canva-style multi-handle color wheel with Skia + Reanimated
 // Crash-safe: no non-serializable captures inside worklets (no Set/refs); hex conversion on JS thread
 
-import { isDebugMode as IS_DEBUG_MODE } from '../utils/debugMode';
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('FullColorWheel: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 // CRASH FIX: Removed top-level IS_DEBUG_MODE() call that was pulling expoConfigHelper
 // during module load (before native bridge is ready). Build tag logging moved to component mount.
@@ -111,146 +125,7 @@ const runOnJSSafe = (fn) => {
   return fn;
 };
 
-let _optimizedColorModule = null;
-let _optimizedColorLoadAttempted = false;
-const getOptimizedColorModule = () => {
-  if (_optimizedColorLoadAttempted) return _optimizedColorModule;
-  _optimizedColorLoadAttempted = true;
-  try {
-    _optimizedColorModule = require('../utils/optimizedColor');
-  } catch (e) {
-    console.warn('FullColorWheel: optimizedColor load failed:', e?.message);
-    _optimizedColorModule = null;
-  }
-  return _optimizedColorModule;
-};
-
-const clampNumber = (value, min, max) => {
-  const n = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(n)) return min;
-  return Math.min(max, Math.max(min, n));
-};
-
-const parseHexToRgb = (hex) => {
-  if (typeof hex !== 'string') return null;
-  const m = /^#([0-9a-fA-F]{6})$/.exec(hex);
-  if (!m) return null;
-  const int = parseInt(m[1], 16);
-  const r = (int >> 16) & 255;
-  const g = (int >> 8) & 255;
-  const b = int & 255;
-  return { r, g, b };
-};
-
-const rgbToHslFallback = ({ r, g, b }) => {
-  const rn = r / 255;
-  const gn = g / 255;
-  const bn = b / 255;
-  const max = Math.max(rn, gn, bn);
-  const min = Math.min(rn, gn, bn);
-  const delta = max - min;
-
-  let h = 0;
-  let s = 0;
-  const l = (max + min) / 2;
-
-  if (delta !== 0) {
-    s = delta / (1 - Math.abs(2 * l - 1));
-    switch (max) {
-      case rn:
-        h = ((gn - bn) / delta) % 6;
-        break;
-      case gn:
-        h = (bn - rn) / delta + 2;
-        break;
-      default:
-        h = (rn - gn) / delta + 4;
-        break;
-    }
-    h *= 60;
-    if (h < 0) h += 360;
-  }
-
-  return {
-    h,
-    s: s * 100,
-    l: l * 100,
-  };
-};
-
-const hexToHslSafe = (hex) => {
-  const mod = getOptimizedColorModule();
-  const fn = mod?.hexToHsl;
-  if (typeof fn === 'function') {
-    try {
-      return fn(hex);
-    } catch (_e) {
-      return null;
-    }
-  }
-  const rgb = parseHexToRgb(hex);
-  if (!rgb) return null;
-  try {
-    return rgbToHslFallback(rgb);
-  } catch (_e) {
-    return null;
-  }
-};
-
-const hslToHexFallback = (h, s, l) => {
-  const hh = ((clampNumber(h, 0, 360) % 360) + 360) % 360;
-  const ss = clampNumber(s, 0, 100) / 100;
-  const ll = clampNumber(l, 0, 100) / 100;
-
-  const c = (1 - Math.abs(2 * ll - 1)) * ss;
-  const x = c * (1 - Math.abs(((hh / 60) % 2) - 1));
-  const m = ll - c / 2;
-
-  let r1 = 0;
-  let g1 = 0;
-  let b1 = 0;
-
-  if (hh < 60) {
-    r1 = c;
-    g1 = x;
-  } else if (hh < 120) {
-    r1 = x;
-    g1 = c;
-  } else if (hh < 180) {
-    g1 = c;
-    b1 = x;
-  } else if (hh < 240) {
-    g1 = x;
-    b1 = c;
-  } else if (hh < 300) {
-    r1 = x;
-    b1 = c;
-  } else {
-    r1 = c;
-    b1 = x;
-  }
-
-  const to255 = (v) => Math.round((v + m) * 255);
-  const r = clampNumber(to255(r1), 0, 255);
-  const g = clampNumber(to255(g1), 0, 255);
-  const b = clampNumber(to255(b1), 0, 255);
-
-  const toHex2 = (n) => n.toString(16).padStart(2, '0');
-  return `#${toHex2(r)}${toHex2(g)}${toHex2(b)}`.toUpperCase();
-};
-
-const hslToHexSafe = (h, s, l) => {
-  const mod = getOptimizedColorModule();
-  const fn = mod?.hslToHex;
-  if (typeof fn === 'function') {
-    try {
-      return fn(h, s, l);
-    } catch (_e) {
-      return hslToHexFallback(h, s, l);
-    }
-  }
-  return hslToHexFallback(h, s, l);
-};
+import { hslToHex, hexToHsl } from '../utils/optimizedColor';
 
 // CRASH FIX: Defer Skia loading until component render, not module load time.
 // Native module crashes bypass try/catch - only JS exceptions are caught.
@@ -285,102 +160,55 @@ const loadSkia = () => {
 };
 
 // Fallback components (used if Skia fails to load)
-const sanitizeFallbackChildren = (node) => {
-  if (node === null || node === undefined || typeof node === 'boolean') return null;
-
-  if (typeof node === 'string') {
-    if (node.trim() === '') return null;
-    return <Text>{node}</Text>;
-  }
-
-  if (typeof node === 'number') {
-    return <Text>{String(node)}</Text>;
-  }
-
-  if (Array.isArray(node)) {
-    return node
-      .map((child, index) => {
-        const sanitized = sanitizeFallbackChildren(child);
-        if (React.isValidElement(sanitized) && sanitized.key === null) {
-          return React.cloneElement(sanitized, { key: index });
-        }
-        return sanitized;
-      })
-      .filter(Boolean);
-  }
-
-  if (React.isValidElement(node)) {
-    if (node.type === React.Fragment) {
-      return sanitizeFallbackChildren(node.props?.children);
-    }
-    return node;
-  }
-
-  return null;
-};
-
-const FallbackCanvas = ({ style, children, ...props }) => {
-  const safeChildren = sanitizeFallbackChildren(children);
-
-  return (
-    <View style={[style, {
-      backgroundColor: '#f0f0f0',
+const FallbackCanvas = ({ style, children, ...props }) => (
+  <View style={[style, {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: '#ddd',
+    justifyContent: 'center',
+    alignItems: 'center'
+  }]} {...props}>
+    <View style={{
+      backgroundColor: '#ff6b6b',
+      width: '80%',
+      height: '80%',
       borderRadius: 999,
-      borderWidth: 2,
-      borderColor: '#ddd',
       justifyContent: 'center',
       alignItems: 'center'
-    }]} {...props}>
-      <View style={{
-        backgroundColor: '#ff6b6b',
-        width: '80%',
-        height: '80%',
-        borderRadius: 999,
-        justifyContent: 'center',
-        alignItems: 'center'
+    }}>
+      <Text style={{
+        color: 'white',
+        fontSize: 12,
+        fontWeight: 'bold',
+        textAlign: 'center'
       }}>
-        <Text style={{
-          color: 'white',
-          fontSize: 12,
-          fontWeight: 'bold',
-          textAlign: 'center'
-        }}>
-          Color{'\n'}Picker
-        </Text>
-      </View>
-      {safeChildren}
+        Color{'\n'}Picker
+      </Text>
     </View>
-  );
-};
+    {children}
+  </View>
+);
 
-const FallbackCircle = ({ cx, cy, r, color, children, ...props }) => {
-  const safeChildren = React.Children.map(children, (child) => {
-    if (typeof child === 'string' || typeof child === 'number') {
-      return <Text>{child}</Text>;
-    }
-    return child;
-  });
-
-  return (
-    <View style={{
-      position: 'absolute',
-      left: (cx || 0) - (r || 50),
-      top: (cy || 0) - (r || 50),
-      width: (r || 50) * 2,
-      height: (r || 50) * 2,
-      backgroundColor: color || '#ff6b6b',
-      borderRadius: 999,
-    }} {...props}>
-      {safeChildren}
-    </View>
-  );
-};
+const FallbackCircle = ({ cx, cy, r, color, children, ...props }) => (
+  <View style={{
+    position: 'absolute',
+    left: (cx || 0) - (r || 50),
+    top: (cy || 0) - (r || 50),
+    width: (r || 50) * 2,
+    height: (r || 50) * 2,
+    backgroundColor: color || '#ff6b6b',
+    borderRadius: 999,
+  }} {...props}>
+    {children}
+  </View>
+);
 
 const FallbackGradient = () => null;
 const fallbackVec = () => ({ x: 0, y: 0 });
 
-// Require (not import) so this stays with the lazy-load strategy and is not hoisted
-const { SCHEME_OFFSETS, SCHEME_COUNTS } = require('../constants/colorWheelConstants');
+// Import constants from shared location
+import { SCHEME_OFFSETS, SCHEME_COUNTS } from '../constants/colorWheelConstants';
 export { SCHEME_OFFSETS, SCHEME_COUNTS };
 
 // JS helper functions for worklet callbacks (defined at top-level for performance)
@@ -419,7 +247,7 @@ const mod = (a, n) => {
 
 const FullColorWheelImpl = forwardRef(function FullColorWheel({
   selectedFollowsActive = true,
-  size = 350,
+  size,
   scheme = 'complementary',
   initialHex = '#FF6B6B',
   linked = true,
@@ -477,13 +305,13 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   // Precomputed hue sweep
   const hueSweepColors = useMemo(() => {
     const arr = [];
-    for (let i=0; i<=360; i+=10) arr.push(hslToHexSafe(i, 100, 50));
+    for (let i=0; i<=360; i+=10) arr.push(hslToHex(i, 100, 50));
     return arr;
   }, []);
 
   // Initialize from initial hex + scheme
   useEffect(() => {
-    const { h=0, s=100, l=50 } = hexToHslSafe(initialHex) || {};
+    const { h=0, s=100, l=50 } = hexToHsl(initialHex) || {};
     const s01 = s/100;
     handleAngles[0].value = h;
     handleSats[0].value = s01;
@@ -502,7 +330,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   useEffect(() => {
     freed.current.clear();
     freedIdxSV.value = [];
-    const { h=0, s=100, l=50 } = hexToHslSafe(initialHex) || {};
+    const { h=0, s=100, l=50 } = hexToHsl(initialHex) || {};
     const s01 = s/100;
     
     // Initialize handles based on scheme
@@ -564,7 +392,7 @@ const FullColorWheelImpl = forwardRef(function FullColorWheel({
   // ===== Palette emission: compute hexes on JS (avoid calling hslToHex in a worklet) =====
   const jsEmitPalette = (triples, activePref, phase = 'change') => {
     try {
-      const out = triples.map(([ang, s01, light]) => hslToHexSafe(ang, s01 * 100, light));
+      const out = triples.map(([ang, s01, light]) => hslToHex(ang, s01 * 100, light));
       if (typeof onColorsChange === 'function') onColorsChange(out, phase);
       if (typeof onHexChange === 'function') {
         const idx = (selectedFollowsActive ? Math.max(0, Math.min(activePref, out.length - 1)) : 0);

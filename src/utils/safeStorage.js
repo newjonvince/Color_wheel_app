@@ -17,7 +17,20 @@ const getSecureStore = () => {
   return _secureStoreModule;
 };
 
-import { isDebugMode as IS_DEBUG_MODE } from './debugMode';
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('./expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('safeStorage: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
 
 // IMPORT ORDER FIX: Move all imports to the top before any code execution
 // Note: STORAGE_KEYS import moved to top to follow ES6 module hoisting principles
@@ -75,6 +88,8 @@ const logger = {
   error: (...args) => getLogger()?.error?.(...args),
 };
 
+// CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 // Error monitoring for critical failures
 const reportError = (error, context) => {

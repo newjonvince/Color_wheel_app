@@ -53,7 +53,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
-  const [globalError, setGlobalError] = useState(null);
+  const [globalError, setGlobalError] = useState('');
   const [focusedField, setFocusedField] = useState(null);
   
   // Refs for focus management and abort controller
@@ -119,7 +119,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       const { email, ...rest } = prev;
       return rest;
     });
-    if (globalError) setGlobalError(null);
+    if (globalError) setGlobalError('');
     
     // Call debounced validation directly
     if (value && value.length > 3) {
@@ -129,11 +129,8 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
 
   const updatePassword = useCallback((value) => {
     setPassword(value);
-    setErrors(prev => {
-      const { password, ...rest } = prev || {};
-      return rest;
-    });
-    if (globalError) setGlobalError(null);
+    setErrors(prev => ({ ...prev, password: '' }));
+    if (globalError) setGlobalError('');
   }, [globalError]);
 
   const togglePasswordVisibility = useCallback(() => {
@@ -301,7 +298,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     
     isProcessingRef.current = true;
     setLoading(true);
-    setGlobalError(null);
+    setGlobalError('');
     
     try {
       // Validate first
@@ -376,7 +373,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     
     isProcessingRef.current = true;
     setLoading(true);
-    setGlobalError(null);
+    setGlobalError('');
     
     try {
       // Try backend demo with full transaction semantics

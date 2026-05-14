@@ -28,7 +28,20 @@ export const createSafeAbortController = () => {
   };
 };
 
-import { isDebugMode as IS_DEBUG_MODE } from './debugMode';
+// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('./expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('apiHelpers: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
 
 // LAZY LOADING: Avoid circular dependency with safeApiService
 let apiService = null;
@@ -75,6 +88,8 @@ const logger = {
   error: (...args) => getLogger()?.error?.(...args),
 };
 
+// CIRCULAR DEPENDENCY FIX: Use lazy getter instead of module-load-time call
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 // React Native compatible network error detection
 const isNetworkError = (error) => {

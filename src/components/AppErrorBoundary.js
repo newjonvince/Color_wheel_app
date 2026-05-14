@@ -8,12 +8,24 @@ import {
   View,
   Alert,
   Linking,
-  Dimensions,
-  Platform,
-  StyleSheet
+  Dimensions
 } from 'react-native';
-import PropTypes from 'prop-types';
-import { isDebugMode as IS_DEBUG_MODE } from '../utils/debugMode';
+import { StyleSheet } from 'react-native';
+// CRASH FIX: Use lazy getter to avoid calling isDebugMode() at module load time
+let _isDebugModeValue = null;
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('AppErrorBoundary: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
+const IS_DEBUG_MODE = () => getIsDebugMode();
 
 class AppErrorBoundary extends React.Component {
   static MAX_ERRORS_PER_MINUTE = 5;
@@ -25,7 +37,7 @@ class AppErrorBoundary extends React.Component {
       emoji: '🌐',
       title: 'Connection Problem',
       message: 'Unable to connect to our servers. Please check your internet connection and try again.',
-      actions: ['retry', 'offline']
+      actions: ['retry', 'offline'] // Reference action names, not functions
     },
     storage: {
       emoji: '💾',
@@ -33,23 +45,11 @@ class AppErrorBoundary extends React.Component {
       message: 'There was a problem accessing your saved data.',
       actions: ['retry', 'clearCache']
     },
-    auth: {
-      emoji: '🔐',
-      title: 'Authentication Error',
-      message: 'There was a problem with your session. Please try again.',
-      actions: ['retry', 'restart']
-    },
     navigation: {
       emoji: '🧭',
       title: 'Navigation Error',
       message: 'There was a problem loading the screen. Let\'s get you back on track.',
       actions: ['goHome', 'restart']
-    },
-    runtime: {
-      emoji: '⚠️',
-      title: 'Runtime Error',
-      message: 'An unexpected code error occurred. Please try again.',
-      actions: ['retry', 'restart']
     },
     unknown: {
       emoji: '❌',
@@ -81,19 +81,18 @@ class AppErrorBoundary extends React.Component {
 
   static classifyError(error) {
     const message = error?.message?.toLowerCase() || '';
-    const name = error?.name?.toLowerCase() || '';
-
-    if (message.includes('network') || message.includes('fetch') || message.includes('timeout'))
+    
+    // Add error codes for tracking
+    if (message.includes('network')) {
       return { type: 'network', code: 'ERR_NETWORK_001' };
-    if (message.includes('storage') || message.includes('asyncstorage') || message.includes('securestore'))
+    }
+    if (message.includes('storage')) {
       return { type: 'storage', code: 'ERR_STORAGE_002' };
-    if (message.includes('auth') || message.includes('token') || message.includes('login'))
-      return { type: 'auth', code: 'ERR_AUTH_003' };
-    if (message.includes('navigation') || message.includes('route') || message.includes('screen'))
-      return { type: 'navigation', code: 'ERR_NAVIGATION_004' };
-    if (name.includes('typeerror') || name.includes('referenceerror'))
-      return { type: 'runtime', code: 'ERR_RUNTIME_005' };
-
+    }
+    if (message.includes('navigation')) {
+      return { type: 'navigation', code: 'ERR_NAVIGATION_003' };
+    }
+    
     return { type: 'unknown', code: 'ERR_UNKNOWN_999' };
   }
 
@@ -122,26 +121,22 @@ class AppErrorBoundary extends React.Component {
     this.errorTimestamps.push(now);
 
     if (this.errorTimestamps.length > AppErrorBoundary.MAX_ERRORS_PER_MINUTE) {
-      this._attemptReload(() => {
-        Alert.alert(
-          'Critical Error',
-          'The app is experiencing critical issues. Close it from your app switcher and reopen it.',
-          [{ text: 'OK' }]
-        );
-      });
-      return;
+      // Too many errors - force app restart
+      Alert.alert(
+        'Critical Error',
+        'The app is experiencing critical issues. Please restart.',
+        [{ text: 'OK', onPress: () => { /* Can't actually restart in RN */ } }]
+      );
+      return; // Don't attempt recovery
     }
     
-    this.setState({ error, errorInfo, hasError: true });
+    this.setState({
+      error,
+      errorInfo,
+      hasError: true
+    });
 
-    if (this.props.onError) {
-      try {
-        this.props.onError(error, errorInfo, this.state.errorType || AppErrorBoundary.classifyError(error).type);
-      } catch (callbackError) {
-        console.error('AppErrorBoundary: onError callback failed:', callbackError);
-      }
-    }
-
+    // Report crash to monitoring service
     this.reportError(error, errorInfo);
   }
 
@@ -178,33 +173,15 @@ class AppErrorBoundary extends React.Component {
     }));
   };
 
-  _attemptReload = (fallback) => {
-    try {
-      const Updates = require('expo-updates');
-      if (Updates?.reloadAsync) {
-        Updates.reloadAsync().catch(fallback);
-        return;
-      }
-    } catch (_) {}
-    if (global.DevSettings?.reload) {
-      global.DevSettings.reload();
-      return;
-    }
-    if (typeof window !== 'undefined' && window.location?.reload) {
-      window.location.reload();
-      return;
-    }
-    fallback?.();
-  };
-
   handleRestart = () => {
-    this._attemptReload(() => {
-      Alert.alert(
-        'Restart Required',
-        'To fully restart, close the app from your device\u2019s app switcher and reopen it.',
-        [{ text: 'OK' }]
-      );
-    });
+    // In React Native, we can't truly restart the app, but we can reset to initial state
+    Alert.alert(
+      'Restart App',
+      'Please close and reopen the app to restart it completely.',
+      [
+        { text: 'OK', onPress: this.handleRetry }
+      ]
+    );
   };
 
   handleOfflineMode = () => {
@@ -328,10 +305,8 @@ class AppErrorBoundary extends React.Component {
                 <ScrollView style={styles.stackTrace}>
                   <Text style={styles.stackText}>
                     Type: {this.state.errorType}{'\n'}
-                    Code: {this.state.errorCode}{'\n'}
                     Message: {this.state.error.message}{'\n'}
-                    Stack: {this.state.error.stack}{'\n'}
-                    Component: {this.state.errorInfo?.componentStack}
+                    Stack: {this.state.error.stack}
                   </Text>
                 </ScrollView>
               </View>
@@ -427,10 +402,8 @@ const styles = StyleSheet.create({
   },
 });
 
-AppErrorBoundary.propTypes = {
-  children: PropTypes.node.isRequired,
-  onError: PropTypes.func,
-};
-
+// Default export
 export default AppErrorBoundary;
+
+// Named export for backward compatibility
 export { AppErrorBoundary };

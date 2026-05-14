@@ -1,9 +1,22 @@
 // config/appconfig.js - Ultra-optimized app configuration with caching and validation
 import { Platform, AppState } from 'react-native';
-import { isDebugMode } from '../utils/debugMode';
 
 // CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+let _isDebugModeValue = null;
 let _isProductionValue = null;
+
+const getIsDebugMode = () => {
+  if (_isDebugModeValue === null) {
+    try {
+      const helper = require('../utils/expoConfigHelper');
+      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
+    } catch (error) {
+      console.warn('appconfig: expoConfigHelper load failed', error?.message);
+      _isDebugModeValue = false;
+    }
+  }
+  return _isDebugModeValue;
+};
 
 const getIsProduction = () => {
   if (_isProductionValue === null) {
@@ -41,8 +54,9 @@ try {
   // Will be handled gracefully in the getStateFromPath function
 }
 
-const IS_DEBUG_MODE = isDebugMode;
-const IS_DEV = isDebugMode;
+// CIRCULAR DEPENDENCY FIX: Use lazy getters instead of module-load-time calls
+const IS_DEBUG_MODE = () => getIsDebugMode();
+const IS_DEV = () => getIsDebugMode();
 const IS_PROD = () => getIsProduction();
 
 // Performance constants - use getter functions for lazy evaluation
@@ -198,31 +212,26 @@ const createAppConfig = (() => {
         }
       },
 
-      // Enhanced tab icons with proper emoji characters
+      // Enhanced tab icons with Unicode escape sequences to avoid bundle issues
       tabIcons: {
         Community: { 
-          focused: '👥', // People emoji
-          unfocused: '👥', // People emoji
+          focused: '', // Globe with meridians
+          unfocused: '', // Earth globe Europe-Africa
           description: 'Community tab - connects users together'
         },
         ColorWheel: { 
-          focused: '🎨', // Artist palette
-          unfocused: '🎨', // Artist palette
+          focused: '', // Artist palette
+          unfocused: '', // Performing arts
           description: 'Color Wheel tab - main color selection tool'
         },
-        Boards: { 
-          focused: '📋', // Clipboard
-          unfocused: '📋', // Clipboard
-          description: 'Boards tab - user color boards'
-        },
         Profile: { 
-          focused: '👤', // Person silhouette
-          unfocused: '👤', // Person silhouette
+          focused: '', // Bust in silhouette
+          unfocused: '', // Busts in silhouette
           description: 'Profile tab - user profile and boards'
         },
         Settings: { 
-          focused: '⚙️', // Gear
-          unfocused: '⚙️', // Gear
+          focused: '', // Gear
+          unfocused: '', // Wrench
           description: 'Settings tab - app configuration'
         },
       },
@@ -451,9 +460,30 @@ export const initializeAppConfig = () => {
   return initializationPromise;
 };
 
-// Platform.OS is constant for the lifetime of the process — no cache needed.
-const STATUS_BAR_STYLE = Platform.OS === 'ios' ? 'dark-content' : 'default';
-export const getStatusBarStyle = () => STATUS_BAR_STYLE;
+// Memoized status bar style with platform optimization
+const statusBarStyleCache = new Map();
+const MAX_STATUS_CACHE_SIZE = 10; // Prevent unlimited growth
+
+export const getStatusBarStyle = () => {
+  const cacheKey = Platform.OS;
+  
+  if (statusBarStyleCache.has(cacheKey)) {
+    return statusBarStyleCache.get(cacheKey);
+  }
+  
+  // Prevent memory leak: trim oldest entries instead of clearing all
+  if (statusBarStyleCache.size >= MAX_STATUS_CACHE_SIZE) {
+    const removed = trimCacheToSize(statusBarStyleCache, MAX_STATUS_CACHE_SIZE - 1);
+      if (removed > 0 && IS_DEV()) {
+        log.debug(`statusBarStyleCache trimmed by ${removed} to stay within limit`);
+      }
+  }
+  
+  const style = Platform.OS === 'ios' ? 'dark-content' : 'default';
+  statusBarStyleCache.set(cacheKey, style);
+  
+  return style;
+};
 
 // Optimized helper functions with memoization
 const userCache = new WeakMap();
@@ -513,18 +543,22 @@ const setupCacheCleanup = () => {
     const CLEANUP_INTERVAL = 10 * 60 * 1000; // 10 minutes
     
     cacheCleanupInterval = setInterval(() => {
+      const statusCacheSize = statusBarStyleCache.size;
       const storageCacheSize = storageKeyCache.size;
       
+      const removedStatus = statusCacheSize > MAX_STATUS_CACHE_SIZE
+        ? trimCacheToSize(statusBarStyleCache, MAX_STATUS_CACHE_SIZE)
+        : 0;
       const removedStorage = storageCacheSize > MAX_STORAGE_CACHE_SIZE
         ? trimCacheToSize(storageKeyCache, MAX_STORAGE_CACHE_SIZE)
         : 0;
       
-      if (IS_DEV() && removedStorage > 0) {
-        log.debug(`Cache cleanup trimmed - Storage: ${removedStorage}`);
+      if (IS_DEV() && (removedStatus > 0 || removedStorage > 0)) {
+        log.debug(`Cache cleanup trimmed - StatusBar: ${removedStatus}, Storage: ${removedStorage}`);
       }
       
-      if (IS_DEV() && storageKeyCache.size > 0) {
-        log.debug(`Cache sizes - Storage: ${storageKeyCache.size}`);
+      if (IS_DEV() && (statusBarStyleCache.size > 0 || storageKeyCache.size > 0)) {
+        log.debug(`Cache sizes - StatusBar: ${statusBarStyleCache.size}, Storage: ${storageKeyCache.size}`);
       }
     }, CLEANUP_INTERVAL);
   }
@@ -573,6 +607,7 @@ export const cleanupAppStateListener = () => {
 
 // Export cache cleanup utilities for manual cleanup if needed
 export const clearAllCaches = () => {
+  statusBarStyleCache.clear();
   storageKeyCache.clear();
   log.info('All caches cleared manually');
 };
@@ -611,6 +646,7 @@ export const performanceUtils = {
 // Memory management utilities
 export const memoryUtils = {
   clearCaches: () => {
+    statusBarStyleCache.clear();
     storageKeyCache.clear();
     // userCache is WeakMap, so it clears automatically
     
@@ -620,6 +656,7 @@ export const memoryUtils = {
   },
   
   getCacheStats: () => ({
+    statusBarCache: statusBarStyleCache.size,
     storageKeyCache: storageKeyCache.size,
     userCache: 'WeakMap (auto-managed)',
   })

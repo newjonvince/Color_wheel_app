@@ -53,15 +53,17 @@ export default {
     },
     plugins: [
       "expo-image-picker",
-      // expo-build-properties is only needed for native (EAS) builds.
-      // Excluding it on Railway/web prevents PluginError on server deployment.
-      ...(process.env.EAS_BUILD ? [[
+      [
         "expo-build-properties",
         {
-          ios: { newArchEnabled: false },
-          android: { newArchEnabled: false }
+          ios: {
+            newArchEnabled: false
+          },
+          android: {
+            newArchEnabled: false
+          }
         }
-      ]] : []),
+      ],
       [
         "expo-font",
         {

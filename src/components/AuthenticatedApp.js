@@ -106,7 +106,7 @@ const Tab = createBottomTabNavigator();
  * AuthenticatedApp - Main app navigation for authenticated users
  * This component renders the bottom tab navigation with all main screens
  */
-const AuthenticatedApp = ({ user = null, handleLogout }) => {
+const AuthenticatedApp = ({ user, handleLogout }) => {
   const [colorWheelReady, setColorWheelReady] = useState(false);
 
   useEffect(() => {
@@ -285,5 +285,8 @@ AuthenticatedApp.propTypes = {
   handleLogout: PropTypes.func.isRequired,
 };
 
+AuthenticatedApp.defaultProps = {
+  user: null,
+};
 
 export default AuthenticatedApp;
