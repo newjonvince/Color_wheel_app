@@ -33,8 +33,8 @@ module.exports = function (api) {
     if (propTypesPlugin) plugins.push(propTypesPlugin);
   }
   
-  // IMPORTANT: Reanimated plugin MUST be last
-  plugins.push('react-native-reanimated/plugin');
+  // NOTE: babel-preset-expo automatically configures the worklets/reanimated
+  // Babel plugin (Reanimated 4+); adding it manually here would break the build.
 
   return {
     presets: ['babel-preset-expo'],

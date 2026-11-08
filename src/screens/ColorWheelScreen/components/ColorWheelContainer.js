@@ -2,8 +2,22 @@
 import React, { useState, useEffect } from 'react';
 import { View, TouchableOpacity, InteractionManager } from 'react-native';
 import PropTypes from 'prop-types';
-// CRASH FIX: @expo/vector-icons DISABLED - triggers libFontParser.dylib SIGABRT on iOS
-const getVectorIcons = () => ({ MaterialIcons: null, Feather: null });
+// CRASH FIX: Lazy-load @expo/vector-icons to prevent native bridge access at module load time
+let _vectorIcons = null;
+const getVectorIcons = () => {
+  if (_vectorIcons) return _vectorIcons;
+  try {
+    const mod = require('@expo/vector-icons');
+    _vectorIcons = {
+      MaterialIcons: mod.MaterialIcons || null,
+      Feather: mod.Feather || null,
+    };
+  } catch (error) {
+    console.warn('ColorWheelContainer: @expo/vector-icons load failed', error?.message);
+    _vectorIcons = { MaterialIcons: null, Feather: null };
+  }
+  return _vectorIcons;
+};
 
 // Safe icon wrapper components with fallback
 const MaterialIcons = ({ name, size, color, style }) => {

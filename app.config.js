@@ -28,16 +28,10 @@ export default {
         ITSAppUsesNonExemptEncryption: false,
         NSCameraUsageDescription: "This app uses the camera to capture photos and extract color information for creating fashion color palettes.",
         NSPhotoLibraryUsageDescription: "This app accesses your photo library to analyze images and extract color palettes for fashion coordination.",
-        NSPhotoLibraryAddUsageDescription: "This app can save your custom color palettes and fashion combinations to your photo library.",
-        NSAppTransportSecurity: {
-          NSAllowsArbitraryLoads: false,
-          NSExceptionDomains: {
-            "colorwheelapp-production.up.railway.app": {
-              NSExceptionAllowsInsecureHTTPLoads: false,
-              NSExceptionMinimumTLSVersion: "TLSv1.2"
-            }
-          }
-        }
+        NSPhotoLibraryAddUsageDescription: "This app can save your custom color palettes and fashion combinations to your photo library."
+        // Note: no NSAppTransportSecurity override needed - the ATS default (HTTPS only,
+        // no arbitrary loads) is exactly what we want, and the old "exception" block
+        // only re-declared default behavior for the Railway domain.
       }
     },
     android: {
@@ -53,25 +47,7 @@ export default {
     },
     plugins: [
       "expo-image-picker",
-      [
-        "expo-build-properties",
-        {
-          ios: {
-            newArchEnabled: false
-          },
-          android: {
-            newArchEnabled: false
-          }
-        }
-      ],
-      [
-        "expo-font",
-        {
-          // CRASH FIX: Prevent auto-loading of fonts at native module init
-          // Fonts will be loaded on-demand by components instead
-          fonts: []
-        }
-      ],
+      "expo-font",
       "expo-secure-store",
       "expo-asset"
     ],
@@ -104,17 +80,11 @@ export default {
       EXPO_PUBLIC_LOG_LEVEL: process.env.EXPO_PUBLIC_LOG_LEVEL || 'warn',
     },
     updates: {
-      // CRASH FIX: Completely disable Expo Updates to prevent ErrorRecovery crashes
-      // Even with checkAutomatically: "NEVER", ErrorRecovery.waitForRemoteLoaderToFinish()
-      // was still running and crashing when the remote loader failed
-      // Disabling updates entirely is the only way to prevent ALL ErrorRecovery crashes
-      fallbackToCacheTimeout: 30000,
-      enabled: false, // ⚠️ DISABLED to prevent ErrorRecovery crash loop
-      checkAutomatically: "NEVER",
+      enabled: true,
       url: `https://u.expo.dev/${EAS_PROJECT_ID}`
     },
     runtimeVersion: {
-      policy: "sdkVersion"
+      policy: "appVersion"
     }
   }
 };

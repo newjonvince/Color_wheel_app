@@ -1,6 +1,4 @@
-﻿// App.js - Simplified Fashion Color Wheel App
-// CRASH FIX: react-native-gesture-handler import moved to index.js
-// It must be initialized at the entry point with try-catch protection
+﻿// App.js - Fashion Color Wheel App root: initialization, auth split, error recovery
 
 // Configure LogBox FIRST - before any other imports or code
 import { LogBox } from 'react-native';
@@ -16,11 +14,6 @@ const getExpoConstants = () => {
   return _expoConstants;
 };
 
-const getExpoExtra = () => {
-  const Constants = getExpoConstants();
-  return Constants?.expoConfig?.extra || {};
-};
-
 // CRASH FIX: Do NOT call getExpoExtra() at module load time!
 // The native bridge isn't ready yet (~300ms after launch).
 // Use safe defaults for LogBox - we can configure more specifically later if needed.
@@ -33,88 +26,14 @@ LogBox.ignoreLogs([
 ]);
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, Animated, Platform, InteractionManager, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, Animated, Platform, InteractionManager, DevSettings } from 'react-native';
+import * as Updates from 'expo-updates';
 
-// Navigation and UI imports (non-native, safe at module load)
 import { NavigationContainer } from '@react-navigation/native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
-// CRASH FIX: Lazy-load gesture handler and safe-area-context to prevent early native access
-let _GestureHandlerRootView = null;
-const getGestureHandlerRootView = () => {
-  if (_GestureHandlerRootView) return _GestureHandlerRootView;
-  try {
-    const mod = require('react-native-gesture-handler');
-    _GestureHandlerRootView = mod.GestureHandlerRootView;
-  } catch (error) {
-    console.warn('App: GestureHandlerRootView load failed', error?.message);
-    _GestureHandlerRootView = View; // Fallback to View
-  }
-  return _GestureHandlerRootView;
-};
-
-let _SafeAreaProvider = null;
-let _SafeAreaView = null;
-const getSafeAreaComponents = () => {
-  if (_SafeAreaProvider && _SafeAreaView) return { SafeAreaProvider: _SafeAreaProvider, SafeAreaView: _SafeAreaView };
-  try {
-    const mod = require('react-native-safe-area-context');
-    _SafeAreaProvider = mod.SafeAreaProvider;
-    _SafeAreaView = mod.SafeAreaView;
-  } catch (error) {
-    console.warn('App: safe-area-context load failed', error?.message);
-    _SafeAreaProvider = View; // Fallback to View
-    _SafeAreaView = View;
-  }
-  return { SafeAreaProvider: _SafeAreaProvider, SafeAreaView: _SafeAreaView };
-};
-
-// CRASH FIX: Lazy-load native modules to prevent bridge access at module load time
-let _StatusBar = null;
-const getStatusBar = () => {
-  if (_StatusBar) return _StatusBar;
-  try {
-    const mod = require('expo-status-bar');
-    _StatusBar = mod.StatusBar || mod.default;
-  } catch (error) {
-    console.warn('App: expo-status-bar load failed', error?.message);
-    _StatusBar = () => null; // Fallback to no-op component
-  }
-  return _StatusBar;
-};
-
-let _AsyncStorage = null;
-const getAsyncStorage = () => {
-  if (_AsyncStorage) return _AsyncStorage;
-  try {
-    const mod = require('@react-native-async-storage/async-storage');
-    _AsyncStorage = mod.default || mod;
-  } catch (error) {
-    console.warn('App: AsyncStorage load failed', error?.message);
-    _AsyncStorage = {
-      getItem: () => Promise.resolve(null),
-      setItem: () => Promise.resolve(),
-      removeItem: () => Promise.resolve(),
-    };
-  }
-  return _AsyncStorage;
-};
-
-let _NetInfo = null;
-const getNetInfo = () => {
-  if (_NetInfo) return _NetInfo;
-  try {
-    const mod = require('@react-native-community/netinfo');
-    _NetInfo = mod.default || mod;
-  } catch (error) {
-    console.warn('App: NetInfo load failed', error?.message);
-    _NetInfo = {
-      fetch: () => Promise.resolve({ isConnected: true, isInternetReachable: true }),
-      addEventListener: () => () => {},
-    };
-  }
-  return _NetInfo;
-};
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 
 // PRODUCTION SAFETY: Gate console.log statements for production
 // CRASH FIX: Use typeof check to prevent ReferenceError in production
@@ -402,7 +321,6 @@ function FashionColorWheelApp() {
     error: null
   });
   const restartTimersRef = useRef({ restart: null, flag: null }); // Track restart timers
-  const isRestartingRef = useRef(false); // Track restart state
   
   // Atomic state transition helper (base implementation)
   const setInitializationState = useCallback((newState, error = null) => {
@@ -437,7 +355,7 @@ function FashionColorWheelApp() {
   devLog('FashionColorWheelApp: Calling useAuthState and useAuthDispatch hooks');
   const authState = useAuthState();
   const authDispatch = useAuthDispatch();
-  const { user, loading: authLoading, isInitialized, error: authError } = authState || {};
+  const { user, loading: authLoading, isInitialized } = authState || {};
   const { initializeAuth, handleLoginSuccess, handleLogout } = authDispatch || {};
   devLog('FashionColorWheelApp: Auth state:', { user: !!user, authLoading, isInitialized });
 
@@ -920,21 +838,22 @@ function FashionColorWheelApp() {
     // The NavigationContainer will reinitialize with clean state
   }, []);
 
-  // IMPROVEMENT: Simplified priority-based restart methods
+  // Priority-based restart methods.
+  // Updates.reloadAsync() only works in release builds; DevSettings.reload() covers dev.
   const RESTART_METHODS = useMemo(() => [
-    { 
-      name: 'expo-updates', 
-      available: () => !!global.Updates?.reloadAsync,
-      execute: () => global.Updates.reloadAsync()
+    {
+      name: 'expo-updates',
+      available: () => !__DEV__ && typeof Updates?.reloadAsync === 'function',
+      execute: () => Updates.reloadAsync()
     },
-    { 
-      name: 'dev-settings', 
-      available: () => !!global.DevSettings?.reload,
-      execute: () => { global.DevSettings.reload(); return Promise.resolve(); }
+    {
+      name: 'dev-settings',
+      available: () => __DEV__ && typeof DevSettings?.reload === 'function',
+      execute: () => { DevSettings.reload(); return Promise.resolve(); }
     },
-    { 
-      name: 'web-reload', 
-      available: () => typeof window !== 'undefined' && !!window.location?.reload,
+    {
+      name: 'web-reload',
+      available: () => Platform.OS === 'web' && typeof window !== 'undefined' && !!window.location?.reload,
       execute: () => { window.location.reload(); return Promise.resolve(); }
     },
   ], []);
@@ -1396,17 +1315,10 @@ function FashionColorWheelApp() {
       }}
     >
       {(() => {
-        // CRASH FIX: Always load SafeAreaProvider eagerly to prevent View→SafeAreaProvider
-        // type change on isReady transition, which unmounts/remounts the entire subtree
-        // (including NavigationContainer) and causes an uncaught fatal JS error.
-        const GestureHandlerRootView = getGestureHandlerRootView();
-        const { SafeAreaProvider, SafeAreaView } = getSafeAreaComponents();
-        const StatusBar = isReady ? getStatusBar() : null;
-        
         return (
           <SafeAreaProvider>
             <GestureHandlerRootView style={styles.fullScreen}>
-              {StatusBar ? <StatusBar style={getStatusBarStyle()} /> : null}
+              {isReady ? <StatusBar style={getStatusBarStyle()} /> : null}
               <NavigationContainer 
                 linking={getAppConfig().linking}
                 fallback={
