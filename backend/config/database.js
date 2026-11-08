@@ -480,26 +480,9 @@ async function initializeTables() {
   }
 }
 
-/** Graceful shutdown (Railway will send SIGTERM on redeploy/scale-down). */
-let _exitHookInstalled = false;
-function installExitHookOnce() {
-  if (_exitHookInstalled) return;
-  _exitHookInstalled = true;
-  const shutdown = async (signal) => {
-    try {
-      await pool.end();
-      // eslint-disable-next-line no-console
-      console.log(`[db] pool closed on ${signal}`);
-    } catch (e) {
-      console.warn('[db] error closing pool:', e?.message || e);
-    } finally {
-      process.exit(0);
-    }
-  };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
-}
-installExitHookOnce();
+// NOTE: graceful shutdown (closing the pool) is owned by server.js's SIGTERM/SIGINT
+// handler. Installing a second signal handler here raced it and could process.exit(0)
+// while in-flight requests were still draining.
 
 module.exports = {
   pool,

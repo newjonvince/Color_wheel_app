@@ -1,5 +1,6 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
+const bcrypt = require('bcryptjs');
 const { query } = require('../../config/database');
 const { authenticateToken } = require('../../middleware/auth-enhanced');
 const { 
@@ -297,7 +298,6 @@ router.put('/password', [
   }
   
   // Verify current password
-  const bcrypt = require('bcrypt');
   const isValidPassword = await bcrypt.compare(current_password, result.rows[0].password_hash);
   
   if (!isValidPassword) {

@@ -2,7 +2,6 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
-const logger = require('./utils/logger');
 require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
@@ -12,7 +11,7 @@ const userRoutes = require('./routes/users');
 const communityRoutes = require('./routes/community');
 const imageRoutes = require('./routes/images');
 const likesRoutes = require('./routes/likes');
-const { initializeTables, healthCheck } = require('./config/database');
+const { pool, initializeTables, healthCheck } = require('./config/database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -79,19 +78,23 @@ app.use(generalLimiter); // Hard limits second
 app.use(express.json({ limit: '2mb' }));             // 2mb is plenty for JSON
 app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
-// Request logger (after body parsing so req.body is available)
+// Request logger (after body parsing so req.body is available).
+// Full header/body dumps only when LOG_VERBOSE=true — too noisy (and too revealing) for production logs.
+const LOG_VERBOSE = process.env.LOG_VERBOSE === 'true';
 app.use('/api', (req, res, next) => {
-  const redacted = { ...req.headers };
-  if (redacted.authorization) redacted.authorization = 'Bearer ***';
-  if (redacted.cookie) redacted.cookie = '***';
   console.log(`🔍 ${req.method} ${req.originalUrl} from ${req.ip}`);
-  console.log('🔍 Headers:', JSON.stringify(redacted, null, 2));
-  if (req.is('application/json') && req.body && Object.keys(req.body).length) {
-    const masked = JSON.parse(JSON.stringify(req.body));
-    ['password','newPassword','token'].forEach(k => { if (masked[k]) masked[k] = '***'; });
-    console.log('🔍 Body:', JSON.stringify(masked, null, 2));
-  } else if (req.method !== 'GET' && !req.is('application/json')) {
-    console.log('🔍 Body: [non-JSON or multipart body]');
+  if (LOG_VERBOSE) {
+    const redacted = { ...req.headers };
+    if (redacted.authorization) redacted.authorization = 'Bearer ***';
+    if (redacted.cookie) redacted.cookie = '***';
+    console.log('🔍 Headers:', JSON.stringify(redacted, null, 2));
+    if (req.is('application/json') && req.body && Object.keys(req.body).length) {
+      const masked = JSON.parse(JSON.stringify(req.body));
+      ['password','newPassword','token','current_password','new_password'].forEach(k => { if (masked[k]) masked[k] = '***'; });
+      console.log('🔍 Body:', JSON.stringify(masked, null, 2));
+    } else if (req.method !== 'GET' && !req.is('application/json')) {
+      console.log('🔍 Body: [non-JSON or multipart body]');
+    }
   }
   next();
 });
@@ -241,13 +244,18 @@ const server = app.listen(PORT, HOST, async () => {
 
 const shutdown = (signal) => {
   console.log(`⏳ Received ${signal}, shutting down gracefully...`);
-  server.close((err) => {
+  server.close(async (err) => {
     if (err) {
       console.error('❌ Error during server shutdown:', err);
       process.exit(1);
-    } else {
-      console.log('✅ Server closed successfully');
+    }
+    try {
+      await pool.end();
+      console.log('✅ Server and DB pool closed successfully');
       process.exit(0);
+    } catch (dbErr) {
+      console.warn('⚠️ Error closing DB pool:', dbErr?.message || dbErr);
+      process.exit(1);
     }
   });
   // Force exit after 10 seconds if graceful shutdown fails

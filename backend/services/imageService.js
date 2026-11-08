@@ -4,15 +4,21 @@ const sharp = require('sharp');
 const crypto = require('crypto');
 const { SESSION_CONFIG, UPLOAD_LIMITS } = require('../constants');
 
-// Try to load node-vibrant
+// Try to load node-vibrant (v4 exposes the Node build at 'node-vibrant/node';
+// fall back to the legacy v3 entry point, then to sharp-based extraction)
 let Vibrant = null;
 try {
-  Vibrant = require('node-vibrant');
-  if (Vibrant && Vibrant.default && Vibrant.from == null) {
-    Vibrant = Vibrant.default;
-  }
+  const mod = require('node-vibrant/node');
+  Vibrant = mod.Vibrant || mod.default || mod;
 } catch (_) {
-  Vibrant = null;
+  try {
+    Vibrant = require('node-vibrant');
+    if (Vibrant && Vibrant.default && Vibrant.from == null) {
+      Vibrant = Vibrant.default;
+    }
+  } catch (_) {
+    Vibrant = null;
+  }
 }
 
 class ImageService {

@@ -9,28 +9,22 @@
     "test": "jest"
   },
   "dependencies": {
-    "@vibrant/core": "^3.2.1-alpha.1",
-    "@vibrant/image-node": "^3.2.1-alpha.1",
     "bcryptjs": "^2.4.3",
-    "compression": "^1.8.1",
+    "compression": "^1.8.2",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.21.1",
-    "express-brute": "^1.0.1",
-    "express-brute-memcached": "^0.0.1",
-    "express-rate-limit": "^7.4.1",
-    "express-slow-down": "^3.0.0",
-    "express-validator": "^7.2.0",
-    "hcaptcha": "^0.2.0",
-    "helmet": "^8.0.0",
-    "jsonwebtoken": "^9.0.2",
-    "multer": "^1.4.5-lts.1",
-    "mysql2": "^3.11.3",
-    "nodemailer": "^7.0.5",
+    "express": "^4.22.3",
+    "express-rate-limit": "^8.7.3",
+    "express-slow-down": "^3.1.1",
+    "express-validator": "7.3.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.0.2",
+    "mysql2": "^3.24.6",
     "rate-limit-redis": "^4.2.0",
     "redis": "^4.7.0",
-    "sharp": "^0.33.5",
-    "uuid": "^10.0.0"
+    "sharp": "^0.35.5",
+    "uuid": "^14.0.1"
   },
   "devDependencies": {
     "jest": "^29.7.0",
@@ -38,7 +32,7 @@
     "supertest": "^7.0.0"
   },
   "optionalDependencies": {
-    "node-vibrant": "^3.2.1-alpha.1"
+    "node-vibrant": "^4.0.4"
   },
   "engines": {
     "node": ">=18.0.0",
@@ -51,5 +45,8 @@
     "mysql"
   ],
   "author": "Fashion Color Wheel Team",
-  "license": "MIT"
+  "license": "MIT",
+  "overrides": {
+    "side-channel": "1.1.0"
+  }
 }
