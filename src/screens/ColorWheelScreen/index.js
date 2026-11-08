@@ -105,7 +105,7 @@ try {
   ApiIntegrationStatus = () => null;
 }
 
-const ColorWheelScreen = ({ navigation, currentUser, onLogout, onSaveColorMatch }) => {
+const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = () => {}, onSaveColorMatch = () => {} }) => {
   const wheelRef = useRef(null);
   
   // CRASH FIX: Safe hook destructuring to prevent crash if hook returns undefined
@@ -395,13 +395,6 @@ ColorWheelScreen.propTypes = {
   currentUser: PropTypes.object,
   onLogout: PropTypes.func,
   onSaveColorMatch: PropTypes.func,
-};
-
-ColorWheelScreen.defaultProps = {
-  navigation: null,
-  currentUser: null,
-  onLogout: () => {},
-  onSaveColorMatch: () => {},
 };
 
 // Wrap with error boundary for production safety

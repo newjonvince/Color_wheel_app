@@ -3,28 +3,7 @@ import {
   StyleSheet, Text, View, Modal, TouchableOpacity, FlatList,
   Image, Alert, Dimensions, ActivityIndicator, SafeAreaView,
 } from 'react-native';
-// CRASH FIX: Lazy-load @expo/vector-icons to prevent native bridge access at module load time
-let _Ionicons = null;
-const getIonicons = () => {
-  if (_Ionicons) return _Ionicons;
-  try {
-    const mod = require('@expo/vector-icons');
-    _Ionicons = mod.Ionicons || null;
-  } catch (error) {
-    console.warn('CommunityModal: @expo/vector-icons load failed', error?.message);
-    _Ionicons = null;
-  }
-  return _Ionicons;
-};
-
-// Safe Ionicons wrapper component with fallback
-const Ionicons = ({ name, size, color, style }) => {
-  const IconComponent = getIonicons();
-  if (IconComponent) {
-    return <IconComponent name={name} size={size} color={color} style={style} />;
-  }
-  return <View style={[{ width: size, height: size }, style]} />;
-};
+import { Ionicons } from '@expo/vector-icons';
 
 import { safeUserId } from '../utils/keyExtractors';
 import ApiService from '../services/safeApiService';

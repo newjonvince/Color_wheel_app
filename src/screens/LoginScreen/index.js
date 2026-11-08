@@ -11,7 +11,7 @@ import LoginButtons from './components/LoginButtons';
 import { useOptimizedLoginState } from './useLoginState';
 import { optimizedStyles, optimizedColors } from './styles';
 
-const LoginScreen = ({ onLoginSuccess }) => {
+const LoginScreen = ({ onLoginSuccess = () => {} }) => {
   const state = useOptimizedLoginState(onLoginSuccess);
 
   const {
@@ -90,10 +90,6 @@ const LoginScreen = ({ onLoginSuccess }) => {
 
 LoginScreen.propTypes = {
   onLoginSuccess: PropTypes.func,
-};
-
-LoginScreen.defaultProps = {
-  onLoginSuccess: () => {},
 };
 
 export default LoginScreen;

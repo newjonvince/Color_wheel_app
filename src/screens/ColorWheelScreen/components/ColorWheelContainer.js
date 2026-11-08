@@ -2,68 +2,26 @@
 import React, { useState, useEffect } from 'react';
 import { View, TouchableOpacity, InteractionManager } from 'react-native';
 import PropTypes from 'prop-types';
-// CRASH FIX: Lazy-load @expo/vector-icons to prevent native bridge access at module load time
-let _vectorIcons = null;
-const getVectorIcons = () => {
-  if (_vectorIcons) return _vectorIcons;
-  try {
-    const mod = require('@expo/vector-icons');
-    _vectorIcons = {
-      MaterialIcons: mod.MaterialIcons || null,
-      Feather: mod.Feather || null,
-    };
-  } catch (error) {
-    console.warn('ColorWheelContainer: @expo/vector-icons load failed', error?.message);
-    _vectorIcons = { MaterialIcons: null, Feather: null };
-  }
-  return _vectorIcons;
-};
-
-// Safe icon wrapper components with fallback
-const MaterialIcons = ({ name, size, color, style }) => {
-  const icons = getVectorIcons();
-  if (icons.MaterialIcons) {
-    return <icons.MaterialIcons name={name} size={size} color={color} style={style} />;
-  }
-  return <View style={[{ width: size, height: size }, style]} />;
-};
-
-const Feather = ({ name, size, color, style }) => {
-  const icons = getVectorIcons();
-  if (icons.Feather) {
-    return <icons.Feather name={name} size={size} color={color} style={style} />;
-  }
-  return <View style={[{ width: size, height: size }, style]} />;
-};
+import { MaterialIcons, Feather } from '@expo/vector-icons';
 
 import { styles, WHEEL_SIZE, colorWheelColors } from '../styles';
+import FullColorWheel from '../../../components/FullColorWheel';
 
-let _FullColorWheel = null;
-const getFullColorWheel = () => {
-  if (_FullColorWheel) return _FullColorWheel;
-  try {
-    const mod = require('../../../components/FullColorWheel');
-    _FullColorWheel = mod?.default || mod;
-  } catch (error) {
-    console.warn('ColorWheelContainer: FullColorWheel load failed', error?.message);
-    _FullColorWheel = null;
-  }
-  return _FullColorWheel;
-};
-
-export const ColorWheelContainer = React.memo(({ 
-  wheelRef,
-  selectedFollowsActive,
+export const ColorWheelContainer = React.memo(({
+  wheelRef = null,
+  selectedFollowsActive = true,
   selectedScheme,
   baseHex,
-  linked,
-  onToggleLinked,
+  linked = true,
+  onToggleLinked = () => {},
   onColorsChange,
   onHexChange,
-  onActiveHandleChange,
+  onActiveHandleChange = () => {},
   onOpenCamera,
   onOpenGallery,
 }) => {
+  // Defer mounting the wheel until initial interactions/navigation settle,
+  // so the first frame of the screen stays responsive.
   const [canRenderWheel, setCanRenderWheel] = useState(false);
 
   useEffect(() => {
@@ -80,35 +38,27 @@ export const ColorWheelContainer = React.memo(({
     };
   }, []);
 
-  const isWheelHardDisabled = String(
-    (typeof process !== 'undefined' ? process?.env?.EXPO_PUBLIC_DISABLE_WHEEL : '') || ''
-  ).toLowerCase() === 'true';
-
-  // Always use FullColorWheel - no fallback needed
-  const wheelProps = {
-    ref: wheelRef,
-    scheme: selectedScheme,
-    initialHex: baseHex,
-    selectedFollowsActive: selectedFollowsActive,
-    linked,
-    onToggleLinked, // PROP FIX: Pass onToggleLinked to FullColorWheel
-    onColorsChange,
-    onHexChange,
-    onActiveHandleChange,
-  };
-
-  const FullColorWheel = (!isWheelHardDisabled && canRenderWheel) ? getFullColorWheel() : null;
-  
   return (
     <View style={styles.wheelContainer}>
-      {FullColorWheel ? (
-        <FullColorWheel {...wheelProps} />
+      {canRenderWheel ? (
+        <FullColorWheel
+          ref={wheelRef}
+          size={WHEEL_SIZE}
+          scheme={selectedScheme}
+          initialHex={baseHex}
+          selectedFollowsActive={selectedFollowsActive}
+          linked={linked}
+          onToggleLinked={onToggleLinked}
+          onColorsChange={onColorsChange}
+          onHexChange={onHexChange}
+          onActiveHandleChange={onActiveHandleChange}
+        />
       ) : (
         <View style={{ width: WHEEL_SIZE, height: WHEEL_SIZE, borderRadius: WHEEL_SIZE / 2, backgroundColor: baseHex }} />
       )}
 
       <View style={styles.cameraButtonsContainer}>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={onOpenCamera}
           style={[styles.cameraButton, styles.cameraButtonSpacing]}
           accessibilityRole="button"
@@ -116,7 +66,7 @@ export const ColorWheelContainer = React.memo(({
         >
           <MaterialIcons name="photo-camera" size={24} color={colorWheelColors.iconPrimary} />
         </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={onOpenGallery}
           style={styles.cameraButton}
           accessibilityRole="button"
@@ -129,7 +79,6 @@ export const ColorWheelContainer = React.memo(({
   );
 });
 
-// PropTypes for better development experience and documentation
 ColorWheelContainer.propTypes = {
   wheelRef: PropTypes.object,
   selectedFollowsActive: PropTypes.bool,
@@ -142,12 +91,4 @@ ColorWheelContainer.propTypes = {
   onActiveHandleChange: PropTypes.func,
   onOpenCamera: PropTypes.func.isRequired,
   onOpenGallery: PropTypes.func.isRequired,
-};
-
-ColorWheelContainer.defaultProps = {
-  wheelRef: null,
-  selectedFollowsActive: true,
-  linked: true,
-  onToggleLinked: () => {},
-  onActiveHandleChange: () => {},
 };

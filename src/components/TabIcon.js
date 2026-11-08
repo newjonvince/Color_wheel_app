@@ -1,25 +1,8 @@
-// components/TabIcon.js - Custom tab icons with emoji fallbacks
+// components/TabIcon.js - Tab bar icons (vector icons with emoji fallback for unknown tabs)
 import React from 'react';
-import { View, Text, StyleSheet, Image } from 'react-native';
-// CRASH FIX: Lazy-load @expo/vector-icons to prevent potential startup issues
+import { View, Text, StyleSheet } from 'react-native';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
 
-// Lazy icon library getters
-let _vectorIcons = null;
-const getVectorIcons = () => {
-  if (_vectorIcons) return _vectorIcons;
-  try {
-    const mod = require('@expo/vector-icons');
-    _vectorIcons = {
-      MaterialIcons: mod.MaterialIcons || null,
-      Feather: mod.Feather || null,
-      Ionicons: mod.Ionicons || null,
-    };
-  } catch (error) {
-    console.warn('TabIcon: @expo/vector-icons load failed', error?.message);
-    _vectorIcons = { MaterialIcons: null, Feather: null, Ionicons: null };
-  }
-  return _vectorIcons;
-};
 // Safe import with fallback
 let COLOR_WHEEL_CONFIG;
 try {
@@ -34,7 +17,8 @@ try {
   };
 }
 
-// Custom icon components using vector icons instead of emojis
+const ICON_LIBRARIES = { MaterialIcons, Ionicons };
+
 const TAB_ICONS = {
   Community: {
     focused: { name: 'people', library: 'MaterialIcons' },
@@ -53,98 +37,56 @@ const TAB_ICONS = {
     unfocused: { name: 'person-outline', library: 'MaterialIcons' }
   },
   Settings: {
-    focused: { name: 'settings', library: 'MaterialIcons' },
-    unfocused: { name: 'settings-outline', library: 'MaterialIcons' }
+    // 'settings-outline' only exists in Ionicons, not MaterialIcons
+    focused: { name: 'settings', library: 'Ionicons' },
+    unfocused: { name: 'settings-outline', library: 'Ionicons' }
   },
-};
-
-// Emoji fallbacks (kept for compatibility)
-const EMOJI_FALLBACKS = {
-  Community: { focused: '👥', unfocused: '👥' },
-  ColorWheel: { focused: '🎨', unfocused: '🎨' },
-  Boards: { focused: '📋', unfocused: '📋' },
-  Profile: { focused: '👤', unfocused: '👤' },
-  Settings: { focused: '⚙️', unfocused: '⚙️' },
 };
 
 const TabIcon = React.memo(({ name, focused, size = 24, color = '#666' }) => {
   const iconData = TAB_ICONS[name];
-  if (!iconData) {
-    // Unknown tab name — fallback to simple dot
-    const emoji = focused ? '●' : '○';
+  const iconConfig = iconData ? (focused ? iconData.focused : iconData.unfocused) : null;
+  const IconComponent = iconConfig ? ICON_LIBRARIES[iconConfig.library] : null;
+
+  if (IconComponent) {
+    const iconColor = focused
+      ? (COLOR_WHEEL_CONFIG?.ICON_COLORS?.focused ?? color)
+      : (COLOR_WHEEL_CONFIG?.ICON_COLORS?.unfocused ?? color);
+
     return (
       <View style={styles.iconContainer}>
-        <Text style={[styles.icon, { fontSize: size, color }]}>{emoji}</Text>
+        <IconComponent
+          name={iconConfig.name}
+          size={size}
+          color={iconColor}
+          accessibilityRole="image"
+          accessibilityLabel={`${name} tab ${focused ? 'selected' : 'unselected'}`}
+        />
       </View>
     );
   }
-  
-  const iconConfig = focused ? iconData.focused : iconData.unfocused;
-  
-  // Render vector icon if available
-  if (iconConfig) {
-    const icons = getVectorIcons();
-    const IconComponent = icons[iconConfig.library];
-    
-    if (IconComponent) {
-      // Use configured colors safely with fallbacks
-      const iconColor = focused 
-        ? (COLOR_WHEEL_CONFIG?.ICON_COLORS?.focused ?? color) 
-        : (COLOR_WHEEL_CONFIG?.ICON_COLORS?.unfocused ?? color);
-        
-      return (
-        <View style={styles.iconContainer}>
-          <IconComponent
-            name={iconConfig.name}
-            size={size}
-            color={iconColor}
-            accessibilityRole="image"
-            accessibilityLabel={`${name} tab ${focused ? 'selected' : 'unselected'}`}
-          />
-        </View>
-      );
-    }
-  }
-  
-  // Fallback to emoji if vector icon fails
-  const emojiData = EMOJI_FALLBACKS[name];
-  const emoji = focused ? emojiData?.focused : emojiData?.unfocused;
-  
+
+  // Unknown tab name — fallback to simple dot
   return (
     <View style={styles.iconContainer}>
-      <Text 
-        style={[
-          styles.icon, 
-          { 
-            fontSize: size,
-            color: color
-          }
-        ]}
+      <Text
+        style={[styles.icon, { fontSize: size, color }]}
         accessibilityRole="image"
         accessibilityLabel={`${name} tab ${focused ? 'selected' : 'unselected'}`}
       >
-        {emoji || (focused ? '●' : '○')}
+        {focused ? '●' : '○'}
       </Text>
     </View>
   );
 });
 
-// Production Note: Currently using emoji icons for cross-platform compatibility
-// Custom PNG icons can be added by:
-// 1. Adding PNG files to assets/icons/ folder
-// 2. Updating iconConfig in APP_CONFIG to use 'image' library
-// 3. The TabIcon component will automatically use PNG files
-
 const styles = StyleSheet.create({
   iconContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    // iOS-only optimizations
-    shadowColor: 'transparent', // Disable shadow for better iOS performance
   },
   icon: {
     textAlign: 'center',
-    // iOS automatically handles retina displays - no additional config needed
   },
 });
 
