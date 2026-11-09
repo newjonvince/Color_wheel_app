@@ -2,7 +2,7 @@
 // Shows API health and integration status in development mode
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform } from 'react-native';
 
 let _apiServiceInstance = null;
 let _apiServiceLoadAttempted = false;

@@ -10,7 +10,7 @@ import {
   Linking,
   Dimensions
 } from 'react-native';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Platform } from 'react-native';
 // CRASH FIX: Use lazy getter to avoid calling isDebugMode() at module load time
 let _isDebugModeValue = null;
 const getIsDebugMode = () => {
@@ -26,6 +26,11 @@ const getIsDebugMode = () => {
   return _isDebugModeValue;
 };
 const IS_DEBUG_MODE = () => getIsDebugMode();
+
+// Keep only the first few frames of React's component stack: enough to see
+// which component threw without flooding the screen.
+const trimComponentStack = (stack) =>
+  String(stack || '').split('\n').filter(Boolean).slice(0, 12).map(l => '  ' + l.trim()).join('\n');
 
 class AppErrorBoundary extends React.Component {
   static MAX_ERRORS_PER_MINUTE = 5;
@@ -66,7 +71,8 @@ class AppErrorBoundary extends React.Component {
       error: null, 
       errorInfo: null,
       errorType: 'unknown',
-      retryCount: 0
+      retryCount: 0,
+      showDetails: false
     };
     
     // Action map bound in constructor
@@ -299,16 +305,25 @@ class AppErrorBoundary extends React.Component {
               ))}
             </View>
             
-            {IS_DEBUG_MODE() && this.state.error && (
+            {this.state.error && (
               <View style={styles.debugSection}>
-                <Text style={styles.debugTitle}>Debug Info:</Text>
-                <ScrollView style={styles.stackTrace}>
-                  <Text style={styles.stackText}>
-                    Type: {this.state.errorType}{'\n'}
-                    Message: {this.state.error.message}{'\n'}
-                    Stack: {this.state.error.stack}
-                  </Text>
-                </ScrollView>
+                <TouchableOpacity
+                  onPress={() => this.setState(s => ({ showDetails: !s.showDetails }))}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.debugTitle}>{this.state.showDetails ? 'Hide details' : 'Show details'}</Text>
+                </TouchableOpacity>
+                {this.state.showDetails && (
+                  <ScrollView style={styles.stackTrace}>
+                    <Text style={styles.stackText} selectable>
+                      {`${this.state.error.name || 'Error'}: ${this.state.error.message}`}
+                      {this.state.errorInfo?.componentStack
+                        ? `\n\nComponent stack:\n${trimComponentStack(this.state.errorInfo.componentStack)}`
+                        : ''}
+                      {IS_DEBUG_MODE() && this.state.error.stack ? `\n\nStack:\n${this.state.error.stack}` : ''}
+                    </Text>
+                  </ScrollView>
+                )}
               </View>
             )}
           </View>

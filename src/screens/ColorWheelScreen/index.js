@@ -383,8 +383,8 @@ const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = ()
         />
       )}
 
-      {/* API Integration Status (Development Only) */}
-      <ApiIntegrationStatus />
+      {/* API Integration Status (debug builds only) */}
+      {IS_DEBUG_MODE() && <ApiIntegrationStatus />}
     </ScrollView>
   );
 };

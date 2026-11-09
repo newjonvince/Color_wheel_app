@@ -12,7 +12,7 @@
 //  - debugMode?: boolean (default false)
 //
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { View, Text, Image, TouchableOpacity, Alert, StyleSheet, Dimensions, PanResponder } from 'react-native';
+import { View, Text, Image, TouchableOpacity, Alert, StyleSheet, Dimensions, PanResponder, Platform } from 'react-native';
 // CRASH FIX: Lazy-load expo modules to prevent native bridge access at module load time
 
 let _apiServiceInstance = null;

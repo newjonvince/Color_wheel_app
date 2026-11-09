@@ -1,6 +1,6 @@
 // screens/ColorWheelScreen/components/ColorWheelContainer.js
-import React, { useState, useEffect } from 'react';
-import { View, TouchableOpacity, InteractionManager } from 'react-native';
+import React from 'react';
+import { View, TouchableOpacity } from 'react-native';
 import PropTypes from 'prop-types';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 
@@ -19,65 +19,41 @@ export const ColorWheelContainer = React.memo(({
   onActiveHandleChange = () => {},
   onOpenCamera,
   onOpenGallery,
-}) => {
-  // Defer mounting the wheel until initial interactions/navigation settle,
-  // so the first frame of the screen stays responsive.
-  const [canRenderWheel, setCanRenderWheel] = useState(false);
+}) => (
+  <View style={styles.wheelContainer}>
+    <FullColorWheel
+      ref={wheelRef}
+      size={WHEEL_SIZE}
+      scheme={selectedScheme}
+      initialHex={baseHex}
+      selectedFollowsActive={selectedFollowsActive}
+      linked={linked}
+      onToggleLinked={onToggleLinked}
+      onColorsChange={onColorsChange}
+      onHexChange={onHexChange}
+      onActiveHandleChange={onActiveHandleChange}
+    />
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const interactionHandle = InteractionManager.runAfterInteractions(() => {
-      if (cancelled) return;
-      setCanRenderWheel(true);
-    });
-
-    return () => {
-      cancelled = true;
-      interactionHandle?.cancel?.();
-    };
-  }, []);
-
-  return (
-    <View style={styles.wheelContainer}>
-      {canRenderWheel ? (
-        <FullColorWheel
-          ref={wheelRef}
-          size={WHEEL_SIZE}
-          scheme={selectedScheme}
-          initialHex={baseHex}
-          selectedFollowsActive={selectedFollowsActive}
-          linked={linked}
-          onToggleLinked={onToggleLinked}
-          onColorsChange={onColorsChange}
-          onHexChange={onHexChange}
-          onActiveHandleChange={onActiveHandleChange}
-        />
-      ) : (
-        <View style={{ width: WHEEL_SIZE, height: WHEEL_SIZE, borderRadius: WHEEL_SIZE / 2, backgroundColor: baseHex }} />
-      )}
-
-      <View style={styles.cameraButtonsContainer}>
-        <TouchableOpacity
-          onPress={onOpenCamera}
-          style={[styles.cameraButton, styles.cameraButtonSpacing]}
-          accessibilityRole="button"
-          accessibilityLabel="Take photo to extract colors"
-        >
-          <MaterialIcons name="photo-camera" size={24} color={colorWheelColors.iconPrimary} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onOpenGallery}
-          style={styles.cameraButton}
-          accessibilityRole="button"
-          accessibilityLabel="Choose photo from gallery to extract colors"
-        >
-          <Feather name="image" size={24} color={colorWheelColors.iconPrimary} />
-        </TouchableOpacity>
-      </View>
+    <View style={styles.cameraButtonsContainer}>
+      <TouchableOpacity
+        onPress={onOpenCamera}
+        style={[styles.cameraButton, styles.cameraButtonSpacing]}
+        accessibilityRole="button"
+        accessibilityLabel="Take photo to extract colors"
+      >
+        <MaterialIcons name="photo-camera" size={24} color={colorWheelColors.iconPrimary} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        onPress={onOpenGallery}
+        style={styles.cameraButton}
+        accessibilityRole="button"
+        accessibilityLabel="Choose photo from gallery to extract colors"
+      >
+        <Feather name="image" size={24} color={colorWheelColors.iconPrimary} />
+      </TouchableOpacity>
     </View>
-  );
-});
+  </View>
+));
 
 ColorWheelContainer.propTypes = {
   wheelRef: PropTypes.object,

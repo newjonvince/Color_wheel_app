@@ -1,7 +1,7 @@
 // screens/ColorWheelScreen/useOptimizedColorWheelState.js - Enhanced state management for FullColorWheel
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { analyzeColor, getColorScheme, getCacheStats, hexToHsl, hslToHex } from '../../utils/optimizedColor';
+import { analyzeColor, getColorScheme, hexToHsl, hslToHex } from '../../utils/optimizedColor';
 import { useThrottledCallbacks } from '../../utils/throttledCallbacks';
 import { useOptimizedColorProcessing } from '../../hooks/useOptimizedColorProcessing';
 import { DEFAULT_SCHEME, DEFAULT_COLOR, generateRandomColor, validateHSL } from './constants';

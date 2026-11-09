@@ -26,7 +26,7 @@ LogBox.ignoreLogs([
 ]);
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, Animated, Platform, InteractionManager, DevSettings } from 'react-native';
+import { View, Text, StyleSheet, Alert, ActivityIndicator, TouchableOpacity, Animated, Platform, DevSettings } from 'react-native';
 import * as Updates from 'expo-updates';
 
 import { NavigationContainer } from '@react-navigation/native';
@@ -728,7 +728,6 @@ function FashionColorWheelApp() {
     }
     
     // Start initialization sequence
-    let interactionHandle = null;
     const scheduleInit = () => {
       initSequenceTimerId = setTimeout(() => {
         initializeSequentially().catch((error) => {
@@ -744,17 +743,7 @@ function FashionColorWheelApp() {
         });
       }, 100);
     };
-    try {
-      if (InteractionManager?.runAfterInteractions) {
-        interactionHandle = InteractionManager.runAfterInteractions(() => {
-          if (isMounted) scheduleInit();
-        });
-      } else {
-        scheduleInit();
-      }
-    } catch (_) {
-      scheduleInit();
-    }
+    scheduleInit();
     
     // COMPREHENSIVE CLEANUP: All timers and resources in one place
     return () => {
@@ -768,13 +757,6 @@ function FashionColorWheelApp() {
       if (initSequenceTimerId !== null) {
         clearTimeout(initSequenceTimerId);
         initSequenceTimerId = null;
-      }
-
-      
-      try {
-        interactionHandle?.cancel?.();
-      } catch (_) {
-        // Ignore cancel failures
       }
       
       // Clear any pending restart timers

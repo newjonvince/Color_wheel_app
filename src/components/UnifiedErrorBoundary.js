@@ -147,14 +147,14 @@ class UnifiedErrorBoundary extends React.Component {
               We encountered an unexpected error. Please try again or restart the app.
             </Text>
 
-            {(IS_DEBUG_MODE() || (typeof __DEV__ !== 'undefined' && __DEV__)) && error && (
+            {error && (
               <View style={styles.debugContainer}>
-                <Text style={styles.debugTitle}>Debug Info:</Text>
-                <Text style={styles.debugText}>
+                <Text style={styles.debugTitle}>Details</Text>
+                <Text style={styles.debugText} selectable>
                   {error.name}: {error.message}
                 </Text>
                 {this.state.errorInfo?.componentStack && (
-                  <Text style={styles.debugStack} numberOfLines={10}>
+                  <Text style={styles.debugStack} numberOfLines={IS_DEBUG_MODE() ? 40 : 10} selectable>
                     {this.state.errorInfo.componentStack}
                   </Text>
                 )}
