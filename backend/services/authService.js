@@ -281,8 +281,9 @@ class AuthService {
       ]
     );
     
-    // DB-driver-agnostic insertId handling (MySQL vs PostgreSQL compatibility)
-    const insertId = sessionResult.insertId ?? sessionResult.insert_id ?? sessionResult.rows?.[0]?.id ?? null;
+    // query() wraps the mysql2 result as { rows }; for INSERTs rows is the
+    // ResultSetHeader, which carries insertId
+    const insertId = sessionResult.rows?.insertId ?? null;
     
     return {
       accessToken: tokenData.token,

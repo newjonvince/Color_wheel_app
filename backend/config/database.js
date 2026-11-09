@@ -341,13 +341,17 @@ async function initializeTables() {
       CREATE TABLE IF NOT EXISTS user_sessions (
         id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id VARCHAR(36) NOT NULL,
-        session_token VARCHAR(255) NOT NULL,
+        session_token VARCHAR(255) NULL,
         expires_at TIMESTAMP NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,
         jti VARCHAR(36) NOT NULL,
         revoked_at TIMESTAMP NULL COMMENT 'When session was revoked (NULL = active)',
         ip_address VARCHAR(45) NULL COMMENT 'IP address when session was created',
         user_agent TEXT NULL COMMENT 'User agent when session was created',
+        refresh_count INT NOT NULL DEFAULT 0,
+        refresh_token_hash VARCHAR(255) NULL,
+        refresh_expires_at TIMESTAMP NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         CONSTRAINT uk_user_sessions_jti UNIQUE (jti),
         CONSTRAINT fk_user_sessions_user FOREIGN KEY (user_id) REFERENCES users(id) ON UPDATE CASCADE ON DELETE CASCADE,
         INDEX idx_user_sessions_auth (jti, user_id, expires_at, revoked_at),
@@ -496,6 +500,23 @@ async function initializeTables() {
       ['profile_image_url', 'profile_image_url VARCHAR(500) NULL'],
       ['preferences', 'preferences JSON NULL'],
     ]);
+    await ensure('user_sessions', [
+      ['refresh_count', 'refresh_count INT NOT NULL DEFAULT 0'],
+      ['refresh_token_hash', 'refresh_token_hash VARCHAR(255) NULL'],
+      ['refresh_expires_at', 'refresh_expires_at TIMESTAMP NULL'],
+      ['updated_at', 'updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'],
+    ]);
+
+    // No code path writes session_token any more; a legacy NOT NULL
+    // definition would reject every session insert (breaking all logins)
+    const st = await query(
+      `SELECT IS_NULLABLE AS nullable FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user_sessions' AND COLUMN_NAME = 'session_token'`
+    );
+    if (st.rows.length > 0 && st.rows[0].nullable === 'NO') {
+      await query('ALTER TABLE user_sessions MODIFY session_token VARCHAR(255) NULL');
+      console.log('✅ Relaxed user_sessions.session_token to NULL');
+    }
 
     console.log('✅ Database tables initialized successfully (all Railway tables included)');
   } catch (error) {
