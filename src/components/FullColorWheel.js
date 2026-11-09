@@ -109,10 +109,12 @@ const FullColorWheel = forwardRef(function FullColorWheel({
     return hslToHex(h, s, 50);
   });
 
-  // Hue sweep, red at the top, clockwise
+  // Skia sweeps clockwise from 3 o'clock and clamps outside 0..360, so instead of a negative
+  // start angle the color lists are rotated a quarter turn: index 0 is the hue at 3 o'clock
+  // (90), which puts red at 12 o'clock to match the handle math (angle - 90).
   const hueSweepColors = useMemo(() => {
     const arr = [];
-    for (let i = 0; i <= 360; i += 10) arr.push(hslToHex(i, 100, 50));
+    for (let i = 0; i <= 360; i += 10) arr.push(hslToHex((i + 90) % 360, 100, 50));
     return arr;
   }, []);
 
@@ -464,13 +466,12 @@ const FullColorWheel = forwardRef(function FullColorWheel({
     <GestureDetector gesture={combinedGesture}>
       <View style={{ width: size, height: size }}>
         <Canvas style={{ width: size, height: size }}>
-          {/* Lightness ring: black at the top, the active color at the sides, white at the bottom */}
+          {/* Lightness ring: black at the top, the active color at the sides, white at the bottom
+              (sweep starts at 3 o'clock: color -> white (6) -> color (9) -> black (12) -> color) */}
           <Circle cx={cx} cy={cy} r={ringRadius} style="stroke" strokeWidth={ringWidth}>
             <SweepGradient
               c={center}
-              start={-90}
-              end={270}
-              colors={['#000000', ringHex, '#FFFFFF', ringHex, '#000000']}
+              colors={[ringHex, '#FFFFFF', ringHex, '#000000', ringHex]}
               positions={[0, 0.25, 0.5, 0.75, 1]}
             />
           </Circle>
@@ -478,9 +479,9 @@ const FullColorWheel = forwardRef(function FullColorWheel({
           {/* White spacer */}
           <Circle cx={cx} cy={cy} r={radius - ringWidth} color="#FFFFFF" />
 
-          {/* Hue disk, red at 12 o'clock, clockwise - matches the handle math (angle - 90) */}
+          {/* Hue disk, red at 12 o'clock, clockwise (see hueSweepColors) */}
           <Circle cx={cx} cy={cy} r={diskRadius}>
-            <SweepGradient c={center} start={-90} end={270} colors={hueSweepColors} />
+            <SweepGradient c={center} colors={hueSweepColors} />
           </Circle>
 
           {/* Saturation falls to neutral gray at the center */}

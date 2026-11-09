@@ -6,17 +6,17 @@ import PropTypes from 'prop-types';
 import { Ionicons } from '@expo/vector-icons';
 import { styles, colorWheelColors } from '../styles';
 
-const Pill = ({ icon, label, on, onPress, role = 'button', hint }) => (
+const Pill = ({ icon, label, on, onPress, role = 'button', hint, iconOnly = false }) => (
   <Pressable
     onPress={onPress}
-    style={[styles.toolPill, on && styles.toolPillOn]}
+    style={[styles.toolPill, iconOnly && styles.toolIconButton, on && styles.toolPillOn]}
     accessibilityRole={role}
     accessibilityState={role === 'switch' ? { checked: !!on } : undefined}
     accessibilityLabel={label}
     accessibilityHint={hint}
   >
-    <Ionicons name={icon} size={16} color={on ? '#FFFFFF' : colorWheelColors.text} />
-    <Text style={[styles.toolPillText, on && styles.toolPillTextOn]}>{label}</Text>
+    <Ionicons name={icon} size={iconOnly ? 18 : 16} color={on ? '#FFFFFF' : colorWheelColors.text} />
+    {!iconOnly && <Text style={[styles.toolPillText, on && styles.toolPillTextOn]}>{label}</Text>}
   </Pressable>
 );
 
@@ -45,8 +45,8 @@ export const ColorControls = React.memo(({
       role="switch"
       hint="When on, the picked color is the handle you touched last"
     />
-    <Pill icon="refresh" label="Reset" onPress={onReset} hint="Rebuild the palette from the base color" />
-    <Pill icon="shuffle" label="Random" onPress={onRandomize} hint="Pick a random base color" />
+    <Pill icon="refresh" label="Reset" onPress={onReset} hint="Rebuild the palette from the base color" iconOnly />
+    <Pill icon="shuffle" label="Random" onPress={onRandomize} hint="Pick a random base color" iconOnly />
   </View>
 ));
 

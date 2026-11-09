@@ -64,6 +64,13 @@ export const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: colorWheelColors.pill,
   },
+  toolIconButton: {
+    width: 38,
+    height: 38,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    justifyContent: 'center',
+  },
   toolPillOn: {
     backgroundColor: colorWheelColors.pillOn,
   },
