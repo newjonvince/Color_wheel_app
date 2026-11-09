@@ -1,45 +1,25 @@
-// screens/ColorWheelScreen/index.js - Refactored ColorWheelScreen
-// SAFER: Lazy load with fallbacks
-import React, { useRef, useCallback, useMemo, lazy, Suspense } from 'react';
-import { ScrollView, View, Text, ActivityIndicator } from 'react-native';
+// screens/ColorWheelScreen/index.js
+// Layout (Canva-style): wheel -> tools -> 1. pick a color -> 2. palette type -> palette -> actions
+import React, { useRef, useCallback, useMemo, useState, useEffect } from 'react';
+import { ScrollView, View, Text, TextInput, Pressable, Alert, ActivityIndicator } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import PropTypes from 'prop-types';
+import { Ionicons } from '@expo/vector-icons';
 import AppErrorBoundary from '../../components/AppErrorBoundary';
 import { isValidHex6 } from '../../utils/colorValidation';
+import { getColorScheme, hexToHsl } from '../../utils/optimizedColor';
 import { SchemeSelector } from './components/SchemeSelector';
 import { ColorWheelContainer } from './components/ColorWheelContainer';
 import { ColorControls } from './components/ColorControls';
 import { HSLInputs } from './components/HSLInputs';
 import { ColorSwatches } from './components/ColorSwatches';
 import { useOptimizedColorWheelState } from './useOptimizedColorWheelState';
-import { styles } from './styles';
+import { getSchemeDisplayName } from './constants';
+import { styles, colorWheelColors } from './styles';
 import { apiPatterns } from '../../utils/apiHelpers';
-
-let _optimizedColorModule = null;
-let _optimizedColorLoadAttempted = false;
-const getOptimizedColorModule = () => {
-  if (_optimizedColorLoadAttempted) return _optimizedColorModule;
-  _optimizedColorLoadAttempted = true;
-  try {
-    _optimizedColorModule = require('../../utils/optimizedColor');
-  } catch (error) {
-    console.warn('ColorWheelScreen: optimizedColor load failed', error?.message || error);
-    _optimizedColorModule = null;
-  }
-  return _optimizedColorModule;
-};
-
-const getColorSchemeSafe = (baseColor, scheme, index) => {
-  const mod = getOptimizedColorModule();
-  const fn = mod?.getColorScheme;
-  if (typeof fn === 'function') return fn(baseColor, scheme, index);
-  return typeof baseColor === 'string' ? [baseColor] : [];
-};
 
 let _apiServiceInstance = null;
 let _apiServiceLoadAttempted = false;
-let _apiServiceLoadError = null;
-
 const getApiServiceInstance = () => {
   if (_apiServiceLoadAttempted) return _apiServiceInstance;
   _apiServiceLoadAttempted = true;
@@ -47,31 +27,19 @@ const getApiServiceInstance = () => {
     const mod = require('../../services/safeApiService');
     _apiServiceInstance = mod?.default || mod;
   } catch (error) {
-    _apiServiceLoadError = error;
     console.warn('ColorWheelScreen: safeApiService load failed', error?.message || error);
     _apiServiceInstance = null;
   }
   return _apiServiceInstance;
 };
-
-const ApiService = {
-  getToken: () => {
-    const inst = getApiServiceInstance();
-    return typeof inst?.getToken === 'function' ? inst.getToken() : undefined;
-  },
+const hasToken = () => {
+  const inst = getApiServiceInstance();
+  return typeof inst?.getToken === 'function' ? !!inst.getToken() : false;
 };
 
-Object.defineProperty(ApiService, 'ready', {
-  enumerable: true,
-  get: () => {
-    const inst = getApiServiceInstance();
-    return inst?.ready || Promise.resolve();
-  },
-});
-
-// CIRCULAR DEPENDENCY FIX: Lazy load expoConfigHelper to prevent crash on module initialization
+// Lazy: expoConfigHelper touches expo-constants, which must not run at module load
 let _isDebugModeValue = null;
-const getIsDebugMode = () => {
+const IS_DEBUG_MODE = () => {
   if (_isDebugModeValue === null) {
     try {
       const helper = require('../../utils/expoConfigHelper');
@@ -83,32 +51,32 @@ const getIsDebugMode = () => {
   }
   return _isDebugModeValue;
 };
-const IS_DEBUG_MODE = () => getIsDebugMode();
 
-// Optional components (lazy load with fallbacks)
+// Optional components (fall back to nothing if they fail to load)
 let CoolorsColorExtractor = null;
 let ApiIntegrationStatus = null;
-
 try {
   CoolorsColorExtractor = require('../../components/CoolorsColorExtractor').default;
 } catch (error) {
   console.warn('CoolorsColorExtractor not available:', error.message);
-  // Fallback component
   CoolorsColorExtractor = () => null;
 }
-
 try {
   ApiIntegrationStatus = require('../../components/ApiIntegrationStatus').default;
 } catch (error) {
   console.warn('ApiIntegrationStatus not available:', error.message);
-  // Fallback component
   ApiIntegrationStatus = () => null;
 }
 
-const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = () => {}, onSaveColorMatch = () => {} }) => {
+const normalizeHex = (raw) => {
+  const text = String(raw || '').trim();
+  const withHash = text.startsWith('#') ? text : `#${text}`;
+  return withHash.toUpperCase();
+};
+
+const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = () => {}, onSaveColorMatch = null }) => {
   const wheelRef = useRef(null);
-  
-  // CRASH FIX: Safe hook destructuring to prevent crash if hook returns undefined
+
   let colorWheelState;
   try {
     colorWheelState = useOptimizedColorWheelState({ wheelRef }) || {};
@@ -116,280 +84,233 @@ const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = ()
     console.error('useOptimizedColorWheelState hook failed:', error);
     colorWheelState = {};
   }
-  
+
   const {
-    selectedScheme = 'monochromatic',
-    setSelectedScheme = () => console.warn('setSelectedScheme not available'),
+    selectedScheme = 'complementary',
+    setSelectedScheme = () => {},
     palette = [],
-    selectedColor = '#FF0000',
-    baseHex = '#FF0000',
-    linked = false,
+    selectedColor = '#FF6B6B',
+    baseHex = '#FF6B6B',
+    linked = true,
     activeIdx = 0,
-    selectedFollowsActive = false,
+    selectedFollowsActive = true,
     showExtractor = false,
-    hslInputs = { h: 0, s: 100, l: 50 },
-    updateHslInput = () => console.warn('updateHslInput not available'),
-    applyHslInputs = () => console.warn('applyHslInputs not available'),
-    updateColorWheelLive = () => console.warn('updateColorWheelLive not available'),
-    resetScheme = () => console.warn('resetScheme not available'),
-    randomize = () => console.warn('randomize not available'),
-    toggleLinked = () => console.warn('toggleLinked not available'),
-    toggleSelectedFollowsActive = () => console.warn('toggleSelectedFollowsActive not available'),
-    openExtractor = () => console.warn('openExtractor not available'),
-    closeExtractor = () => console.warn('closeExtractor not available'),
-    handleExtractorComplete = () => console.warn('handleExtractorComplete not available'),
-    handleColorsChange = () => console.warn('handleColorsChange not available'),
-    handleHexChange = () => console.warn('handleHexChange not available'),
-    handleActiveHandleChange = () => console.warn('handleActiveHandleChange not available'),
+    hslInputs = { h: '0', s: '100', l: '50' },
+    updateHslInput = () => {},
+    applyHslInputs = () => {},
+    updateColorWheelLive = () => {},
+    resetScheme = () => {},
+    randomize = () => {},
+    toggleLinked = () => {},
+    toggleSelectedFollowsActive = () => {},
+    openExtractor = () => {},
+    closeExtractor = () => {},
+    handleExtractorComplete = () => {},
+    handleColorsChange = () => {},
+    handleHexChange = () => {},
+    handleActiveHandleChange = () => {},
   } = colorWheelState;
 
-  // Load user data with proper error handling using apiHelpers
+  // ----- user data on focus -----
   const loadUserData = useCallback(async () => {
-    // DEBUG: Log auth status before API call
-    console.log('🔍 ColorWheelScreen - Loading user data:', {
-      hasCurrentUser: !!currentUser,
-      userId: currentUser?.id || 'none',
-      hasToken: !!ApiService.getToken(),
-      timestamp: new Date().toISOString()
-    });
-    
-    if (!currentUser) {
-      console.warn('⚠️ No currentUser - skipping loadUserData');
-      return;
-    }
-
+    if (!currentUser) return;
     try {
-      console.log('📡 Calling apiPatterns.loadUserData()...');
       const result = await apiPatterns.loadUserData();
-      console.log('✅ API call completed:', { success: result.success });
-
-      if (result.success) {
-        // Log API integration status only in debug mode
-        if (IS_DEBUG_MODE()) {
-          console.log('API Integration Status:', {
-            authenticated: !!ApiService.getToken(),
-            userDataLoaded: !!result.data,
-            apiReady: true,
-            timestamp: new Date().toISOString()
-          });
-        }
-        return;
-      }
-
-      console.warn('Failed to load user data:', result.error);
-
-      // Always log API integration issues for production debugging
-      console.error('API Integration Issue:', {
-        error: result.error?.message ?? String(result.error),
-        isAuthError: result.error?.isAuthError,
-        hasToken: !!ApiService.getToken(),
-      });
-
-      if (result.error?.isAuthError && typeof onLogout === 'function') {
-        onLogout();
-      }
+      if (result.success) return;
+      console.warn('Failed to load user data:', result.error?.message ?? String(result.error));
+      if (result.error?.isAuthError && typeof onLogout === 'function') onLogout();
     } catch (error) {
-      console.error('loadUserData threw:', error);
-      // Always log API integration crashes for production debugging
-      console.error('API Integration Crash Path:', {
-        message: error.message,
-        stack: error.stack,
-        hasToken: !!ApiService.getToken(),
-      });
+      console.error('loadUserData threw:', error?.message, { hasToken: hasToken() });
     }
   }, [currentUser, onLogout]);
 
-  // Load data when screen focuses
-  useFocusEffect(useCallback(() => { 
-    loadUserData(); 
+  useFocusEffect(useCallback(() => {
+    loadUserData();
   }, [loadUserData]));
 
-  // Enhanced memoized scheme colors with performance monitoring
+  // ----- palette -----
   const schemeColors = useMemo(() => {
-    const startTime = Date.now();
-    
-    let colors;
-    if (Array.isArray(palette) && palette.length > 0) {
-      colors = palette;
-    } else {
-      colors = getColorSchemeSafe(selectedColor, selectedScheme, 0);
+    if (Array.isArray(palette) && palette.length > 0) return palette;
+    try {
+      const generated = getColorScheme(selectedColor, selectedScheme);
+      return Array.isArray(generated) && generated.length ? generated : [selectedColor];
+    } catch (_) {
+      return [selectedColor];
     }
-    
-    const duration = Date.now() - startTime;
-    if (IS_DEBUG_MODE() && duration > 50) {
-      console.log(`⏱️ Scheme calculation took ${duration}ms for ${selectedScheme}`);
-    }
-    
-    return colors;
   }, [palette, selectedColor, selectedScheme]);
 
-  // Event handlers with useCallback for performance
   const handleSchemeChange = useCallback((scheme) => {
     setSelectedScheme(scheme);
     resetScheme();
   }, [setSelectedScheme, resetScheme]);
 
-  const handleApplyInputs = useCallback(() => {
-    applyHslInputs();
-  }, [applyHslInputs]);
-
-  const handleReset = useCallback(() => {
-    resetScheme();
-  }, [resetScheme]);
-
-  // Handle swatch press to select different palette colors
   const handleSwatchPress = useCallback((color, index) => {
-    try {
-      if (!isValidHex6(color)) {
-        console.warn('Invalid color selected from swatch:', color);
-        return;
-      }
-
-      // CRASH FIX: Use existing hook handlers instead of undefined setters
-      handleHexChange(color);
-      
-      // VALIDATION FIX: Proper index validation - must be actual number >= 0
-      if (typeof index === 'number' && !isNaN(index) && Number.isInteger(index) && index >= 0) {
-        // Valid palette index - update active handle
-        handleActiveHandleChange(index);
-        
-        if (IS_DEBUG_MODE()) {
-          console.log(`Color selected from swatch: ${color} (valid index: ${index})`);
-        }
-      } else if (index !== -1) { // -1 is used for selected color swatch, so it's expected
-        console.warn('Invalid swatch index provided:', {
-          index,
-          type: typeof index,
-          isNaN: isNaN(index),
-          isInteger: Number.isInteger(index)
-        });
-      }
-      
-      if (IS_DEBUG_MODE() && (index === -1 || (typeof index === 'number' && !isNaN(index) && Number.isInteger(index) && index >= 0))) {
-        console.log(`Color selected from swatch: ${color} (index: ${index})`);
-      }
-    } catch (error) {
-      console.error('Error handling swatch press:', error);
-    }
+    if (!isValidHex6(color)) return;
+    handleHexChange(color);
+    if (Number.isInteger(index) && index >= 0) handleActiveHandleChange(index);
   }, [handleHexChange, handleActiveHandleChange]);
 
-  // Memoized color match object to prevent unnecessary recreations
+  // ----- hex field ("1. Pick a color") -----
+  const [hexDraft, setHexDraft] = useState(selectedColor);
+  const hexFocused = useRef(false);
+  useEffect(() => {
+    if (!hexFocused.current) setHexDraft(selectedColor);
+  }, [selectedColor]);
+
+  const commitHex = useCallback(() => {
+    hexFocused.current = false;
+    const hex = normalizeHex(hexDraft);
+    if (!isValidHex6(hex)) {
+      setHexDraft(selectedColor);
+      return;
+    }
+    const { h = 0, s = 100, l = 50 } = hexToHsl(hex) || {};
+    handleHexChange(hex);
+    wheelRef.current?.setActiveHandleHSL?.(h, s, l);
+  }, [hexDraft, selectedColor, handleHexChange]);
+
+  // ----- save -----
+  const schemeLabel = getSchemeDisplayName(selectedScheme);
   const colorMatchData = useMemo(() => ({
     base_color: selectedColor,
     scheme: selectedScheme,
     colors: schemeColors,
-    title: `${selectedScheme} palette`,
-    description: `Generated color palette using ${selectedScheme} scheme`,
-  }), [selectedColor, selectedScheme, schemeColors]);
+    title: `${schemeLabel} palette`,
+    description: `Generated color palette using the ${selectedScheme} scheme`,
+  }), [selectedColor, selectedScheme, schemeColors, schemeLabel]);
 
-  // Save color match handler
-  const handleSaveColorMatch = useCallback(async () => {
-    if (!onSaveColorMatch || !currentUser) return;
-    
-    try {
-      
-      // Log color match saving only in debug mode
-      if (IS_DEBUG_MODE()) {
-        console.log('Saving Color Match:', {
-          baseColor: colorMatchData.base_color,
-          scheme: colorMatchData.scheme,
-          colorsCount: colorMatchData.colors.length,
-          timestamp: new Date().toISOString()
-        });
-      }
-      
-      const result = await onSaveColorMatch(colorMatchData);
-      
-      // Log successful color match saves only in debug mode
-      if (IS_DEBUG_MODE()) {
-        console.log('Color Match Saved:', {
-          success: !!result,
-          matchId: result?.id,
-          timestamp: new Date().toISOString()
-        });
-      }
-      
-      return result;
-    } catch (error) {
-      console.error('Failed to save color match:', error);
-      // Always log color match save errors for production debugging
-      console.error('Save Color Match Error:', {
-        error: error.message,
-        isAuthError: error.isAuthError,
-        colorMatch: {
-          baseColor: selectedColor,
-          scheme: selectedScheme,
-          colorsCount: schemeColors.length
-        }
-      });
-      throw error;
+  const [saving, setSaving] = useState(false);
+  const handleSavePalette = useCallback(async () => {
+    if (!currentUser) {
+      Alert.alert('Sign in to save', 'Log in to save palettes to your boards.');
+      return;
     }
-  }, [onSaveColorMatch, currentUser, colorMatchData]);
+    if (saving) return;
+    setSaving(true);
+    try {
+      const result = typeof onSaveColorMatch === 'function'
+        ? await onSaveColorMatch(colorMatchData)
+        : await apiPatterns.createColorMatch(colorMatchData);
+      const ok = result == null ? true : result.success !== false;
+      if (ok) {
+        Alert.alert('Palette saved', `${colorMatchData.title} was added to your boards.`);
+      } else {
+        Alert.alert('Could not save', result.userMessage || result.error?.message || 'Please try again.');
+      }
+    } catch (error) {
+      Alert.alert('Could not save', error?.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  }, [currentUser, saving, onSaveColorMatch, colorMatchData]);
+
+  // The extractor reports { imageUri, slots, activeIndex }; the hook wants the color list
+  const handleExtractorDone = useCallback((result) => {
+    handleExtractorComplete(Array.isArray(result) ? result : (result?.slots || []));
+  }, [handleExtractorComplete]);
 
   return (
-    <ScrollView 
+    <ScrollView
+      style={[styles.screen, { backgroundColor: selectedColor }]}
       contentContainerStyle={styles.container}
+      keyboardShouldPersistTaps="handled"
       accessibilityLabel="Color wheel screen"
     >
-      <SchemeSelector
-        selectedScheme={selectedScheme}
-        onSchemeChange={handleSchemeChange}
-        selectedColor={selectedColor}
-      />
+      <View style={styles.card}>
+        <ColorWheelContainer
+          wheelRef={wheelRef}
+          selectedFollowsActive={selectedFollowsActive}
+          selectedScheme={selectedScheme}
+          baseHex={baseHex}
+          linked={linked}
+          onToggleLinked={toggleLinked}
+          onColorsChange={handleColorsChange}
+          onHexChange={handleHexChange}
+          onActiveHandleChange={handleActiveHandleChange}
+        />
 
-      <ColorWheelContainer
-        wheelRef={wheelRef}
-        selectedFollowsActive={selectedFollowsActive}
-        selectedScheme={selectedScheme}
-        baseHex={baseHex}
-        linked={linked}
-        onToggleLinked={toggleLinked}
-        onColorsChange={handleColorsChange}
-        onHexChange={handleHexChange}
-        onActiveHandleChange={handleActiveHandleChange}
-        onOpenCamera={openExtractor}
-        onOpenGallery={openExtractor}
-      />
+        <ColorControls
+          linked={linked}
+          selectedFollowsActive={selectedFollowsActive}
+          onToggleLinked={toggleLinked}
+          onToggleSelectedFollowsActive={toggleSelectedFollowsActive}
+          onReset={resetScheme}
+          onRandomize={randomize}
+        />
 
-      <ColorControls
-        linked={linked}
-        selectedFollowsActive={selectedFollowsActive}
-        onToggleLinked={toggleLinked}
-        onToggleSelectedFollowsActive={toggleSelectedFollowsActive}
-        onReset={handleReset}
-        onRandomize={randomize}
-      />
+        <Text style={styles.stepLabel}>1. Pick a color</Text>
+        <View style={styles.colorRow}>
+          <View style={[styles.colorDot, { backgroundColor: selectedColor }]} accessibilityLabel={`Selected color ${selectedColor}`} />
+          <TextInput
+            style={styles.hexInput}
+            value={hexDraft}
+            onChangeText={setHexDraft}
+            onFocus={() => { hexFocused.current = true; }}
+            onBlur={commitHex}
+            onSubmitEditing={commitHex}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={7}
+            returnKeyType="done"
+            placeholder="#RRGGBB"
+            accessibilityLabel="Hex color"
+          />
+        </View>
+        <HSLInputs
+          hslInputs={hslInputs}
+          onUpdateInput={updateHslInput}
+          onLiveUpdate={updateColorWheelLive}
+          onApplyInputs={applyHslInputs}
+          wheelRef={wheelRef}
+        />
 
-      <HSLInputs
-        hslInputs={hslInputs}
-        onUpdateInput={updateHslInput}
-        onLiveUpdate={updateColorWheelLive}
-        onApplyInputs={handleApplyInputs}
-      />
+        <Text style={styles.stepLabel}>2. Choose a palette type</Text>
+        <SchemeSelector selectedScheme={selectedScheme} onSchemeChange={handleSchemeChange} />
 
-      <ColorSwatches
-        selectedColor={selectedColor}
-        schemeColors={schemeColors}
-        selectedScheme={selectedScheme}
-        activeIdx={activeIdx}
-        onSwatchPress={handleSwatchPress}
-      />
+        <ColorSwatches
+          schemeColors={schemeColors}
+          activeIdx={activeIdx}
+          onSwatchPress={handleSwatchPress}
+        />
+
+        <View style={styles.actionsRow}>
+          <Pressable
+            style={[styles.primaryButton, saving && styles.buttonDisabled]}
+            onPress={handleSavePalette}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Save palette"
+          >
+            {saving
+              ? <ActivityIndicator color="#FFFFFF" />
+              : <Ionicons name="bookmark-outline" size={18} color="#FFFFFF" />}
+            <Text style={styles.primaryButtonText}>{saving ? 'Saving…' : 'Save palette'}</Text>
+          </Pressable>
+          <Pressable
+            style={styles.secondaryButton}
+            onPress={openExtractor}
+            accessibilityRole="button"
+            accessibilityLabel="Extract colors from a photo"
+          >
+            <Ionicons name="camera-outline" size={18} color={colorWheelColors.text} />
+            <Text style={styles.secondaryButtonText}>From photo</Text>
+          </Pressable>
+        </View>
+      </View>
 
       {showExtractor && (
         <CoolorsColorExtractor
           initialSlots={5}
-          onComplete={handleExtractorComplete}
+          onComplete={handleExtractorDone}
           onClose={closeExtractor}
         />
       )}
 
-      {/* API Integration Status (debug builds only) */}
       {IS_DEBUG_MODE() && <ApiIntegrationStatus />}
     </ScrollView>
   );
 };
 
-// PropTypes for better development experience
 ColorWheelScreen.propTypes = {
   navigation: PropTypes.object,
   currentUser: PropTypes.object,
@@ -397,7 +318,6 @@ ColorWheelScreen.propTypes = {
   onSaveColorMatch: PropTypes.func,
 };
 
-// Wrap with error boundary for production safety
 const ColorWheelScreenWithErrorBoundary = (props) => (
   <AppErrorBoundary>
     <ColorWheelScreen {...props} />

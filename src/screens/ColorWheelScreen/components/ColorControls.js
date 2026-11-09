@@ -1,68 +1,62 @@
 // screens/ColorWheelScreen/components/ColorControls.js
+// Compact tool pills under the wheel: link toggle, follow-active toggle, reset, random.
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
-import { styles } from '../styles';
+import PropTypes from 'prop-types';
+import { Ionicons } from '@expo/vector-icons';
+import { styles, colorWheelColors } from '../styles';
 
-export const ColorControls = React.memo(({ 
+const Pill = ({ icon, label, on, onPress, role = 'button', hint }) => (
+  <Pressable
+    onPress={onPress}
+    style={[styles.toolPill, on && styles.toolPillOn]}
+    accessibilityRole={role}
+    accessibilityState={role === 'switch' ? { checked: !!on } : undefined}
+    accessibilityLabel={label}
+    accessibilityHint={hint}
+  >
+    <Ionicons name={icon} size={16} color={on ? '#FFFFFF' : colorWheelColors.text} />
+    <Text style={[styles.toolPillText, on && styles.toolPillTextOn]}>{label}</Text>
+  </Pressable>
+);
+
+export const ColorControls = React.memo(({
   linked,
   selectedFollowsActive,
   onToggleLinked,
   onToggleSelectedFollowsActive,
   onReset,
   onRandomize,
-}) => {
-  return (
-    <View style={styles.controlsContainer}>
-      <View style={styles.controlsRow}>
-        <Pressable 
-          onPress={onToggleLinked}
-          style={[
-            styles.toggleButton,
-            linked ? styles.linkedButtonActive : styles.linkedButtonInactive
-          ]}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: linked }}
-          accessibilityLabel="Toggle color linking"
-        >
-          <Text style={styles.buttonText}>{linked ? 'Linked' : 'Unlinked'}</Text>
-        </Pressable>
+}) => (
+  <View style={styles.toolsRow}>
+    <Pill
+      icon="link-outline"
+      label="Linked"
+      on={linked}
+      onPress={onToggleLinked}
+      role="switch"
+      hint="When on, the scheme handles move together"
+    />
+    <Pill
+      icon="eye-outline"
+      label="Follow active"
+      on={selectedFollowsActive}
+      onPress={onToggleSelectedFollowsActive}
+      role="switch"
+      hint="When on, the picked color is the handle you touched last"
+    />
+    <Pill icon="refresh" label="Reset" onPress={onReset} hint="Rebuild the palette from the base color" />
+    <Pill icon="shuffle" label="Random" onPress={onRandomize} hint="Pick a random base color" />
+  </View>
+));
 
-        <Pressable 
-          onPress={onToggleSelectedFollowsActive}
-          style={[
-            styles.followsActiveButton,
-            selectedFollowsActive 
-              ? styles.followsActiveButtonActive 
-              : styles.followsActiveButtonInactive
-          ]}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: selectedFollowsActive }}
-          accessibilityLabel="Toggle selected color follows active handle"
-        >
-          <Text style={styles.buttonText}>
-            {selectedFollowsActive ? 'Selected = Active Handle' : 'Selected = Handle #1'}
-          </Text>
-        </Pressable>
+ColorControls.propTypes = {
+  linked: PropTypes.bool.isRequired,
+  selectedFollowsActive: PropTypes.bool.isRequired,
+  onToggleLinked: PropTypes.func.isRequired,
+  onToggleSelectedFollowsActive: PropTypes.func.isRequired,
+  onReset: PropTypes.func.isRequired,
+  onRandomize: PropTypes.func.isRequired,
+};
 
-        <View style={styles.actionButtonsContainer}>
-          <Pressable 
-            onPress={onReset} 
-            style={[styles.actionButton, styles.actionButtonSpacing]}
-            accessibilityRole="button"
-            accessibilityLabel="Reset color scheme"
-          >
-            <Text>Reset</Text>
-          </Pressable>
-          <Pressable 
-            onPress={onRandomize} 
-            style={styles.actionButton}
-            accessibilityRole="button"
-            accessibilityLabel="Generate random colors"
-          >
-            <Text>Randomize</Text>
-          </Pressable>
-        </View>
-      </View>
-    </View>
-  );
-});
+ColorControls.displayName = 'ColorControls';

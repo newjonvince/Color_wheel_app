@@ -1,49 +1,69 @@
 // screens/ColorWheelScreen/components/SchemeSelector.js
-import React from 'react';
-import { View, Text, Pressable } from 'react-native';
+// "Choose a palette type": a dropdown that opens a bottom sheet listing the schemes.
+import React, { useState, useCallback } from 'react';
+import { View, Text, Pressable, Modal, ScrollView } from 'react-native';
 import PropTypes from 'prop-types';
-import { styles } from '../styles';
-import { SCHEMES, getAccessibilityLabel } from '../constants';
+import { Ionicons } from '@expo/vector-icons';
+import { styles, colorWheelColors } from '../styles';
+import { SCHEMES, getAccessibilityLabel, getSchemeDisplayName } from '../constants';
 
-export const SchemeSelector = React.memo(({ 
-  selectedScheme, 
-  onSchemeChange, 
-  selectedColor 
-}) => {
+export const SchemeSelector = React.memo(({ selectedScheme, onSchemeChange }) => {
+  const [open, setOpen] = useState(false);
+
+  const choose = useCallback((name) => {
+    setOpen(false);
+    if (name !== selectedScheme) onSchemeChange(name);
+  }, [onSchemeChange, selectedScheme]);
+
   return (
-    <View style={styles.schemeContainer}>
-      <View style={styles.schemeButtonsContainer}>
-        {SCHEMES.map((name) => (
-          <Pressable
-            key={name}
-            onPress={() => onSchemeChange(name)}
-            style={[
-              styles.schemeButton,
-              selectedScheme === name 
-                ? styles.schemeButtonActive 
-                : styles.schemeButtonInactive
-            ]}
-            accessibilityRole="button"
-            accessibilityLabel={getAccessibilityLabel(name)}
-            accessibilityState={{ selected: selectedScheme === name }}
-          >
-            <Text style={styles.schemeButtonText}>{name}</Text>
+    <>
+      <Pressable
+        style={styles.dropdown}
+        onPress={() => setOpen(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`Palette type: ${getSchemeDisplayName(selectedScheme)}. Tap to change.`}
+      >
+        <Text style={styles.dropdownText}>{getSchemeDisplayName(selectedScheme)}</Text>
+        <Ionicons name="chevron-down" size={20} color={colorWheelColors.textSecondary} />
+      </Pressable>
+
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setOpen(false)}>
+          <Pressable style={styles.sheet} onPress={() => {}}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.sheetTitle}>Palette type</Text>
+            <ScrollView bounces={false}>
+              {SCHEMES.map((name) => {
+                const on = name === selectedScheme;
+                return (
+                  <Pressable
+                    key={name}
+                    style={styles.sheetRow}
+                    onPress={() => choose(name)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: on }}
+                  >
+                    <View>
+                      <Text style={[styles.sheetRowText, on && styles.sheetRowTextOn]}>
+                        {getSchemeDisplayName(name)}
+                      </Text>
+                      <Text style={styles.sheetRowHint}>{getAccessibilityLabel(name)}</Text>
+                    </View>
+                    {on && <Ionicons name="checkmark" size={22} color={colorWheelColors.text} />}
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
           </Pressable>
-        ))}
-      </View>
-      <View 
-        style={[styles.selectedColorPreview, { backgroundColor: selectedColor }]}
-        accessibilityLabel={`Selected color: ${selectedColor}`}
-      />
-    </View>
+        </Pressable>
+      </Modal>
+    </>
   );
 });
 
-// PropTypes validation for development safety
 SchemeSelector.propTypes = {
   selectedScheme: PropTypes.string.isRequired,
   onSchemeChange: PropTypes.func.isRequired,
-  selectedColor: PropTypes.string.isRequired,
 };
 
 SchemeSelector.displayName = 'SchemeSelector';

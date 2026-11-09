@@ -1,9 +1,12 @@
 // components/FullColorWheel.js
-// Canva-style multi-handle color wheel with Skia + Reanimated.
-// Gestures run as worklets on the UI thread; hex conversion stays on the JS thread,
-// so nothing non-serializable (Set/refs/closures) is captured inside worklets.
+// Canva-style color wheel: a hue/saturation disk, a lightness ring around it, and
+// scheme-linked handles. Skia draws the wheel; gestures run as Reanimated worklets on
+// the UI thread; hex conversion stays on the JS thread so nothing non-serializable
+// (Set/refs/closures) is captured inside a worklet.
 
-import React, { useEffect, useMemo, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import React, {
+  useEffect, useMemo, useRef, useState, forwardRef, useImperativeHandle, useCallback,
+} from 'react';
 import { View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -20,22 +23,39 @@ import { SCHEME_OFFSETS, SCHEME_COUNTS } from '../constants/colorWheelConstants'
 export { SCHEME_OFFSETS, SCHEME_COUNTS };
 
 const MAX_HANDLES = 5;
+const MAIN_HANDLE = 28;
+const SUB_HANDLE = 18;
+const LIGHT_HANDLE = 20;
+const DISK_CENTER = '#8C8C8C'; // neutral gray: saturation 0 at the center of the disk
 
-// JS helper for worklet callbacks: the ref itself must never cross into a worklet,
-// so the worklet calls this bound function via runOnJS instead.
+// The ref itself must never cross into a worklet; worklets call this bound JS function via runOnJS.
 const addFreedIndexCallback = (freedRef) => (idx) => {
   freedRef.current.add(idx);
 };
 
-// Pure functions - safe to call from worklets (no closures/captures)
+// Pure helpers, safe inside worklets (no captures)
 const clamp01 = (v) => {
   'worklet';
   return Math.max(0, Math.min(1, v));
 };
-
+const clamp100 = (v) => {
+  'worklet';
+  return Math.max(0, Math.min(100, v));
+};
 const mod = (a, n) => {
   'worklet';
   return ((a % n) + n) % n;
+};
+
+const markerBase = {
+  position: 'absolute',
+  borderRadius: 999,
+  borderColor: '#FFFFFF',
+  backgroundColor: 'transparent',
+  shadowColor: '#000',
+  shadowOpacity: 0.35,
+  shadowRadius: 3,
+  shadowOffset: { width: 0, height: 1 },
 };
 
 const FullColorWheel = forwardRef(function FullColorWheel({
@@ -45,13 +65,18 @@ const FullColorWheel = forwardRef(function FullColorWheel({
   initialHex = '#FF6B6B',
   linked = true,
   freedIndices = [],
-  onToggleLinked,
+  onToggleLinked, // accepted for API compatibility; linking is toggled by the parent
   onColorsChange,
   onHexChange,
   onActiveHandleChange,
 }, ref) {
+  // ===== Geometry =====
   const radius = size / 2;
   const cx = radius, cy = radius;
+  const ringWidth = Math.max(10, radius * 0.075);   // lightness ring thickness
+  const gap = Math.max(6, radius * 0.045);          // white spacer between ring and disk
+  const diskRadius = radius - ringWidth - gap;      // hue/saturation disk
+  const ringRadius = radius - ringWidth / 2;        // centerline of the lightness ring
 
   const followActive = useSharedValue(selectedFollowsActive ? 1 : 0);
   useEffect(() => {
@@ -70,15 +95,21 @@ const FullColorWheel = forwardRef(function FullColorWheel({
   const handleSats   = [useSharedValue(1), useSharedValue(1), useSharedValue(1), useSharedValue(1), useSharedValue(1)];
   const handleLights = [useSharedValue(50), useSharedValue(50), useSharedValue(50), useSharedValue(50), useSharedValue(50)];
   const activeIdx = useSharedValue(0);
+  const dragMode = useSharedValue(0); // 0 = moving a handle on the disk, 1 = sliding the lightness ring
   const freed = useRef(new Set(freedIndices || []));                    // JS-only
   const freedIdxSV = useSharedValue((freedIndices || []).slice());      // UI-thread safe (array)
 
   const addFreedIndex = useCallback(addFreedIndexCallback(freed), []);
 
-  // Throttling for palette emission from the UI thread
   const lastEmitTime = useSharedValue(0);
 
-  // Precomputed hue sweep
+  // Ring color follows the active handle's hue/saturation at mid lightness (JS state: it is a Skia prop)
+  const [ringHex, setRingHex] = useState(() => {
+    const { h = 0, s = 100 } = hexToHsl(initialHex) || {};
+    return hslToHex(h, s, 50);
+  });
+
+  // Hue sweep, red at the top, clockwise
   const hueSweepColors = useMemo(() => {
     const arr = [];
     for (let i = 0; i <= 360; i += 10) arr.push(hslToHex(i, 100, 50));
@@ -103,78 +134,69 @@ const FullColorWheel = forwardRef(function FullColorWheel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialHex]);
 
-  // Reset freed when scheme changes
+  // Reset freed handles when the scheme changes
   useEffect(() => {
     freed.current.clear();
     freedIdxSV.value = [];
     const { h = 0, s = 100, l = 50 } = hexToHsl(initialHex) || {};
     const s01 = s / 100;
-
-    // Initialize handles based on scheme
     for (let i = 1; i < count; i++) {
-      const offset = offsets[i] ?? 0;
-      handleAngles[i].value = mod(h + offset, 360);
+      handleAngles[i].value = mod(h + (offsets[i] ?? 0), 360);
       handleSats[i].value = s01;
       handleLights[i].value = l;
     }
-
     emitPaletteJS();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scheme, count, offsets, initialHex]);
 
-  // Sync prop → state
+  // Sync prop -> state
   useEffect(() => {
     freed.current = new Set(freedIndices || []);
     freedIdxSV.value = (freedIndices || []).slice();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [freedIndices]);
 
-  // When linking toggles, re-sync dependents to base
+  // When linking turns on, re-sync dependents to the base handle
   useEffect(() => {
     if (!linked) return;
     const base = handleAngles[0].value;
     const sat0 = handleSats[0].value;
     const light0 = handleLights[0].value;
 
-    // Special handling for different schemes (Canva-style)
     if (scheme === 'complementary') {
       handleAngles[1].value = mod(base + 180, 360);
       handleSats[1].value = sat0;
       handleLights[1].value = light0;
     } else if (scheme === 'analogous' || scheme === 'triadic' || scheme === 'tetradic' || scheme === 'split-complementary') {
-      // Multi-handle schemes: All handles move together maintaining relative spacing
       const schemeOffsets = SCHEME_OFFSETS[scheme] || [0];
       const handleCount = SCHEME_COUNTS[scheme] || 1;
-
       for (let i = 0; i < handleCount; i++) {
-        const offset = schemeOffsets[i] || 0;
-        handleAngles[i].value = mod(base + offset, 360);
+        handleAngles[i].value = mod(base + (schemeOffsets[i] || 0), 360);
         handleSats[i].value = sat0;
         handleLights[i].value = light0;
       }
     } else {
-      // Handle other schemes
       for (let i = 1; i < count; i++) {
         if (!freed.current.has(i)) {
-          const offset = offsets[i] ?? 0;
-          handleAngles[i].value = mod(base + offset, 360);
+          handleAngles[i].value = mod(base + (offsets[i] ?? 0), 360);
           handleSats[i].value = sat0;
           handleLights[i].value = light0;
         }
       }
     }
-
     emitPaletteJS();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linked, scheme, count, offsets]);
 
-  // ===== Palette emission: compute hexes on JS (avoid calling hslToHex in a worklet) =====
-  const jsEmitPalette = (triples, activePref, phase = 'change') => {
+  // ===== Palette emission: hex math happens on JS =====
+  const jsEmitPalette = (triples, activePref, phase = 'change', activeIndex = 0) => {
     try {
       const out = triples.map(([ang, s01, light]) => hslToHex(ang, s01 * 100, light));
+      const ringSource = triples[Math.max(0, Math.min(activeIndex, triples.length - 1))];
+      if (ringSource) setRingHex(hslToHex(ringSource[0], ringSource[1] * 100, 50));
       if (typeof onColorsChange === 'function') onColorsChange(out, phase);
       if (typeof onHexChange === 'function') {
-        const idx = (selectedFollowsActive ? Math.max(0, Math.min(activePref, out.length - 1)) : 0);
+        const idx = selectedFollowsActive ? Math.max(0, Math.min(activePref, out.length - 1)) : 0;
         onHexChange(out[idx]);
       }
     } catch (error) {
@@ -189,22 +211,19 @@ const FullColorWheel = forwardRef(function FullColorWheel({
       for (let i = 0; i < c; i++) {
         triples.push([handleAngles[i].value, handleSats[i].value, handleLights[i].value]);
       }
-      const activePref = selectedFollowsActive ? Math.max(0, Math.min(activeIdx.value, c - 1)) : 0;
-      jsEmitPalette(triples, activePref, phase);
+      const active = Math.max(0, Math.min(activeIdx.value, c - 1));
+      const activePref = selectedFollowsActive ? active : 0;
+      jsEmitPalette(triples, activePref, phase, active);
     } catch (error) {
       console.warn('FullColorWheel: emitPaletteJS failed:', error.message);
     }
   };
 
-  const emitPaletteWorklet = (phase = 'change') => {
+  const emitPaletteWorklet = (phase = 'change', force = false) => {
     'worklet';
-    // Throttle to ~60fps so drags don't flood the JS thread
+    // Throttle to ~60fps so drags don't flood the JS thread; gesture end always goes through
     const now = Date.now();
-    const THROTTLE_MS = 16;
-
-    if (now - lastEmitTime.value < THROTTLE_MS) {
-      return;
-    }
+    if (!force && now - lastEmitTime.value < 16) return;
     lastEmitTime.value = now;
 
     const c = schemeCount.value;
@@ -212,33 +231,25 @@ const FullColorWheel = forwardRef(function FullColorWheel({
     for (let i = 0; i < c; i++) {
       triples.push([handleAngles[i].value, handleSats[i].value, handleLights[i].value]);
     }
-    const idxPref = followActive.value ? Math.max(0, Math.min(activeIdx.value, c - 1)) : 0;
-    runOnJS(jsEmitPalette)(triples, idxPref, phase);
+    const active = Math.max(0, Math.min(activeIdx.value, c - 1));
+    const idxPref = followActive.value ? active : 0;
+    runOnJS(jsEmitPalette)(triples, idxPref, phase, active);
   };
 
-  // ===== Marker visuals (Canva look) =====
+  // ===== Marker visuals =====
   // Called unconditionally in fixed order (m0..m4), so hook order is stable.
   const markerStyle = (idx) => useAnimatedStyle(() => {
     'worklet';
-    const rad = ((handleAngles[idx].value - 90) * Math.PI) / 180;
-    const r = radius * clamp01(handleSats[idx].value);
-    const x = cx - 12 + Math.cos(rad) * r;
-    const y = cy - 12 + Math.sin(rad) * r;
     const isMain = idx === 0;
+    const d = isMain ? MAIN_HANDLE : SUB_HANDLE;
+    const rad = ((handleAngles[idx].value - 90) * Math.PI) / 180;
+    const r = diskRadius * clamp01(handleSats[idx].value);
     return {
-      position: 'absolute',
-      left: x,
-      top: y,
-      width: isMain ? 24 : 16,
-      height: isMain ? 24 : 16,
-      borderRadius: 999,
-      backgroundColor: '#FFFFFF',
-      borderWidth: 3,
-      borderColor: '#E0E0E0',
-      shadowColor: '#000',
-      shadowOpacity: 0.15,
-      shadowRadius: 3,
-      shadowOffset: { width: 0, height: 1 },
+      left: cx - d / 2 + Math.cos(rad) * r,
+      top: cy - d / 2 + Math.sin(rad) * r,
+      width: d,
+      height: d,
+      borderWidth: isMain ? 4 : 2.5,
     };
   });
   const m0 = markerStyle(0);
@@ -247,7 +258,18 @@ const FullColorWheel = forwardRef(function FullColorWheel({
   const m3 = markerStyle(3);
   const m4 = markerStyle(4);
 
-  // Choose nearest handle
+  // Lightness handle sits on the right half of the ring: top = 0%, right = 50%, bottom = 100%
+  const lightMarker = useAnimatedStyle(() => {
+    'worklet';
+    const i = Math.max(0, Math.min(activeIdx.value, MAX_HANDLES - 1));
+    const theta = (clamp100(handleLights[i].value) / 100) * Math.PI;
+    return {
+      left: cx - LIGHT_HANDLE / 2 + Math.sin(theta) * ringRadius,
+      top: cy - LIGHT_HANDLE / 2 - Math.cos(theta) * ringRadius,
+    };
+  });
+
+  // ===== Gesture helpers (worklets) =====
   const nearestHandle = (x, y) => {
     'worklet';
     const rawCount = SCHEME_COUNTS[scheme] || 1;
@@ -255,28 +277,64 @@ const FullColorWheel = forwardRef(function FullColorWheel({
     let best = 0, bestDist = 1e9;
     for (let i = 0; i < c; i++) {
       const ang = ((handleAngles[i].value - 90) * Math.PI) / 180;
-      const r = radius * clamp01(handleSats[i].value);
-      const hx = cx + Math.cos(ang) * r;
-      const hy = cy + Math.sin(ang) * r;
-      const d = Math.hypot(x - hx, y - hy);
+      const r = diskRadius * clamp01(handleSats[i].value);
+      const d = Math.hypot(x - (cx + Math.cos(ang) * r), y - (cy + Math.sin(ang) * r));
       if (d < bestDist) { bestDist = d; best = i; }
     }
     return best;
+  };
+
+  const isOnRing = (x, y) => {
+    'worklet';
+    return Math.hypot(x - cx, y - cy) > diskRadius + gap / 2;
+  };
+
+  // Lightness from a touch angle: clockwise from the top; the left half mirrors the right
+  const lightnessAt = (x, y) => {
+    'worklet';
+    const deg = mod((Math.atan2(y - cy, x - cx) * 180) / Math.PI + 90, 360);
+    const t = deg <= 180 ? deg / 180 : (360 - deg) / 180;
+    return t * 100;
+  };
+
+  const applyLightness = (light) => {
+    'worklet';
+    const idx = activeIdx.value;
+    handleLights[idx].value = light;
+    if (linked) {
+      const c = schemeCount.value;
+      const freedArray = Array.isArray(freedIdxSV.value) ? freedIdxSV.value : [];
+      for (let k = 0; k < c; k++) {
+        if (k !== idx && freedArray.indexOf(k) === -1) handleLights[k].value = light;
+      }
+    }
   };
 
   const hasActiveHandleCallback = typeof onActiveHandleChange === 'function';
 
   const tap = Gesture.Tap().onStart((e) => {
     'worklet';
+    if (isOnRing(e.x, e.y)) {
+      applyLightness(lightnessAt(e.x, e.y));
+      emitPaletteWorklet('end', true);
+      return;
+    }
     const idx = nearestHandle(e.x, e.y);
     activeIdx.value = idx;
     if (hasActiveHandleCallback) runOnJS(onActiveHandleChange)(idx);
-    emitPaletteWorklet();
+    emitPaletteWorklet('end', true);
   });
 
   const pan = Gesture.Pan()
     .onBegin((e) => {
       'worklet';
+      if (isOnRing(e.x, e.y)) {
+        dragMode.value = 1;
+        applyLightness(lightnessAt(e.x, e.y));
+        emitPaletteWorklet();
+        return;
+      }
+      dragMode.value = 0;
       const idx = nearestHandle(e.x, e.y);
       activeIdx.value = idx;
       if (hasActiveHandleCallback) runOnJS(onActiveHandleChange)(idx);
@@ -284,47 +342,48 @@ const FullColorWheel = forwardRef(function FullColorWheel({
     })
     .onChange((e) => {
       'worklet';
+      if (dragMode.value === 1) {
+        applyLightness(lightnessAt(e.x, e.y));
+        emitPaletteWorklet();
+        return;
+      }
+
       const idx = activeIdx.value;
       const ang = (Math.atan2(e.y - cy, e.x - cx) * 180) / Math.PI;
       const deg = mod(ang + 450, 360);
-      const sat = clamp01(Math.hypot(e.x - cx, e.y - cy) / radius);
+      const sat = clamp01(Math.hypot(e.x - cx, e.y - cy) / diskRadius);
 
-      // Update the dragged handle
       handleAngles[idx].value = deg;
       handleSats[idx].value = sat;
 
-      // Canva-style synchronized movement for different schemes
       if (linked && scheme === 'complementary') {
-        const complementaryIdx = idx === 0 ? 1 : 0;
-        handleAngles[complementaryIdx].value = mod(deg + 180, 360);
-        handleSats[complementaryIdx].value = sat;
+        const other = idx === 0 ? 1 : 0;
+        handleAngles[other].value = mod(deg + 180, 360);
+        handleSats[other].value = sat;
       } else if (linked && (scheme === 'analogous' || scheme === 'triadic' || scheme === 'tetradic' || scheme === 'split-complementary')) {
-        // Synchronized movement for multi-handle schemes
+        // Multi-handle schemes: all handles move together, keeping their relative spacing
         const schemeOffsets = SCHEME_OFFSETS[scheme] || [0];
         const rawHandleCount = SCHEME_COUNTS[scheme] || 1;
         const handleCount = rawHandleCount > MAX_HANDLES ? MAX_HANDLES : rawHandleCount;
-
+        const baseDeg = mod(deg - (schemeOffsets[idx] || 0), 360);
         for (let k = 0; k < handleCount; k++) {
           if (k !== idx) {
-            const offset = schemeOffsets[k] || 0;
-            handleAngles[k].value = mod(deg + offset, 360);
+            handleAngles[k].value = mod(baseDeg + (schemeOffsets[k] || 0), 360);
             handleSats[k].value = sat;
           }
         }
       } else if (linked && idx === 0) {
-        // Handle other schemes (non-complementary)
         const c = schemeCount.value;
+        const freedArray = Array.isArray(freedIdxSV.value) ? freedIdxSV.value : [];
+        const schemeOffsets = SCHEME_OFFSETS[scheme] || [0];
         for (let k = 1; k < c; k++) {
-          const freedArray = Array.isArray(freedIdxSV.value) ? freedIdxSV.value : [];
           if (freedArray.indexOf(k) === -1) {
-            const schemeOffsets = SCHEME_OFFSETS[scheme] || [0];
-            const offset = k < schemeOffsets.length ? schemeOffsets[k] : 0;
-            handleAngles[k].value = mod(deg + offset, 360);
+            handleAngles[k].value = mod(deg + (k < schemeOffsets.length ? schemeOffsets[k] : 0), 360);
             handleSats[k].value = sat;
           }
         }
       } else if (linked && idx !== 0) {
-        // Mark non-primary handles as freed when dragged independently
+        // A dependent handle dragged on its own becomes free
         const currentFreed = Array.isArray(freedIdxSV.value) ? freedIdxSV.value : [];
         if (currentFreed.indexOf(idx) === -1) {
           freedIdxSV.value = currentFreed.concat([idx]);
@@ -334,60 +393,59 @@ const FullColorWheel = forwardRef(function FullColorWheel({
       }
 
       emitPaletteWorklet();
+    })
+    .onFinalize(() => {
+      'worklet';
+      emitPaletteWorklet('end', true);
     });
 
   const combinedGesture = Gesture.Simultaneous(tap, pan);
 
-  // Public setters live on JS: safe to consult JS Set + props
+  // ===== Public setters (JS): may consult the JS Set and props =====
   const setHandleHSL = (idx, h, s, l) => {
     const c = Math.min(SCHEME_COUNTS[scheme] || 1, MAX_HANDLES);
     const i = Math.max(0, Math.min(idx, c - 1));
+    const s01 = clamp01(s / 100);
+    const light = clamp100(l);
     handleAngles[i].value = mod(h, 360);
-    handleSats[i].value = clamp01(s / 100);
-    handleLights[i].value = Math.max(0, Math.min(100, l));
+    handleSats[i].value = s01;
+    handleLights[i].value = light;
 
     if (linked) {
-      // Canva-style synchronization for different schemes
       if (scheme === 'complementary') {
-        const complementaryIdx = i === 0 ? 1 : 0;
-        handleAngles[complementaryIdx].value = mod(h + 180, 360);
-        handleSats[complementaryIdx].value = clamp01(s / 100);
-        handleLights[complementaryIdx].value = Math.max(0, Math.min(100, l));
+        const other = i === 0 ? 1 : 0;
+        handleAngles[other].value = mod(h + 180, 360);
+        handleSats[other].value = s01;
+        handleLights[other].value = light;
       } else if (scheme === 'analogous' || scheme === 'triadic' || scheme === 'tetradic' || scheme === 'split-complementary') {
-        // Multi-handle schemes: All handles move together maintaining relative spacing
         const schemeOffsets = SCHEME_OFFSETS[scheme] || [0];
-        const handleCount = SCHEME_COUNTS[scheme] || 1;
-
+        const handleCount = Math.min(SCHEME_COUNTS[scheme] || 1, MAX_HANDLES);
+        const baseDeg = mod(h - (schemeOffsets[i] || 0), 360);
         for (let k = 0; k < handleCount; k++) {
           if (k !== i) {
-            const offset = schemeOffsets[k] || 0;
-            handleAngles[k].value = mod(h + offset, 360);
-            handleSats[k].value = clamp01(s / 100);
-            handleLights[k].value = Math.max(0, Math.min(100, l));
+            handleAngles[k].value = mod(baseDeg + (schemeOffsets[k] || 0), 360);
+            handleSats[k].value = s01;
+            handleLights[k].value = light;
           }
         }
       } else if (i === 0) {
-        // Handle other schemes when primary handle changes
         for (let k = 1; k < c; k++) {
           if (!freed.current.has(k)) {
-            const offset = offsets[k] ?? 0;
-            handleAngles[k].value = mod(h + offset, 360);
-            handleSats[k].value = clamp01(s / 100);
-            handleLights[k].value = Math.max(0, Math.min(100, l));
+            handleAngles[k].value = mod(h + (offsets[k] ?? 0), 360);
+            handleSats[k].value = s01;
+            handleLights[k].value = light;
           }
         }
       }
     }
-
-    emitPaletteJS();
+    emitPaletteJS('end');
   };
 
   useImperativeHandle(ref, () => ({
     setActiveHandleHSL: (h, s, l) => {
       try {
         const c = Math.min(SCHEME_COUNTS[scheme] || 1, MAX_HANDLES);
-        const idx = Math.min(Math.max(activeIdx.value, 0), c - 1);
-        setHandleHSL(idx, h, s, l);
+        setHandleHSL(Math.min(Math.max(activeIdx.value, 0), c - 1), h, s, l);
       } catch (error) {
         console.warn('FullColorWheel: setActiveHandleHSL failed:', error.message);
       }
@@ -396,41 +454,57 @@ const FullColorWheel = forwardRef(function FullColorWheel({
       try { setHandleHSL(i, h, s, l); } catch (error) {
         console.warn('FullColorWheel: setHandleHSL failed:', error.message);
       }
-    }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [scheme, linked, setHandleHSL, activeIdx]);
 
-  // ===== Render: Canva look =====
-  const innerSpacer = Math.max(6, radius * 0.06); // white spacer ring
-  const outerRim = Math.max(10, radius * 0.10);   // glossy rim thickness
-
+  // ===== Render =====
+  const center = vec(cx, cy);
   return (
     <GestureDetector gesture={combinedGesture}>
       <View style={{ width: size, height: size }}>
         <Canvas style={{ width: size, height: size }}>
-          {/* Outer gradient rim (dark teal -> cyan) */}
-          <Circle cx={cx} cy={cy} r={radius} color="#1A3A3F" />
-
-          {/* White spacer ring */}
-          <Circle cx={cx} cy={cy} r={radius - outerRim} color="#F8F8F8" />
-
-          {/* Hue disk */}
-          <Circle cx={cx} cy={cy} r={radius - outerRim - innerSpacer}>
-            <SweepGradient c={vec(cx, cy)} colors={hueSweepColors} />
+          {/* Lightness ring: black at the top, the active color at the sides, white at the bottom */}
+          <Circle cx={cx} cy={cy} r={ringRadius} style="stroke" strokeWidth={ringWidth}>
+            <SweepGradient
+              c={center}
+              start={-90}
+              end={270}
+              colors={['#000000', ringHex, '#FFFFFF', ringHex, '#000000']}
+              positions={[0, 0.25, 0.5, 0.75, 1]}
+            />
           </Circle>
 
-          {/* Desaturation toward center */}
-          <Circle cx={cx} cy={cy} r={radius - outerRim - innerSpacer}>
-            <RadialGradient c={vec(cx, cy)} r={radius - outerRim - innerSpacer} colors={['#FFFFFFFF', '#FFFFFF00']} />
+          {/* White spacer */}
+          <Circle cx={cx} cy={cy} r={radius - ringWidth} color="#FFFFFF" />
+
+          {/* Hue disk, red at 12 o'clock, clockwise - matches the handle math (angle - 90) */}
+          <Circle cx={cx} cy={cy} r={diskRadius}>
+            <SweepGradient c={center} start={-90} end={270} colors={hueSweepColors} />
+          </Circle>
+
+          {/* Saturation falls to neutral gray at the center */}
+          <Circle cx={cx} cy={cy} r={diskRadius}>
+            <RadialGradient c={center} r={diskRadius} colors={[DISK_CENTER + 'FF', DISK_CENTER + '00']} />
           </Circle>
         </Canvas>
 
-        {/* Handles */}
-        <Animated.View pointerEvents="none" style={[m0, { zIndex: 4 }]} />
-        <Animated.View pointerEvents="none" style={[m1, { zIndex: 3, opacity: count >= 2 ? 1 : 0 }]} />
-        <Animated.View pointerEvents="none" style={[m2, { zIndex: 2, opacity: count >= 3 ? 1 : 0 }]} />
-        <Animated.View pointerEvents="none" style={[m3, { zIndex: 1, opacity: count >= 4 ? 1 : 0 }]} />
-        <Animated.View pointerEvents="none" style={[m4, { zIndex: 0, opacity: count >= 5 ? 1 : 0 }]} />
+        {/* Scheme handles (hollow rings, main one larger) */}
+        <Animated.View pointerEvents="none" style={[markerBase, m0, { zIndex: 5 }]} />
+        <Animated.View pointerEvents="none" style={[markerBase, m1, { zIndex: 4, opacity: count >= 2 ? 1 : 0 }]} />
+        <Animated.View pointerEvents="none" style={[markerBase, m2, { zIndex: 3, opacity: count >= 3 ? 1 : 0 }]} />
+        <Animated.View pointerEvents="none" style={[markerBase, m3, { zIndex: 2, opacity: count >= 4 ? 1 : 0 }]} />
+        <Animated.View pointerEvents="none" style={[markerBase, m4, { zIndex: 1, opacity: count >= 5 ? 1 : 0 }]} />
+
+        {/* Lightness handle on the ring */}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            markerBase,
+            lightMarker,
+            { width: LIGHT_HANDLE, height: LIGHT_HANDLE, borderWidth: 2, borderColor: '#E6E6E6', backgroundColor: '#FFFFFF', zIndex: 6 },
+          ]}
+        />
       </View>
     </GestureDetector>
   );
