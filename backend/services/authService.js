@@ -114,28 +114,56 @@ class AuthService {
    * Demo login
    */
   static async demoLogin() {
-    const demoUser = {
-      id: 'demo-user',
-      email: 'demo@fashioncolorwheel.com',
-      username: 'demo_user',
-      location: 'United States',
-      birthday_month: 'January',
-      birthday_day: 1,
-      birthday_year: 1990,
-      gender: 'Prefer not to say',
-      created_at: new Date().toISOString(),
-      is_active: true,
-    };
+    const DEMO_EMAIL = 'demo@fashioncolorwheel.com';
+    const DEMO_FIELDS =
+      'id, email, username, location, birthday_month, birthday_day, birthday_year, gender, created_at, is_active';
 
-    // Generate token for demo user (demo doesn't create real session)
-    const tokenData = generateSecureToken(
-      { userId: demoUser.id, email: demoUser.email },
-      { expiresIn: '1h' } // Demo tokens expire quickly
-    );
+    // The demo account is a real users row with a real session, so demo tokens
+    // pass the same session validation as any other login.
+    let result = await query(`SELECT ${DEMO_FIELDS} FROM users WHERE email = ?`, [DEMO_EMAIL]);
+
+    if (result.rows.length === 0) {
+      // Random password: the demo account is only reachable through this endpoint
+      const unusablePassword = await bcrypt.hash(uuidv4() + uuidv4(), 12);
+      const username = `demo_user`;
+      try {
+        await query(
+          `INSERT INTO users (id, email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [uuidv4(), DEMO_EMAIL, username, unusablePassword, 'United States', 'January', 1, 1990, 'Prefer not to say']
+        );
+      } catch (err) {
+        // Duplicate email means we lost a race with a concurrent demo login:
+        // fine, the re-select below picks up the winner's row. A duplicate
+        // username means someone registered "demo_user"; retry with a suffix.
+        if (err?.code !== 'ER_DUP_ENTRY') throw err;
+        const taken = await query('SELECT id FROM users WHERE email = ?', [DEMO_EMAIL]);
+        if (taken.rows.length === 0) {
+          await query(
+            `INSERT INTO users (id, email, username, password_hash, location, birthday_month, birthday_day, birthday_year, gender, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+            [uuidv4(), DEMO_EMAIL, `demo_user_${uuidv4().slice(0, 8)}`, unusablePassword, 'United States', 'January', 1, 1990, 'Prefer not to say']
+          );
+        }
+      }
+      result = await query(`SELECT ${DEMO_FIELDS} FROM users WHERE email = ?`, [DEMO_EMAIL]);
+    }
+
+    if (result.rows.length === 0) {
+      throw new Error(ERROR_MESSAGES.USER_NOT_FOUND);
+    }
+
+    const user = result.rows[0];
+    if (!user.is_active) {
+      throw new Error(ERROR_MESSAGES.UNAUTHORIZED_ACCESS);
+    }
+
+    const tokenData = await this.generateTokenWithSession(user, 'demo-login', 'demo-login');
 
     return {
-      user: this.formatUserResponse(demoUser),
-      token: tokenData.token,
+      user: this.formatUserResponse(user),
+      token: tokenData.accessToken,
+      refreshToken: tokenData.refreshToken,
       expiresAt: tokenData.expiresAt,
       message: SUCCESS_MESSAGES.LOGIN_SUCCESS,
     };
