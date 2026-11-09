@@ -230,6 +230,11 @@ async function initializeTables() {
         email VARCHAR(255) NOT NULL,
         username VARCHAR(50) NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
+        first_name VARCHAR(50),
+        last_name VARCHAR(50),
+        age INT,
+        profile_image_url VARCHAR(500),
+        preferences JSON,
         location VARCHAR(100),
         birthday_month VARCHAR(20),
         birthday_day INT,
@@ -468,6 +473,29 @@ async function initializeTables() {
         INDEX idx_user_follows_following_id (following_id)
       ) ENGINE=InnoDB
     `);
+
+    // CREATE TABLE IF NOT EXISTS never alters a table that already exists, so
+    // add any columns the application queries that are missing from older databases.
+    const ensure = async (table, columns) => {
+      const { rows } = await query(
+        'SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
+        [table]
+      );
+      const existing = new Set(rows.map(r => r.name));
+      for (const [name, ddl] of columns) {
+        if (!existing.has(name)) {
+          await query(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+          console.log(`✅ Added missing column ${table}.${name}`);
+        }
+      }
+    };
+    await ensure('users', [
+      ['first_name', 'first_name VARCHAR(50) NULL'],
+      ['last_name', 'last_name VARCHAR(50) NULL'],
+      ['age', 'age INT NULL'],
+      ['profile_image_url', 'profile_image_url VARCHAR(500) NULL'],
+      ['preferences', 'preferences JSON NULL'],
+    ]);
 
     console.log('✅ Database tables initialized successfully (all Railway tables included)');
   } catch (error) {

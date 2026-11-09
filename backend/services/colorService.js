@@ -270,7 +270,7 @@ class ColorService {
       [matchId, userId]
     );
 
-    if (result.affectedRows === 0) {
+    if (result.rows.affectedRows === 0) {
       throw new Error(ERROR_MESSAGES.RESOURCE_NOT_FOUND);
     }
 

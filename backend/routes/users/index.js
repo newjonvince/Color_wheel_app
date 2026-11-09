@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const bcrypt = require('bcryptjs');
-const { query } = require('../../config/database');
+const { query, inTransaction } = require('../../config/database');
 const { authenticateToken } = require('../../middleware/auth-enhanced');
 const { 
   success, 
@@ -178,26 +178,20 @@ router.put('/preferences', [
 router.delete('/account', authenticateToken, asyncHandler(async (req, res) => {
   const userId = req.user.userId;
   
-  // Start transaction for cascading deletes
-  await query('START TRANSACTION');
-  
-  try {
-    // Delete user's data in order (respecting foreign key constraints)
-    await query('DELETE FROM board_items WHERE board_id IN (SELECT id FROM boards WHERE user_id = ?)', [userId]);
-    await query('DELETE FROM boards WHERE user_id = ?', [userId]);
-    await query('DELETE FROM color_matches WHERE user_id = ?', [userId]);
-    await query('DELETE FROM community_likes WHERE user_id = ?', [userId]);
-    await query('DELETE FROM community_follows WHERE follower_user_id = ? OR followed_user_id = ?', [userId, userId]);
-    await query('DELETE FROM community_posts WHERE user_id = ?', [userId]);
-    await query('DELETE FROM users WHERE id = ?', [userId]);
-    
-    await query('COMMIT');
-    
-    success(res, null, 'Account deleted successfully');
-  } catch (error) {
-    await query('ROLLBACK');
-    throw error;
-  }
+  // All deletes run on one dedicated connection inside a real transaction;
+  // query() draws a fresh pool connection per call, so transaction statements
+  // issued through it would not share a session.
+  await inTransaction(async (conn) => {
+    await conn.execute('DELETE FROM board_items WHERE board_id IN (SELECT id FROM boards WHERE user_id = ?)', [userId]);
+    await conn.execute('DELETE FROM boards WHERE user_id = ?', [userId]);
+    await conn.execute('DELETE FROM color_matches WHERE user_id = ?', [userId]);
+    await conn.execute('DELETE FROM post_likes WHERE user_id = ?', [userId]);
+    await conn.execute('DELETE FROM user_follows WHERE follower_id = ? OR following_id = ?', [userId, userId]);
+    await conn.execute('DELETE FROM posts WHERE user_id = ?', [userId]);
+    await conn.execute('DELETE FROM users WHERE id = ?', [userId]);
+  });
+
+  success(res, null, 'Account deleted successfully');
 }));
 
 // Request data export
@@ -208,7 +202,7 @@ router.post('/export-data', authenticateToken, asyncHandler(async (req, res) => 
   const userData = await query('SELECT * FROM users WHERE id = ?', [userId]);
   const colorMatches = await query('SELECT * FROM color_matches WHERE user_id = ?', [userId]);
   const boards = await query('SELECT * FROM boards WHERE user_id = ?', [userId]);
-  const posts = await query('SELECT * FROM community_posts WHERE user_id = ?', [userId]);
+  const posts = await query('SELECT * FROM posts WHERE user_id = ?', [userId]);
   
   if (userData.rows.length === 0) {
     return notFound(res, null, 'User not found');
@@ -242,10 +236,10 @@ router.get('/stats', authenticateToken, asyncHandler(async (req, res) => {
     `SELECT 
       (SELECT COUNT(*) FROM color_matches WHERE user_id = ?) as color_matches_count,
       (SELECT COUNT(*) FROM boards WHERE user_id = ?) as boards_count,
-      (SELECT COUNT(*) FROM community_posts WHERE user_id = ?) as posts_count,
-      (SELECT COUNT(*) FROM community_likes WHERE post_id IN (SELECT id FROM community_posts WHERE user_id = ?)) as likes_received,
-      (SELECT COUNT(*) FROM community_follows WHERE followed_user_id = ?) as followers_count,
-      (SELECT COUNT(*) FROM community_follows WHERE follower_user_id = ?) as following_count`,
+      (SELECT COUNT(*) FROM posts WHERE user_id = ?) as posts_count,
+      (SELECT COUNT(*) FROM post_likes WHERE post_id IN (SELECT id FROM posts WHERE user_id = ?)) as likes_received,
+      (SELECT COUNT(*) FROM user_follows WHERE following_id = ?) as followers_count,
+      (SELECT COUNT(*) FROM user_follows WHERE follower_id = ?) as following_count`,
     [userId, userId, userId, userId, userId, userId]
   );
   

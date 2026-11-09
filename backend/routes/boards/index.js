@@ -124,8 +124,8 @@ router.delete('/:boardId', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
 
     const result = await query('DELETE FROM boards WHERE id = ? AND user_id = ?', [boardId, userId]);
-    
-    if (result.affectedRows === 0) {
+
+    if (result.rows.affectedRows === 0) {
       return res.status(404).json({ success: false, message: 'Board not found' });
     }
 

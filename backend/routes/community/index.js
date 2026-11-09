@@ -24,30 +24,31 @@ router.get('/posts/community', optionalAuth, communityLimiter, async (req, res) 
     const limit = 20;
     
     let queryText = `
-      SELECT 
+      SELECT
         cp.*,
         u.username,
         u.profile_image_url,
-        (SELECT COUNT(*) FROM community_likes cl WHERE cl.post_id = cp.id) as like_count,
-        ${req.user ? `(SELECT COUNT(*) FROM community_likes cl WHERE cl.post_id = cp.id AND cl.user_id = ?) as user_liked,` : '0 as user_liked,'}
-        ${req.user ? `(SELECT COUNT(*) FROM community_follows cf WHERE cf.followed_user_id = cp.user_id AND cf.follower_user_id = ?) as is_following` : '0 as is_following'}
-      FROM community_posts cp
+        (SELECT COUNT(*) FROM post_likes cl WHERE cl.post_id = cp.id) as like_count,
+        ${req.user ? `(SELECT COUNT(*) FROM post_likes cl WHERE cl.post_id = cp.id AND cl.user_id = ?) as user_liked,` : '0 as user_liked,'}
+        ${req.user ? `(SELECT COUNT(*) FROM user_follows cf WHERE cf.following_id = cp.user_id AND cf.follower_id = ?) as is_following` : '0 as is_following'}
+      FROM posts cp
       JOIN users u ON cp.user_id = u.id
-      WHERE cp.is_public = true
+      WHERE cp.privacy = 'public'
     `;
-    
+
     const queryParams = [];
     if (req.user) {
       queryParams.push(req.user.userId, req.user.userId);
     }
-    
+
     if (cursor) {
       queryText += ` AND cp.created_at < ?`;
       queryParams.push(cursor);
     }
-    
-    queryText += ` ORDER BY cp.created_at DESC LIMIT ?`;
-    queryParams.push(limit + 1);
+
+    // LIMIT is inlined: it's a server-side constant, and mysql2's execute()
+    // can't bind LIMIT placeholders on MySQL >= 8.0.22
+    queryText += ` ORDER BY cp.created_at DESC LIMIT ${limit + 1}`;
     
     const result = await query(queryText, queryParams);
     const posts = result.rows || result;
@@ -89,19 +90,19 @@ router.post('/posts/:postId/like', authenticateToken, async (req, res) => {
     
     // Check if already liked
     const existingLike = await query(
-      'SELECT id FROM community_likes WHERE post_id = ? AND user_id = ?',
+      'SELECT id FROM post_likes WHERE post_id = ? AND user_id = ?',
       [postId, userId]
     );
-    
+
     if (existingLike.rows && existingLike.rows.length > 0) {
       return res.status(409).json({
         success: false,
         message: 'Post already liked'
       });
     }
-    
+
     await query(
-      'INSERT INTO community_likes (post_id, user_id) VALUES (?, ?)',
+      'INSERT INTO post_likes (post_id, user_id) VALUES (?, ?)',
       [postId, userId]
     );
     
@@ -126,11 +127,11 @@ router.delete('/posts/:postId/like', authenticateToken, async (req, res) => {
     const userId = req.user.userId;
     
     const result = await query(
-      'DELETE FROM community_likes WHERE post_id = ? AND user_id = ?',
+      'DELETE FROM post_likes WHERE post_id = ? AND user_id = ?',
       [postId, userId]
     );
-    
-    if (result.affectedRows === 0) {
+
+    if (result.rows.affectedRows === 0) {
       return res.status(404).json({
         success: false,
         message: 'Like not found'
@@ -166,19 +167,19 @@ router.post('/users/:userId/follow', authenticateToken, async (req, res) => {
     
     // Check if already following
     const existingFollow = await query(
-      'SELECT id FROM community_follows WHERE follower_user_id = ? AND followed_user_id = ?',
+      'SELECT id FROM user_follows WHERE follower_id = ? AND following_id = ?',
       [followerId, targetUserId]
     );
-    
+
     if (existingFollow.rows && existingFollow.rows.length > 0) {
       return res.status(409).json({
         success: false,
         message: 'Already following this user'
       });
     }
-    
+
     await query(
-      'INSERT INTO community_follows (follower_user_id, followed_user_id) VALUES (?, ?)',
+      'INSERT INTO user_follows (follower_id, following_id) VALUES (?, ?)',
       [followerId, targetUserId]
     );
     
@@ -203,11 +204,11 @@ router.delete('/users/:userId/follow', authenticateToken, async (req, res) => {
     const followerId = req.user.userId;
     
     const result = await query(
-      'DELETE FROM community_follows WHERE follower_user_id = ? AND followed_user_id = ?',
+      'DELETE FROM user_follows WHERE follower_id = ? AND following_id = ?',
       [followerId, targetUserId]
     );
-    
-    if (result.affectedRows === 0) {
+
+    if (result.rows.affectedRows === 0) {
       return res.status(404).json({
         success: false,
         message: 'Follow relationship not found'
@@ -240,10 +241,10 @@ router.get('/users/:userId/profile', optionalAuth, async (req, res) => {
         u.username,
         u.profile_image_url,
         u.created_at,
-        (SELECT COUNT(*) FROM community_follows cf WHERE cf.followed_user_id = u.id) as follower_count,
-        (SELECT COUNT(*) FROM community_follows cf WHERE cf.follower_user_id = u.id) as following_count,
-        (SELECT COUNT(*) FROM community_posts cp WHERE cp.user_id = u.id AND cp.is_public = true) as post_count
-        ${currentUserId ? `, (SELECT COUNT(*) FROM community_follows cf WHERE cf.follower_user_id = ? AND cf.followed_user_id = u.id) as is_following` : ''}
+        (SELECT COUNT(*) FROM user_follows cf WHERE cf.following_id = u.id) as follower_count,
+        (SELECT COUNT(*) FROM user_follows cf WHERE cf.follower_id = u.id) as following_count,
+        (SELECT COUNT(*) FROM posts cp WHERE cp.user_id = u.id AND cp.privacy = 'public') as post_count
+        ${currentUserId ? `, (SELECT COUNT(*) FROM user_follows cf WHERE cf.follower_id = ? AND cf.following_id = u.id) as is_following` : ''}
       FROM users u
       WHERE u.id = ?`,
       currentUserId ? [currentUserId, userId] : [userId]
@@ -286,22 +287,21 @@ router.get('/users/:userId/posts', optionalAuth, async (req, res) => {
         cp.*,
         u.username,
         u.profile_image_url,
-        (SELECT COUNT(*) FROM community_likes cl WHERE cl.post_id = cp.id) as like_count
-        ${currentUserId ? `, (SELECT COUNT(*) FROM community_likes cl WHERE cl.post_id = cp.id AND cl.user_id = ?) as user_liked` : ''}
-      FROM community_posts cp
+        (SELECT COUNT(*) FROM post_likes cl WHERE cl.post_id = cp.id) as like_count
+        ${currentUserId ? `, (SELECT COUNT(*) FROM post_likes cl WHERE cl.post_id = cp.id AND cl.user_id = ?) as user_liked` : ''}
+      FROM posts cp
       JOIN users u ON cp.user_id = u.id
-      WHERE cp.user_id = ? AND cp.is_public = true
+      WHERE cp.user_id = ? AND cp.privacy = 'public'
     `;
-    
+
     const queryParams = currentUserId ? [currentUserId, userId] : [userId];
-    
+
     if (cursor) {
       queryText += ` AND cp.created_at < ?`;
       queryParams.push(cursor);
     }
-    
-    queryText += ` ORDER BY cp.created_at DESC LIMIT ?`;
-    queryParams.push(limit + 1);
+
+    queryText += ` ORDER BY cp.created_at DESC LIMIT ${limit + 1}`;
     
     const result = await query(queryText, queryParams);
     const posts = result.rows || result;
