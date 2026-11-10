@@ -288,6 +288,17 @@ export const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
   },
+  photoLabel: {
+    marginTop: 20,
+    marginBottom: 8,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colorWheelColors.text,
+  },
+  photoRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
   buttonDisabled: {
     opacity: 0.6,
   },

@@ -1,735 +1,630 @@
-// CoolorsColorExtractor.js — interactive magnifier with live palette slots
-// Drop-in replacement. Requires server endpoints:
-//  - POST /images/extract-colors   (multipart: image) -> { dominant, palette: ["#..."] }
-//  - POST /images/sample-color     (multipart: image + {x,y,radius} or JSON alongside) -> { hex }
-// If /sample-color isn't available, the component falls back to approximating from the initial palette.
+// components/CoolorsColorExtractor.js
+// Full-screen photo color picker. The photo opens zoomed in; drag to move, pinch to zoom,
+// tap a spot to bring it under the aiming ring, then pick. Pixels are read on the device
+// with Skia, so the photo is never uploaded and sampling is instant.
 //
 // Props:
-//  - initialImageUri?: string
-//  - initialSlots?: number (default 5)
+//  - initialImageUri: string (required) local photo URI (use pickPhotoAsync to get one)
+//  - initialSlots?: number (default 5) - legacy name for maxColors
+//  - maxColors?: number - 1 = "pick one color and return", >1 = collect up to N colors
 //  - onComplete?(result: { imageUri, slots: string[], activeIndex: number }): void
-//  - onColorExtracted?(hex: string): void  // kept for backward-compat (uses slots[0])
-//  - debugMode?: boolean (default false)
+//  - onColorExtracted?(hex: string): void
+//  - onClose?(): void
 //
+// The component renders full-screen content; callers present it inside a <Modal>.
+
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { View, Text, Image, TouchableOpacity, Alert, StyleSheet, Dimensions, PanResponder, Platform } from 'react-native';
-// CRASH FIX: Lazy-load expo modules to prevent native bridge access at module load time
+import { View, Text, Image, Pressable, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, runOnJS } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { Skia, ColorType, AlphaType } from '@shopify/react-native-skia';
 
-let _apiServiceInstance = null;
-let _apiServiceLoadAttempted = false;
-let _apiServiceLoadError = null;
+const AUTO_ZOOM = 2.5;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 8;
+const MAX_EDGE = 1600;          // long edge of the working copy; keeps the pixel buffer ~10MB max
+const RETICLE = 64;             // aiming ring diameter (screen px)
+const RETICLE_STROKE = 12;
+const SAMPLE_SCREEN_RADIUS = 3; // average ~6 screen px under the ring so fabric texture doesn't flicker
 
-const getApiServiceInstance = () => {
-  if (_apiServiceLoadAttempted) return _apiServiceInstance;
-  _apiServiceLoadAttempted = true;
-  try {
-    const mod = require('../services/safeApiService');
-    _apiServiceInstance = mod?.default || mod;
-  } catch (error) {
-    _apiServiceLoadError = error;
-    console.warn('CoolorsColorExtractor: safeApiService load failed', error?.message);
-    _apiServiceInstance = null;
-  }
-  return _apiServiceInstance;
-};
+// ---------------------------------------------------------------------------
+// Photo helpers
+// ---------------------------------------------------------------------------
 
-const ApiService = {
-  extractColorsFromImage: async (...args) => {
-    const inst = getApiServiceInstance();
-    if (typeof inst?.extractColorsFromImage === 'function') return inst.extractColorsFromImage(...args);
-    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
-  },
-  sampleColorAt: async (...args) => {
-    const inst = getApiServiceInstance();
-    if (typeof inst?.sampleColorAt === 'function') return inst.sampleColorAt(...args);
-    throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
-  },
-  closeImageSession: (...args) => {
-    const inst = getApiServiceInstance();
-    if (typeof inst?.closeImageSession === 'function') return inst.closeImageSession(...args);
-  },
-  getToken: () => {
-    const inst = getApiServiceInstance();
-    return typeof inst?.getToken === 'function' ? inst.getToken() : undefined;
-  },
-};
+/**
+ * Launch the camera or the photo library and return the chosen photo's URI (or null).
+ * The library (iOS 14+ PHPicker) needs no permission prompt; the camera does.
+ */
+export async function pickPhotoAsync(source = 'library') {
+  const ImagePicker = require('expo-image-picker');
+  const options = { mediaTypes: ['images'], allowsEditing: false, quality: 1, exif: false };
 
-Object.defineProperty(ApiService, 'baseURL', {
-  enumerable: true,
-  get: () => {
-    const inst = getApiServiceInstance();
-    return inst?.baseURL;
-  },
-});
-
-Object.defineProperty(ApiService, 'ready', {
-  enumerable: true,
-  get: () => {
-    const inst = getApiServiceInstance();
-    return inst?.ready || Promise.resolve();
-  },
-});
-
-// Lazy expo-image-picker getter
-let _ImagePicker = null;
-const getImagePicker = () => {
-  if (_ImagePicker) return _ImagePicker;
-  try {
-    _ImagePicker = require('expo-image-picker');
-  } catch (error) {
-    console.warn('CoolorsColorExtractor: expo-image-picker load failed', error?.message);
-    _ImagePicker = {
-      launchImageLibraryAsync: () => Promise.resolve({ canceled: true }),
-      requestMediaLibraryPermissionsAsync: () => Promise.resolve({ status: 'denied' }),
-    };
-  }
-  return _ImagePicker;
-};
-
-// Lazy expo-image-manipulator getter
-let _ImageManipulator = null;
-const getImageManipulator = () => {
-  if (_ImageManipulator) return _ImageManipulator;
-  try {
-    _ImageManipulator = require('expo-image-manipulator');
-  } catch (error) {
-    console.warn('CoolorsColorExtractor: expo-image-manipulator load failed', error?.message);
-    _ImageManipulator = {
-      manipulateAsync: (uri) => Promise.resolve({ uri }),
-      SaveFormat: { JPEG: 'jpeg' },
-    };
-  }
-  return _ImageManipulator;
-};
-
-// Lazy expo-haptics getter
-let _Haptics = null;
-const getHaptics = () => {
-  if (_Haptics) return _Haptics;
-  try {
-    _Haptics = require('expo-haptics');
-  } catch (error) {
-    console.warn('CoolorsColorExtractor: expo-haptics load failed', error?.message);
-    _Haptics = {
-      impactAsync: () => Promise.resolve(),
-      ImpactFeedbackStyle: { Light: 'light', Medium: 'medium', Heavy: 'heavy' },
-    };
-  }
-  return _Haptics;
-};
-// CRASH FIX: Use lazy getter to avoid calling isDebugMode() at module load time
-let _isDebugModeValue = null;
-const getIsDebugMode = () => {
-  if (_isDebugModeValue === null) {
-    try {
-      const helper = require('../utils/expoConfigHelper');
-      _isDebugModeValue = helper.isDebugMode ? helper.isDebugMode() : false;
-    } catch (error) {
-      console.warn('CoolorsColorExtractor: expoConfigHelper load failed', error?.message);
-      _isDebugModeValue = false;
+  if (source === 'camera') {
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm?.granted) {
+      Alert.alert('Camera access needed', 'Allow camera access in Settings to take a photo.');
+      return null;
     }
   }
-  return _isDebugModeValue;
-};
-const IS_DEBUG_MODE = () => getIsDebugMode();
 
-// Safe wrapper to log real errors + stack traces from component layer
-const safe = (fn, context = 'unknown') => (...args) => {
-  try {
-    return fn(...args);
-  } catch (error) {
-    console.error(`CoolorsColorExtractor Error in ${context}:`, error);
-    console.error('Stack trace:', error.stack);
-    console.error('Args:', args);
-    throw error; // Re-throw to maintain error handling flow
-  }
-};
+  const result = source === 'camera'
+    ? await ImagePicker.launchCameraAsync(options)
+    : await ImagePicker.launchImageLibraryAsync(options);
 
-// iOS image safety: Re-encode to JPEG to avoid HEIC 415 from server
-const prepareAssetForUpload = async (asset) => {
-  try {
-    // Re-encode to JPEG to avoid HEIC 415 from server
-    const manip = await getImageManipulator().manipulateAsync(
-      asset.uri,
-      [], // no transforms
-      { compress: 0.9, format: getImageManipulator().SaveFormat.JPEG }
-    );
-    return { ...asset, uri: manip.uri };
-  } catch (error) {
-    console.warn('Failed to prepare asset for upload, using original:', error);
-    return asset; // Fallback to original if manipulation fails
-  }
-};
-
-const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-// Match your screenshots (large lens) while staying responsive
-const MAGNIFIER_SIZE = Math.max(110, Math.min(Math.round(screenWidth * 0.28), 160));
-const DEFAULT_SLOTS = 5;
-
-// Small throttle helper (leading, trailing last call after delay)
-function useThrottle(fn, ms) {
-  const last = useRef(0);
-  const trailing = useRef(null);
-  
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (trailing.current) {
-        clearTimeout(trailing.current);
-        trailing.current = null;
-      }
-    };
-  }, []);
-  
-  return useCallback((...args) => {
-    const now = Date.now();
-    const remaining = ms - (now - last.current);
-    if (remaining <= 0) {
-      last.current = now;
-      fn(...args);
-    } else {
-      clearTimeout(trailing.current);
-      trailing.current = setTimeout(() => {
-        last.current = Date.now();
-        fn(...args);
-      }, remaining);
-    }
-  }, [fn, ms]);
+  const uri = !result?.canceled && result?.assets?.[0]?.uri;
+  return typeof uri === 'string' && uri.length > 0 ? uri : null;
 }
 
+// Re-encode to an upright JPEG (handles HEIC + EXIF rotation) and cap the size.
+async function normalizePhoto(uri) {
+  const { ImageManipulator, SaveFormat } = require('expo-image-manipulator');
+  const refs = [];
+  try {
+    let ref = await ImageManipulator.manipulate(uri).renderAsync();
+    refs.push(ref);
+    if (Math.max(ref.width, ref.height) > MAX_EDGE) {
+      const ctx = ImageManipulator.manipulate(uri);
+      ctx.resize(ref.width >= ref.height ? { width: MAX_EDGE } : { height: MAX_EDGE });
+      ref = await ctx.renderAsync();
+      refs.push(ref, ctx);
+    }
+    const saved = await ref.saveAsync({ format: SaveFormat.JPEG, compress: 0.92 });
+    return { uri: saved.uri, width: saved.width, height: saved.height };
+  } finally {
+    refs.forEach((r) => { try { r?.release?.(); } catch (_) {} });
+  }
+}
+
+// Decode the working copy with Skia and copy out its RGBA pixels once.
+async function decodePixels(uri) {
+  const data = await Skia.Data.fromURI(uri);
+  const image = Skia.Image.MakeImageFromEncoded(data);
+  if (!image) throw new Error('Could not decode the photo');
+  const width = image.width();
+  const height = image.height();
+  const pixels = image.readPixels(0, 0, {
+    width,
+    height,
+    colorType: ColorType?.RGBA_8888 ?? 4,
+    alphaType: AlphaType?.Unpremul ?? 3,
+  });
+  try { image.dispose?.(); } catch (_) {}
+  try { data.dispose?.(); } catch (_) {}
+  if (!pixels) throw new Error('Could not read the photo pixels');
+  return { pixels, width, height };
+}
+
+const toHex = (r, g, b) =>
+  `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+
+// Readable text color on top of a swatch
+const inkFor = (hex) => {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) > 160 ? '#111827' : '#FFFFFF';
+};
+
+// Worklet-safe clamp of a translation so the ring always stays on the photo
+const clampT = (t, scale, half) => {
+  'worklet';
+  const lim = scale * half;
+  return Math.min(lim, Math.max(-lim, t));
+};
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
 export default function CoolorsColorExtractor({
-  mode = 'gallery',                // 'camera' | 'gallery'
   initialImageUri,
-  initialSlots = DEFAULT_SLOTS,
+  initialSlots = 5,
+  maxColors,
   onComplete,
-  onColorExtracted,                // optional: uses slots[0]
-  onCreateCollage,
+  onColorExtracted,
   onClose,
 }) {
-  const [selectedImage, setSelectedImage] = useState(null); // { uri }
-  const [isLoading, setIsLoading] = useState(false);
+  const insets = useSafeAreaInsets();
+  const limit = Math.max(1, maxColors ?? initialSlots ?? 5);
+  const single = limit === 1;
 
-  const [serverPalette, setServerPalette] = useState([]); // reference palette from the server
-  const [imageToken, setImageToken] = useState(null);     // <-- session id from backend
-  const [sampleRadius, setSampleRadius] = useState(0.02); // 2% of min dimension
+  const [status, setStatus] = useState('loading'); // loading | ready | error
+  const [errorText, setErrorText] = useState('');
+  const [photo, setPhoto] = useState(null);         // { uri, width, height }
+  const [viewport, setViewport] = useState(null);   // { W, H }
+  const [live, setLive] = useState('#9CA3AF');
+  const [picked, setPicked] = useState([]);
+  const [showHint, setShowHint] = useState(true);
+  const [zoomLabel, setZoomLabel] = useState(`${AUTO_ZOOM}×`);
 
-  // layout and magnifier
-  const [imageLayout, setImageLayout] = useState({ width: 0, height: 0 });
-  const [magnifierPosition, setMagnifierPosition] = useState({ x: screenWidth / 2, y: screenHeight / 2 });
+  const pixelsRef = useRef(null);
+  const liveRef = useRef(live);
 
-  // palette & slots
-  const [slots, setSlots] = useState(Array.from({ length: initialSlots }, () => '#CCCCCC'));
-  const [activeIndex, setActiveIndex] = useState(0);
+  // Transform of the photo inside the viewport (about the viewport center)
+  const scale = useSharedValue(1);
+  const tx = useSharedValue(0);
+  const ty = useSharedValue(0);
+  const pinchStart = useSharedValue({ s: 1, x: 0, y: 0, fx: 0, fy: 0 });
+  const lastSample = useSharedValue(0);
 
-  // live color under magnifier
-  const [magnifierColor, setMagnifierColor] = useState('#FF6B6B');
-  const [liveColor, setLiveColor] = useState('#FF6B6B');
-  const [previousColor, setPreviousColor] = useState('#FF6B6B');
-
-  const fallbackPalette = useMemo(() => (
-    ['#FF6B6B','#4ECDC4','#45B7D1','#96CEB4','#FECA57','#FF9FF3','#54A0FF','#5F27CD','#00D2D3','#FF9F43','#10AC84','#EE5A24','#0984E3','#A29BFE','#6C5CE7']
-  ), []);
-
-  const fillSlots = useCallback((paletteArr) => {
-    const base = Array.from({ length: Math.max(initialSlots, 1) }, (_, i) => paletteArr[i % paletteArr.length] || '#CCCCCC');
-    setSlots(base);
-    setMagnifierColor(base[0] || '#808080');
-  }, [initialSlots]);
-
-  // --- permissions and picking --------------------------------------------------
-
-  const fillSlotsFromPalette = useCallback((paletteArr) => {
-    const base = Array.from({ length: Math.max(initialSlots, 1) }, (_, i) => paletteArr[i % paletteArr.length] || '#CCCCCC');
-    setSlots(base);
-    setLiveColor(base[0] || '#808080');
-  }, [initialSlots]);
-
-  const callServerSample = useCallback(async (imageId, normX, normY, radius = 0.02) => {
-    // Throttled elsewhere; keep this fast.
-    try {
-      if (!imageId) throw new Error('No image session');
-      if (ApiService?.sampleColorAt) {
-        return await ApiService.sampleColorAt(imageId, normX, normY, radius);
-      }
-      // Safe optional-chaining to prevent crashes if ApiService is undefined
-      const apiBase = ApiService?.baseURL?.replace(/\/?$/, '');
-      if (!apiBase) {
-        throw new Error('API base URL unavailable');
-      }
-      const url = `${apiBase}/images/sample-color`;
-      const headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
-      const t = ApiService?.getToken?.();
-      if (t) headers.Authorization = `Bearer ${t}`;
-      const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify({ imageId, x: normX, y: normY, units:'norm', radius }) });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json(); // { hex }
-    } catch (e) {
-      // Always log critical color sampling errors for production debugging
-      console.error('CoolorsColorExtractor Error in callServerSample:', e);
-      console.error('Stack trace:', e.stack);
-      console.error('Args:', { imageId, normX, normY, radius });
-      
-      // Check for session expiration (404 error)
-      if (e.message && e.message.includes('404')) {
-        Alert.alert(
-          'Session expired',
-          'Session expired — Reopen image',
-          [
-            { text: 'OK', onPress: () => onClose?.() }
-          ]
-        );
-        return { hex: liveColor }; // Return current color to avoid UI flicker
-      }
-      
-      // fallback: snap to nearest server palette color
-      const approx = nearestFromPalette(liveColor, serverPalette.length ? serverPalette : fallbackPalette);
-      return { hex: approx };
-    }
-  }, [fallbackPalette, liveColor, serverPalette, onClose]);
-
-  const hexToRgb = (hex) => {
-    const h = hex.replace('#','');
-    const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16);
-    return {r,g,b};
-  };
-
-  const deltaE = (hex1, hex2) => {
-    const rgb1 = hexToRgb(hex1);
-    const rgb2 = hexToRgb(hex2);
-    // Simple RGB distance (approximates Delta-E for haptic threshold)
-    return Math.sqrt((rgb1.r-rgb2.r)**2 + (rgb1.g-rgb2.g)**2 + (rgb1.b-rgb2.b)**2);
-  };
-
-  const nearestFromPalette = (hex, palette) => {
-    const {r, g, b} = hexToRgb(hex);
-    let best = palette[0], bestD = Infinity;
-    palette.forEach(p => {
-      const {r:pr, g:pg, b:pb} = hexToRgb(p);
-      const d = Math.sqrt((r-pr)**2 + (g-pg)**2 + (b-pb)**2);
-      if (d < bestD) { bestD = d; best = p; }
-    });
-    return best;
-  };
-
-  const processImage = useCallback(async (asset) => {
-    setIsLoading(true);
-    try {
-      setSelectedImage(asset);
-      // Log image processing only in debug mode
-      if (IS_DEBUG_MODE()) {
-        console.log('CoolorsColorExtractor: Processing image with ApiService.extractColorsFromImage');
-      }
-      
-      // iOS image safety: Re-encode to JPEG to avoid HEIC 415 from server
-      const assetSafe = await prepareAssetForUpload(asset);
-      
-      // Use the proper ApiService method for backend extraction
-      await ApiService.ready; // ensure token is loaded from SecureStore first
-      
-      // Add timeout to prevent hanging
-      const response = await Promise.race([
-        ApiService.extractColorsFromImage(assetSafe.uri, {
-          onProgress: (progress) => {
-            // Log upload progress only in debug mode
-            if (IS_DEBUG_MODE()) {
-              console.log(`Upload progress: ${progress}%`);
-            }
-          }
-        }),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Image processing timeout')), 30000)
-        )
-      ]);
-      
-      const { dominant, palette, imageId } = response;
-      setImageToken(imageId || null);
-      const basePalette = (Array.isArray(palette) && palette.length) ? palette : fallbackPalette;
-      setServerPalette(basePalette);
-      fillSlotsFromPalette(basePalette);
-      
-      // preselect first slot with dominant
-      setSlots(prev => {
-        const next = [...prev];
-        next[0] = dominant || basePalette[0];
-        return next;
-      });
-      setLiveColor(dominant || basePalette[0]);
-      
-      // Log successful image processing only in debug mode
-      if (IS_DEBUG_MODE()) {
-        console.log('CoolorsColorExtractor: Image processed successfully, dominant:', dominant);
-      }
-    } catch (e) {
-      // Always log image processing errors for production debugging
-      console.error('CoolorsColorExtractor Error in processImage:', e);
-      console.error('Stack trace:', e.stack);
-      console.error('Asset:', asset);
-      setServerPalette(fallbackPalette);
-      fillSlotsFromPalette(fallbackPalette);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [fallbackPalette, fillSlotsFromPalette]);
-
-  const pickImage = useCallback(async () => {
-    try {
-      // Enhanced type safety for ImagePicker to prevent Swift runtime crashes
-      const ImagePicker = getImagePicker();
-      if (!ImagePicker || typeof ImagePicker.launchImageLibraryAsync !== 'function') {
-        throw new Error('ImagePicker module not available');
-      }
-
-      // Validate MediaTypeOptions exists and has Images property
-      const mediaTypeImages = getImagePicker().MediaTypeOptions?.Images || 
-                             getImagePicker().MediaTypeOptions?.['Images'] || 
-                             'Images';
-
-      // Safe ImagePicker options with comprehensive type validation
-      const pickerOptions = {
-        mediaTypes: mediaTypeImages,
-        allowsEditing: false,
-        quality: 0.9,
-        // Add explicit type constraints to prevent Swift casting errors
-        allowsMultipleSelection: false,
-        base64: false,
-        exif: false,
-      };
-      
-      const result = await getImagePicker().launchImageLibraryAsync(pickerOptions);
-      
-      // Enhanced result validation to prevent Swift collection iterator failures
-      if (result && 
-          typeof result === 'object' && 
-          !result.canceled && 
-          result.assets && 
-          Array.isArray(result.assets) && 
-          result.assets.length > 0) {
-        
-        const asset = result.assets[0];
-        // Validate asset object structure before processing
-        if (asset && 
-            typeof asset === 'object' && 
-            asset.uri && 
-            typeof asset.uri === 'string' && 
-            asset.uri.length > 0) {
-          await processImage(asset);
-        } else {
-          console.warn('Invalid asset structure from ImagePicker');
-          onClose?.();
-        }
-      } else {
-        onClose?.();
-      }
-    } catch (error) {
-      // Always log critical ImagePicker errors in production
-      console.error('CoolorsColorExtractor Error in pickImage:', error);
-      console.error('ImagePicker Error Details:', {
-        type: typeof error,
-        name: error?.name,
-        message: error?.message,
-        stack: error?.stack?.substring(0, 500),
-        timestamp: new Date().toISOString()
-      });
-      
-      // Enhanced error reporting for native module failures
-      const errorMessage = error?.message || 'Unknown error';
-      if (errorMessage.includes('Swift') || errorMessage.includes('native')) {
-        console.error('Native module error detected - potential Swift runtime issue');
-      }
-      
-      Alert.alert('Error', 'Failed to select image');
-      onClose?.();
-    }
-  }, [onClose, processImage]);
-
+  // ----- load the photo -----
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      if (initialImageUri) {
-        await processImage({ uri: initialImageUri });
+      if (!initialImageUri) {
+        setErrorText('No photo was selected.');
+        setStatus('error');
         return;
       }
-      // Honor `mode` and request permissions
-      const perm = await (mode === 'camera'
-        ? getImagePicker().requestCameraPermissionsAsync()
-        : getImagePicker().requestMediaLibraryPermissionsAsync());
-      if (perm.status !== 'granted') {
-        Alert.alert('Permission needed', mode === 'camera'
-          ? 'Camera permission is required to take a photo.'
-          : 'Photo library permission is required to pick an image.');
-        onClose?.();
-        return;
-      }
-      // Safe ImagePicker calls with type validation
-      const cameraOptions = { quality: 0.9 };
-      const libraryOptions = { 
-        mediaTypes: getImagePicker().MediaTypeOptions?.Images || 'Images', 
-        quality: 0.9 
-      };
-      
-      const result = await (mode === 'camera'
-        ? getImagePicker().launchCameraAsync(cameraOptions)
-        : getImagePicker().launchImageLibraryAsync(libraryOptions));
-        
-      // Safe array access with validation
-      if (!result?.canceled && Array.isArray(result.assets) && result.assets.length > 0 && result.assets[0]) {
-        await processImage(result.assets[0]);
-      }
-      else onClose?.();
-    })();
-  }, [initialImageUri, mode, onClose, processImage]);
-
-  // SAFETY FIX: Close server session on unmount with proper guards
-  useEffect(() => {
-    return () => {
-      if (imageToken && ApiService.closeImageSession) {
-        try {
-          ApiService.closeImageSession(imageToken);
-        } catch (error) {
-          console.warn('Failed to close image session on unmount:', error);
+      try {
+        const normalized = await normalizePhoto(initialImageUri);
+        const decoded = await decodePixels(normalized.uri);
+        if (cancelled) return;
+        pixelsRef.current = decoded;
+        setPhoto({ uri: normalized.uri, width: decoded.width, height: decoded.height });
+        setStatus('ready');
+      } catch (error) {
+        console.error('CoolorsColorExtractor: failed to load photo', error?.message || error);
+        if (!cancelled) {
+          setErrorText('This photo could not be opened. Try a different one.');
+          setStatus('error');
         }
       }
+    })();
+    return () => {
+      cancelled = true;
+      pixelsRef.current = null;
     };
-  }, [imageToken]);
+  }, [initialImageUri]);
 
-  // --- magnifier interactions ---------------------------------------------------
-  const updateActiveSlot = useCallback((hex) => {
-    setSlots(prev => {
-      const next = [...prev];
-      next[activeIndex] = hex;
-      return next;
-    });
-    setLiveColor(hex);
-  }, [activeIndex]);
+  // ----- geometry: photo fitted ("contain") inside the viewport -----
+  const geom = useMemo(() => {
+    if (!photo || !viewport) return null;
+    const { W, H } = viewport;
+    const fit = Math.min(W / photo.width, H / photo.height);
+    const dw = photo.width * fit;
+    const dh = photo.height * fit;
+    return { W, H, fit, dw, dh, ox: (W - dw) / 2, oy: (H - dh) / 2 };
+  }, [photo, viewport]);
+  const geomRef = useRef(null);
+  geomRef.current = geom;
 
-  const throttledSample = useThrottle(async (nx, ny) => {
-    if (!selectedImage) return;
-    const out = await callServerSample(imageToken, nx, ny, sampleRadius);
-    const hex = (out && out.hex) ? out.hex.toUpperCase() : liveColor;
-    
-    // Haptic feedback on significant color change (ΔE threshold)
-    const colorDelta = deltaE(hex, previousColor);
-    if (colorDelta > 30) { // Threshold for haptic tick (RGB distance ~30)
-      try {
-        await getHaptics().impactAsync(getHaptics().ImpactFeedbackStyle.Light);
-      } catch (_) {} // Ignore haptic errors
-      setPreviousColor(hex);
+  // ----- sampling (JS thread): average a small box under the ring -----
+  const sampleAt = useCallback((tX, tY, s) => {
+    const g = geomRef.current;
+    const buf = pixelsRef.current;
+    if (!g || !buf) return;
+    const { pixels, width, height } = buf;
+
+    // Viewport center -> photo coordinates (inverse of translate + scale about the center)
+    const qx = g.W / 2 - tX / s;
+    const qy = g.H / 2 - tY / s;
+    const cx = Math.min(width - 1, Math.max(0, Math.round((qx - g.ox) / g.fit)));
+    const cy = Math.min(height - 1, Math.max(0, Math.round((qy - g.oy) / g.fit)));
+    const r = Math.min(8, Math.max(0, Math.round(SAMPLE_SCREEN_RADIUS / (g.fit * s))));
+
+    let R = 0, G = 0, B = 0, n = 0;
+    for (let y = Math.max(0, cy - r); y <= Math.min(height - 1, cy + r); y++) {
+      for (let x = Math.max(0, cx - r); x <= Math.min(width - 1, cx + r); x++) {
+        const i = (y * width + x) * 4;
+        R += pixels[i]; G += pixels[i + 1]; B += pixels[i + 2]; n++;
+      }
     }
-    
-    // Update both the magnifier display color and the active slot
-    setMagnifierColor(hex);
-    setLiveColor(hex);
-    
-    // Update the active slot in the palette
-    setSlots(prev => {
-      const next = [...prev];
-      next[activeIndex] = hex;
-      return next;
-    });
-  }, 125); // ~8Hz
-
-  const extractAt = useCallback((x, y) => {
-    const w = imageLayout.width || 1;
-    const h = imageLayout.height || 1;
-    const cx = Math.max(MAGNIFIER_SIZE/2, Math.min(w - MAGNIFIER_SIZE/2, x));
-    const cy = Math.max(MAGNIFIER_SIZE/2, Math.min(h - MAGNIFIER_SIZE/2, y));
-    setMagnifierPosition({ x: cx, y: cy });
-    const nx = cx / w, ny = cy / h;
-    throttledSample(nx, ny);
-  }, [imageLayout.height, imageLayout.width, throttledSample]);
-
-  const panResponder = useMemo(() => PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder: () => true,
-    onPanResponderGrant: (evt) => {
-      if (!selectedImage) return;
-      const { locationX, locationY } = evt.nativeEvent;
-      extractAt(locationX, locationY);
-    },
-    onPanResponderMove: (evt) => {
-      if (!selectedImage) return;
-      const { locationX, locationY } = evt.nativeEvent;
-      extractAt(locationX, locationY);
-    },
-  }), [selectedImage, extractAt]);
-
-  const onImageLayout = useCallback((event) => {
-    const { width, height, x, y } = event.nativeEvent.layout;
-    setImageLayout({ width, height, x, y });
-    if (width > 0 && height > 0) {
-      setMagnifierPosition({ x: width / 2, y: height / 2 });
+    if (!n) return;
+    const hex = toHex(R / n, G / n, B / n);
+    if (hex !== liveRef.current) {
+      liveRef.current = hex;
+      setLive(hex);
     }
   }, []);
 
-  // --- controls with safe error logging -----------------------------------------------------------------
-  const addSlot = safe(() => {
-    setSlots(prev => [...prev, serverPalette[prev.length % serverPalette.length] || '#CCCCCC']);
-  }, 'addSlot');
+  const hideHint = useCallback(() => setShowHint(false), []);
+  const updateZoomLabel = useCallback((s) => {
+    setZoomLabel(`${Math.round(s * 10) / 10}×`);
+  }, []);
 
-  const removeSlot = safe(() => {
-    setSlots(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
-  }, 'removeSlot');
+  // ----- auto zoom once the photo and viewport are known -----
+  useEffect(() => {
+    if (status !== 'ready' || !geom) return;
+    tx.value = 0;
+    ty.value = 0;
+    scale.value = 1;
+    scale.value = withTiming(AUTO_ZOOM, { duration: 450 });
+    sampleAt(0, 0, AUTO_ZOOM);
+    updateZoomLabel(AUTO_ZOOM);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, geom]);
 
-  const nextSlot = safe(() => {
-    if (activeIndex < slots.length - 1) {
-      setActiveIndex(i => i + 1);
-    } else {
-      // finished → callbacks
-      onComplete?.({ imageUri: selectedImage?.uri, slots, activeIndex });
-      onColorExtracted?.(slots[0]);
+  // ----- gestures -----
+  const gestures = useMemo(() => {
+    if (!geom) return Gesture.Tap().enabled(false);
+    const { W, H, dw, dh } = geom;
+    const halfW = dw / 2;
+    const halfH = dh / 2;
+
+    const requestSample = (force) => {
+      'worklet';
+      const now = Date.now();
+      if (!force && now - lastSample.value < 33) return;
+      lastSample.value = now;
+      runOnJS(sampleAt)(tx.value, ty.value, scale.value);
+    };
+
+    // Animate to a target transform and sample where it will land
+    const animateTo = (nx, ny, ns) => {
+      'worklet';
+      const cxT = clampT(nx, ns, halfW);
+      const cyT = clampT(ny, ns, halfH);
+      tx.value = withTiming(cxT, { duration: 220 });
+      ty.value = withTiming(cyT, { duration: 220 });
+      if (ns !== scale.value) scale.value = withTiming(ns, { duration: 220 });
+      runOnJS(sampleAt)(cxT, cyT, ns);
+      runOnJS(updateZoomLabel)(ns);
+    };
+
+    const pan = Gesture.Pan()
+      .maxPointers(1)
+      .onStart(() => {
+        'worklet';
+        runOnJS(hideHint)();
+      })
+      .onChange((e) => {
+        'worklet';
+        tx.value = clampT(tx.value + e.changeX, scale.value, halfW);
+        ty.value = clampT(ty.value + e.changeY, scale.value, halfH);
+        requestSample(false);
+      })
+      .onEnd(() => {
+        'worklet';
+        requestSample(true);
+      });
+
+    const pinch = Gesture.Pinch()
+      .onStart((e) => {
+        'worklet';
+        pinchStart.value = { s: scale.value, x: tx.value, y: ty.value, fx: e.focalX, fy: e.focalY };
+        runOnJS(hideHint)();
+      })
+      .onUpdate((e) => {
+        'worklet';
+        const st = pinchStart.value;
+        const ns = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, st.s * e.scale));
+        const k = ns / st.s;
+        // Keep the photo point that started under the fingers under the fingers
+        const nx = (e.focalX - W / 2) - k * (st.fx - W / 2 - st.x);
+        const ny = (e.focalY - H / 2) - k * (st.fy - H / 2 - st.y);
+        scale.value = ns;
+        tx.value = clampT(nx, ns, halfW);
+        ty.value = clampT(ny, ns, halfH);
+        requestSample(false);
+      })
+      .onEnd(() => {
+        'worklet';
+        requestSample(true);
+        runOnJS(updateZoomLabel)(scale.value);
+      });
+
+    // Tap: slide the tapped spot under the ring
+    const tap = Gesture.Tap()
+      .maxDuration(250)
+      .onEnd((e, success) => {
+        'worklet';
+        if (!success) return;
+        runOnJS(hideHint)();
+        animateTo(tx.value - (e.x - W / 2), ty.value - (e.y - H / 2), scale.value);
+      });
+
+    // Double tap: toggle between fitted and zoomed, keeping the spot under the ring
+    const doubleTap = Gesture.Tap()
+      .numberOfTaps(2)
+      .onEnd((e, success) => {
+        'worklet';
+        if (!success) return;
+        const s = scale.value;
+        const ns = s < 1.5 ? AUTO_ZOOM : 1;
+        animateTo((tx.value * ns) / s, (ty.value * ns) / s, ns);
+      });
+
+    return Gesture.Simultaneous(pan, pinch, Gesture.Exclusive(doubleTap, tap));
+  }, [geom, sampleAt, hideHint, updateZoomLabel, tx, ty, scale, pinchStart, lastSample]);
+
+  const toggleZoom = useCallback(() => {
+    if (!geom) return;
+    const s = scale.value;
+    const ns = s < 1.5 ? AUTO_ZOOM : 1;
+    const nx = clampT((tx.value * ns) / s, ns, geom.dw / 2);
+    const ny = clampT((ty.value * ns) / s, ns, geom.dh / 2);
+    tx.value = withTiming(nx, { duration: 220 });
+    ty.value = withTiming(ny, { duration: 220 });
+    scale.value = withTiming(ns, { duration: 220 });
+    sampleAt(nx, ny, ns);
+    updateZoomLabel(ns);
+  }, [geom, scale, tx, ty, sampleAt, updateZoomLabel]);
+
+  const photoStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: tx.value }, { translateY: ty.value }, { scale: scale.value }],
+  }));
+
+  // ----- picking -----
+  const haptic = useCallback(() => {
+    try {
+      const Haptics = require('expo-haptics');
+      Haptics.impactAsync?.(Haptics.ImpactFeedbackStyle?.Light);
+    } catch (_) {}
+  }, []);
+
+  const finish = useCallback((colors) => {
+    if (!colors.length) return;
+    onColorExtracted?.(colors[0]);
+    onComplete?.({ imageUri: photo?.uri || initialImageUri, slots: colors, activeIndex: 0 });
+  }, [onColorExtracted, onComplete, photo, initialImageUri]);
+
+  const handlePick = useCallback(() => {
+    haptic();
+    if (single) {
+      finish([live]);
+      return;
     }
-  }, 'nextSlot');
+    setPicked((prev) => (prev.length >= limit || prev.includes(live) ? prev : [...prev, live]));
+  }, [haptic, single, finish, live, limit]);
 
-  const handleUseOnWheel = safe(() => {
-    onColorExtracted?.(slots[0]);
-    onComplete?.({ imageUri: selectedImage?.uri, slots, activeIndex });
-  }, 'handleUseOnWheel');
+  const removePicked = useCallback((hex) => {
+    setPicked((prev) => prev.filter((c) => c !== hex));
+  }, []);
 
-  const handleCreateCollagePress = safe(() => {
-    if (onCreateCollage && selectedImage) onCreateCollage(selectedImage, slots);
-  }, 'handleCreateCollagePress');
+  const handleDone = useCallback(() => {
+    finish(picked.length ? picked : [live]);
+  }, [finish, picked, live]);
 
-  // --- UI -----------------------------------------------------------------------
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Processing image…</Text>
-      </View>
-    );
-  }
+  // ----- render -----
+  const full = !single && picked.length >= limit;
 
   return (
-    <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => onClose?.()} style={styles.closeButton}>
-          <Text style={styles.closeButtonText}>✕</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Image picker</Text>
-        <TouchableOpacity onPress={nextSlot} style={styles.nextButton}>
-          <Text style={styles.nextButtonText}>{activeIndex < slots.length - 1 ? 'Next' : 'Done'}</Text>
-        </TouchableOpacity>
+    <GestureHandlerRootView style={styles.root}>
+      {/* Top bar */}
+      <View style={[styles.topBar, { paddingTop: insets.top + 8 }]}>
+        <Pressable onPress={() => onClose?.()} style={styles.iconButton} accessibilityRole="button" accessibilityLabel="Close">
+          <Ionicons name="close" size={24} color="#FFFFFF" />
+        </Pressable>
+        <Text style={styles.title}>Pick a color</Text>
+        <Pressable
+          onPress={toggleZoom}
+          style={[styles.zoomPill, status !== 'ready' && styles.hidden]}
+          disabled={status !== 'ready'}
+          accessibilityRole="button"
+          accessibilityLabel={`Zoom ${zoomLabel}. Tap to toggle zoom.`}
+        >
+          <Ionicons name="search" size={14} color="#FFFFFF" />
+          <Text style={styles.zoomText}>{zoomLabel}</Text>
+        </Pressable>
       </View>
 
-      {/* Image */}
-      {selectedImage && (
-        <View style={styles.imageContainer}>
-          <View style={styles.imageWrapper} {...panResponder.panHandlers}>
-            <Image
-              source={{ uri: selectedImage.uri }}
-              style={styles.image}
-              resizeMode="contain"
-              onLayout={onImageLayout}
-            />
-            {/* Magnifier with colored center showing sampled color */}
-            <View
-              style={[styles.magnifier, { left: magnifierPosition.x - MAGNIFIER_SIZE / 2, top: magnifierPosition.y - MAGNIFIER_SIZE / 2 }]}
-            >
-              <View style={[styles.magnifierInner, { borderColor: '#FFFFFF', borderWidth: 6 }]}>
-                {/* Colored center circle showing the sampled color */}
-                <View style={[styles.magnifierCenter, { backgroundColor: magnifierColor }]}>
-                  <View style={styles.crosshair}>
-                    <View style={[styles.crosshairHorizontal, { backgroundColor: '#FFFFFF' }]} />
-                    <View style={[styles.crosshairVertical, { backgroundColor: '#FFFFFF' }]} />
-                  </View>
-                </View>
-              </View>
-              {/* Hex readout below magnifier */}
-              <View style={styles.hexReadout}>
-                <Text style={styles.hexText}>{magnifierColor}</Text>
-              </View>
-            </View>
+      {/* Photo viewport */}
+      <View
+        style={styles.viewport}
+        onLayout={(e) => {
+          const { width, height } = e.nativeEvent.layout;
+          if (width > 0 && height > 0) setViewport({ W: width, H: height });
+        }}
+      >
+        {status === 'loading' && (
+          <View style={styles.center}>
+            <ActivityIndicator color="#FFFFFF" size="large" />
+            <Text style={styles.centerText}>Preparing photo…</Text>
           </View>
-        </View>
-      )}
+        )}
 
-      {/* Slots row */}
-      <View style={styles.paletteBar}>
-        <View style={styles.slotsRow}>
-          {slots.map((c, idx) => (
-            <TouchableOpacity key={idx} onPress={() => setActiveIndex(idx)}>
-              <View style={[styles.slot, { backgroundColor: c }, activeIndex === idx ? styles.slotActive : null]}>
-                {activeIndex === idx && <View style={styles.slotDot} />}
+        {status === 'error' && (
+          <View style={styles.center}>
+            <Ionicons name="image-outline" size={40} color="#9CA3AF" />
+            <Text style={styles.centerText}>{errorText}</Text>
+            <Pressable onPress={() => onClose?.()} style={styles.errorButton} accessibilityRole="button">
+              <Text style={styles.errorButtonText}>Close</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {status === 'ready' && geom && (
+          <GestureDetector gesture={gestures}>
+            <View style={StyleSheet.absoluteFill} collapsable={false}>
+              <Animated.View style={[StyleSheet.absoluteFill, photoStyle]}>
+                <Image
+                  source={{ uri: photo.uri }}
+                  style={{ position: 'absolute', left: geom.ox, top: geom.oy, width: geom.dw, height: geom.dh }}
+                  resizeMode="stretch"
+                  accessibilityIgnoresInvertColors
+                />
+              </Animated.View>
+
+              {/* Aiming ring: filled with the color under it, transparent center */}
+              <View pointerEvents="none" style={styles.reticleWrap}>
+                <View style={styles.reticleOuter}>
+                  <View style={[styles.reticle, { borderColor: live }]} />
+                </View>
+                <View style={styles.reticleDot} />
               </View>
-            </TouchableOpacity>
-          ))}
-        </View>
 
-        {/* plus / minus */}
-        <View style={styles.slotActions}>
-          <TouchableOpacity style={styles.circleBtn} onPress={removeSlot}><Text style={styles.circleBtnText}>−</Text></TouchableOpacity>
-          <TouchableOpacity style={styles.circleBtn} onPress={addSlot}><Text style={styles.circleBtnText}>＋</Text></TouchableOpacity>
-        </View>
+              {showHint && (
+                <View pointerEvents="none" style={styles.hint}>
+                  <Text style={styles.hintText}>Drag to move · Pinch to zoom · Tap a spot to aim</Text>
+                </View>
+              )}
+            </View>
+          </GestureDetector>
+        )}
       </View>
 
-      {/* Actions */}
-      <View style={styles.actionButtonsContainer}>
-        <TouchableOpacity style={[styles.actionButton, styles.secondaryButton]} onPress={handleCreateCollagePress}>
-          <Text style={styles.secondaryButtonText}>Create Collage</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.actionButton, styles.primaryButton]} onPress={handleUseOnWheel}>
-          <Text style={styles.primaryButtonText}>View on Color Wheel</Text>
-        </TouchableOpacity>
+      {/* Bottom panel */}
+      <View style={[styles.panel, { paddingBottom: insets.bottom + 16 }]}>
+        <View style={styles.liveRow}>
+          <View style={[styles.liveSwatch, { backgroundColor: live }]} />
+          <View style={styles.liveInfo}>
+            <Text style={styles.liveHex} selectable>{live}</Text>
+            <Text style={styles.liveCaption}>Color under the ring</Text>
+          </View>
+          <Pressable
+            onPress={handlePick}
+            disabled={status !== 'ready' || full}
+            style={[styles.pickButton, { backgroundColor: live }, (status !== 'ready' || full) && styles.disabled]}
+            accessibilityRole="button"
+            accessibilityLabel={single ? `Use color ${live}` : `Add color ${live}`}
+          >
+            <Ionicons name={single ? 'checkmark' : 'add'} size={18} color={inkFor(live)} />
+            <Text style={[styles.pickText, { color: inkFor(live) }]}>{single ? 'Use color' : 'Add'}</Text>
+          </Pressable>
+        </View>
+
+        {!single && (
+          <View style={styles.pickedRow}>
+            <View style={styles.pickedChips}>
+              {picked.length === 0 ? (
+                <Text style={styles.pickedHint}>Add up to {limit} colors</Text>
+              ) : (
+                picked.map((hex) => (
+                  <Pressable
+                    key={hex}
+                    onPress={() => removePicked(hex)}
+                    style={[styles.chip, { backgroundColor: hex }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${hex}. Tap to remove.`}
+                  >
+                    <Ionicons name="close" size={12} color={inkFor(hex)} />
+                  </Pressable>
+                ))
+              )}
+            </View>
+            <Pressable
+              onPress={handleDone}
+              disabled={status !== 'ready'}
+              style={[styles.doneButton, status !== 'ready' && styles.disabled]}
+              accessibilityRole="button"
+              accessibilityLabel="Done"
+            >
+              <Text style={styles.doneText}>Done{picked.length ? ` (${picked.length})` : ''}</Text>
+            </Pressable>
+          </View>
+        )}
       </View>
-    </View>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' },
-  loadingText: { fontSize: 16, color: '#666' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 50, paddingBottom: 20, backgroundColor: '#fff' },
-  closeButton: { padding: 10 },
-  closeButtonText: { fontSize: 18, color: '#333' },
-  headerTitle: { fontSize: 18, fontWeight: '600', color: '#333' },
-  nextButton: { padding: 10 },
-  nextButtonText: { fontSize: 16, color: '#007AFF', fontWeight: '600' },
-  imageContainer: { flex: 1, paddingHorizontal: 20 },
-  imageWrapper: { flex: 1, position: 'relative' },
-  image: { width: '100%', height: '100%' },
-  magnifier: { position: 'absolute', width: MAGNIFIER_SIZE, height: MAGNIFIER_SIZE, borderRadius: MAGNIFIER_SIZE / 2, backgroundColor: 'rgba(255,255,255,0.85)', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 5, borderWidth: 6, borderColor: '#fff' },
-  magnifierInner: { flex: 1, borderRadius: (MAGNIFIER_SIZE - 12) / 2, overflow: 'hidden', justifyContent: 'center', alignItems: 'center', borderWidth: 4 },
-  magnifierCenter: { width: '100%', height: '100%', borderRadius: (MAGNIFIER_SIZE - 18) / 2, justifyContent: 'center', alignItems: 'center' },
-  crosshair: { position: 'absolute', width: 22, height: 22, justifyContent: 'center', alignItems: 'center' },
-  crosshairHorizontal: { position: 'absolute', width: 22, height: 2, backgroundColor: '#FFFFFF' },
-  crosshairVertical: { position: 'absolute', width: 2, height: 22, backgroundColor: '#FFFFFF' },
-  
-  // Hex readout below magnifier
-  hexReadout: { 
-    position: 'absolute', 
-    top: MAGNIFIER_SIZE + 8, 
-    left: -20, 
-    right: -20, 
+  root: { flex: 1, backgroundColor: '#0B0B0C' },
+  topBar: {
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.75)', 
-    borderRadius: 12, 
-    paddingVertical: 6, 
-    paddingHorizontal: 12 
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingBottom: 8,
   },
-  hexText: { 
-    color: '#FFFFFF', 
-    fontSize: 14, 
-    fontWeight: '600', 
-    fontFamily: Platform.select({
-      ios: 'Courier',
-      android: 'monospace',
-      default: 'monospace',
-    })
+  iconButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  title: { color: '#FFFFFF', fontSize: 17, fontWeight: '600' },
+  zoomPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    minWidth: 64,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.16)',
   },
+  zoomText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  hidden: { opacity: 0 },
 
-  paletteBar: { backgroundColor: '#fff', paddingVertical: 16, paddingHorizontal: 16, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e6e6e6' },
-  slotsRow: { flexDirection: 'row', alignItems: 'center' },
-  slot: { width: (screenWidth - 32 - 100) / 5, maxWidth: 80, height: 44, borderRadius: 10, marginRight: 8, borderWidth: 1, borderColor: '#e6e6e6', justifyContent: 'center', alignItems: 'center' },
-  slotActive: { borderColor: '#000' },
-  slotDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#000' },
-  slotActions: { flexDirection: 'row', position: 'absolute', right: 16, top: 12 },
-  circleBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#f0f0f0', justifyContent: 'center', alignItems: 'center', marginLeft: 10 },
-  circleBtnText: { fontSize: 20, color: '#333', fontWeight: '600' },
+  viewport: { flex: 1, overflow: 'hidden' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingHorizontal: 32 },
+  centerText: { color: '#D1D5DB', fontSize: 15, textAlign: 'center' },
+  errorButton: { marginTop: 8, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 999, backgroundColor: '#FFFFFF' },
+  errorButtonText: { color: '#111827', fontWeight: '600' },
 
-  actionButtonsContainer: { flexDirection: 'row', marginHorizontal: 20, marginBottom: 40, gap: 12 },
-  actionButton: { flex: 1, paddingVertical: 16, borderRadius: 25, alignItems: 'center' },
-  primaryButton: { backgroundColor: '#007AFF' },
-  secondaryButton: { backgroundColor: '#f8f8f8', borderWidth: 1, borderColor: '#e0e0e0' },
-  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  secondaryButtonText: { color: '#333', fontSize: 16, fontWeight: '600' },
+  reticleWrap: {
+    position: 'absolute',
+    left: 0, right: 0, top: 0, bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // White edge around the color ring so it reads on any photo
+  reticleOuter: {
+    width: RETICLE + 6,
+    height: RETICLE + 6,
+    borderRadius: (RETICLE + 6) / 2,
+    borderWidth: 3,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+  },
+  reticle: {
+    width: RETICLE,
+    height: RETICLE,
+    borderRadius: RETICLE / 2,
+    borderWidth: RETICLE_STROKE,
+    backgroundColor: 'transparent',
+  },
+  reticleDot: {
+    position: 'absolute',
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.6)',
+  },
+  hint: {
+    position: 'absolute',
+    top: 12,
+    alignSelf: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  hintText: { color: '#FFFFFF', fontSize: 13 },
+
+  panel: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 16,
+    paddingHorizontal: 16,
+  },
+  liveRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  liveSwatch: { width: 48, height: 48, borderRadius: 24, borderWidth: 1, borderColor: '#E5E7EB' },
+  liveInfo: { flex: 1 },
+  liveHex: { fontSize: 20, fontWeight: '700', color: '#111827', fontVariant: ['tabular-nums'] },
+  liveCaption: { fontSize: 12, color: '#6B7280', marginTop: 2 },
+  pickButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 44,
+    paddingHorizontal: 18,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.08)',
+  },
+  pickText: { fontSize: 15, fontWeight: '700' },
+  disabled: { opacity: 0.45 },
+
+  pickedRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, gap: 12 },
+  pickedChips: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 8, minHeight: 36, alignItems: 'center' },
+  pickedHint: { color: '#6B7280', fontSize: 13 },
+  chip: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.08)',
+  },
+  doneButton: { height: 40, paddingHorizontal: 18, borderRadius: 999, backgroundColor: '#111827', justifyContent: 'center' },
+  doneText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
 });

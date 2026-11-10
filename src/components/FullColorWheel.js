@@ -457,6 +457,16 @@ const FullColorWheel = forwardRef(function FullColorWheel({
         console.warn('FullColorWheel: setHandleHSL failed:', error.message);
       }
     },
+    // Make handle i the active one (the one the lightness ring and "follow active" track)
+    selectHandle: (i) => {
+      try {
+        const c = Math.min(SCHEME_COUNTS[scheme] || 1, MAX_HANDLES);
+        activeIdx.value = Math.max(0, Math.min(i, c - 1));
+        emitPaletteJS('end');
+      } catch (error) {
+        console.warn('FullColorWheel: selectHandle failed:', error.message);
+      }
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [scheme, linked, setHandleHSL, activeIdx]);
 

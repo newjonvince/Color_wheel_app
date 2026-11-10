@@ -1,7 +1,7 @@
 // screens/ColorWheelScreen/index.js
 // Layout (Canva-style): wheel -> tools -> 1. pick a color -> 2. palette type -> palette -> actions
 import React, { useRef, useCallback, useMemo, useState, useEffect } from 'react';
-import { ScrollView, View, Text, TextInput, Pressable, Alert, ActivityIndicator } from 'react-native';
+import { ScrollView, View, Text, TextInput, Pressable, Alert, ActivityIndicator, Modal } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import PropTypes from 'prop-types';
 import { Ionicons } from '@expo/vector-icons';
@@ -54,9 +54,12 @@ const IS_DEBUG_MODE = () => {
 
 // Optional components (fall back to nothing if they fail to load)
 let CoolorsColorExtractor = null;
+let pickPhotoAsync = async () => null;
 let ApiIntegrationStatus = null;
 try {
-  CoolorsColorExtractor = require('../../components/CoolorsColorExtractor').default;
+  const extractorModule = require('../../components/CoolorsColorExtractor');
+  CoolorsColorExtractor = extractorModule.default;
+  pickPhotoAsync = extractorModule.pickPhotoAsync || pickPhotoAsync;
 } catch (error) {
   console.warn('CoolorsColorExtractor not available:', error.message);
   CoolorsColorExtractor = () => null;
@@ -94,7 +97,6 @@ const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = ()
     linked = true,
     activeIdx = 0,
     selectedFollowsActive = true,
-    showExtractor = false,
     hslInputs = { h: '0', s: '100', l: '50' },
     updateHslInput = () => {},
     applyHslInputs = () => {},
@@ -103,8 +105,6 @@ const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = ()
     randomize = () => {},
     toggleLinked = () => {},
     toggleSelectedFollowsActive = () => {},
-    openExtractor = () => {},
-    closeExtractor = () => {},
     handleExtractorComplete = () => {},
     handleColorsChange = () => {},
     handleHexChange = () => {},
@@ -204,10 +204,38 @@ const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = ()
     }
   }, [currentUser, saving, onSaveColorMatch, colorMatchData]);
 
-  // The extractor reports { imageUri, slots, activeIndex }; the hook wants the color list
-  const handleExtractorDone = useCallback((result) => {
-    handleExtractorComplete(Array.isArray(result) ? result : (result?.slots || []));
-  }, [handleExtractorComplete]);
+  // ----- color from a photo -----
+  // Pick the photo first, then present the extractor: presenting the picker from inside an
+  // already-open modal is unreliable on iOS.
+  const [photoUri, setPhotoUri] = useState(null);
+  const pickingRef = useRef(false);
+
+  const startPhotoPick = useCallback(async (source) => {
+    if (pickingRef.current) return;
+    pickingRef.current = true;
+    try {
+      const uri = await pickPhotoAsync(source);
+      // Let the system picker finish dismissing before our modal presents
+      if (uri) setTimeout(() => setPhotoUri(uri), 300);
+    } catch (error) {
+      console.error('Photo pick failed:', error?.message || error);
+      Alert.alert('Could not open photos', 'Please try again.');
+    } finally {
+      pickingRef.current = false;
+    }
+  }, []);
+
+  const closePhoto = useCallback(() => setPhotoUri(null), []);
+
+  // The picked color becomes the wheel's base color (handle 1), and the scheme rebuilds around it
+  const handlePhotoColor = useCallback((result) => {
+    const hex = Array.isArray(result) ? result[0] : result?.slots?.[0];
+    setPhotoUri(null);
+    if (!isValidHex6(hex)) return;
+    wheelRef.current?.selectHandle?.(0);
+    handleActiveHandleChange(0);
+    handleExtractorComplete([hex]);
+  }, [handleActiveHandleChange, handleExtractorComplete]);
 
   return (
     <ScrollView
@@ -286,25 +314,46 @@ const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = ()
               : <Ionicons name="bookmark-outline" size={18} color="#FFFFFF" />}
             <Text style={styles.primaryButtonText}>{saving ? 'Saving…' : 'Save palette'}</Text>
           </Pressable>
+        </View>
+
+        <Text style={styles.photoLabel}>Pick a color from a photo</Text>
+        <View style={styles.photoRow}>
           <Pressable
             style={styles.secondaryButton}
-            onPress={openExtractor}
+            onPress={() => startPhotoPick('camera')}
             accessibilityRole="button"
-            accessibilityLabel="Extract colors from a photo"
+            accessibilityLabel="Take a photo and pick a color from it"
           >
             <Ionicons name="camera-outline" size={18} color={colorWheelColors.text} />
-            <Text style={styles.secondaryButtonText}>From photo</Text>
+            <Text style={styles.secondaryButtonText}>Camera</Text>
+          </Pressable>
+          <Pressable
+            style={styles.secondaryButton}
+            onPress={() => startPhotoPick('library')}
+            accessibilityRole="button"
+            accessibilityLabel="Choose a photo and pick a color from it"
+          >
+            <Ionicons name="images-outline" size={18} color={colorWheelColors.text} />
+            <Text style={styles.secondaryButtonText}>Photo library</Text>
           </Pressable>
         </View>
       </View>
 
-      {showExtractor && (
-        <CoolorsColorExtractor
-          initialSlots={5}
-          onComplete={handleExtractorDone}
-          onClose={closeExtractor}
-        />
-      )}
+      <Modal
+        visible={!!photoUri}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={closePhoto}
+      >
+        {photoUri && (
+          <CoolorsColorExtractor
+            initialImageUri={photoUri}
+            maxColors={1}
+            onComplete={handlePhotoColor}
+            onClose={closePhoto}
+          />
+        )}
+      </Modal>
 
       {IS_DEBUG_MODE() && <ApiIntegrationStatus />}
     </ScrollView>
