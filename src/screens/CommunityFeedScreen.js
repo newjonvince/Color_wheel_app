@@ -1,928 +1,160 @@
+// screens/CommunityFeedScreen.js - A Pinterest-style feed of palettes people chose to share.
+// Tap a pin to see it large; heart it; save it into one of your boards.
+import React, { useState, useCallback, useRef, useMemo } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { paletteApi, withLikeToggled, sendLike } from '../services/paletteApi';
+import { PaletteGrid } from '../components/palettes/PaletteGrid';
+import { PaletteDetailModal } from '../components/palettes/PaletteDetailModal';
+import { SaveToBoardSheet } from '../components/palettes/SaveToBoardSheet';
+import { ui } from '../components/palettes/theme';
 
-/*
-IMPROVEMENTS MADE:
-1. Added robust error handling around all async calls.
-2. Added loading state management and button disabling.
-3. Unified API response handling (success, data, message).
-4. Optimistic UI updates with rollback on API failure.
-5. Prevented overlapping pagination requests.
-6. Added server-side query parameter validation.
-7. Applied authentication middleware to secure routes.
-8. Structured for easy DB integration instead of mock data.
-9. Cleaned unused imports, added inline comments, improved readability.
-*/
+const STALE_MS = 60 * 1000; // refetch on focus only if the feed is older than this
 
-  import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-  import {
-    StyleSheet,
-    Text,
-    View,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    Image,
-    RefreshControl,
-    Alert,
-    ActivityIndicator,
-    Share,
-    FlatList,
-    Animated,
-    TextInput,
-    ScrollView,
-  } from 'react-native';
-  import { Ionicons } from '@expo/vector-icons';
+function CommunityFeedScreen({ currentUser, navigation }) {
+  const [palettes, setPalettes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [saving, setSaving] = useState(null); // palette being saved from the grid
 
-  // CRASH FIX: Lazy-load CommunityModal to prevent early module initialization
-  let _CommunityModal = null;
-  let _CommunityModalLoadAttempted = false;
-  const getCommunityModal = () => {
-    if (_CommunityModalLoadAttempted) return _CommunityModal;
-    _CommunityModalLoadAttempted = true;
+  const nextOffset = useRef(0);       // null once the last page has loaded
+  const fetching = useRef(false);
+  const loadedAt = useRef(0);
+
+  const selected = useMemo(() => palettes.find((p) => p.id === selectedId) || null, [palettes, selectedId]);
+
+  const loadFirstPage = useCallback(async () => {
+    if (fetching.current) return;
+    fetching.current = true;
     try {
-      const mod = require('../components/CommunityModal');
-      _CommunityModal = mod?.default || mod;
+      const page = await paletteApi.feed(0);
+      setPalettes(page?.palettes || []);
+      nextOffset.current = page?.next_offset ?? null;
+      loadedAt.current = Date.now();
+      setFailed(false);
     } catch (error) {
-      console.warn('CommunityFeedScreen: CommunityModal load failed', error?.message);
-      _CommunityModal = () => null;
-    }
-    return _CommunityModal;
-  };
-
-  // CRASH FIX: Lazy-load apiPatterns to prevent early module initialization
-  let _apiPatterns = null;
-  let _apiPatternsLoadAttempted = false;
-  const getApiPatterns = () => {
-    if (_apiPatternsLoadAttempted) return _apiPatterns;
-    _apiPatternsLoadAttempted = true;
-    try {
-      const mod = require('../utils/apiHelpers');
-      _apiPatterns = mod?.apiPatterns || {};
-    } catch (error) {
-      console.warn('CommunityFeedScreen: apiPatterns load failed', error?.message);
-      _apiPatterns = {
-        loadCommunityPosts: async () => ({ success: false, error: 'apiPatterns not available' }),
-      };
-    }
-    return _apiPatterns;
-  };
-
-  // CRASH FIX: Lazy-load safePostId to prevent early module initialization
-  let _safePostId = null;
-  let _safePostIdLoadAttempted = false;
-  const getSafePostId = () => {
-    if (_safePostIdLoadAttempted) return _safePostId;
-    _safePostIdLoadAttempted = true;
-    try {
-      const mod = require('../utils/keyExtractors');
-      _safePostId = mod?.safePostId || ((item, index) => String(index));
-    } catch (error) {
-      console.warn('CommunityFeedScreen: safePostId load failed', error?.message);
-      _safePostId = (item, index) => String(index);
-    }
-    return _safePostId;
-  };
-
-  let _apiServiceInstance = null;
-  let _apiServiceLoadAttempted = false;
-  let _apiServiceLoadError = null;
-
-  const getApiServiceInstance = () => {
-    if (_apiServiceLoadAttempted) return _apiServiceInstance;
-    _apiServiceLoadAttempted = true;
-    try {
-      const mod = require('../services/safeApiService');
-      _apiServiceInstance = mod?.default || mod;
-    } catch (error) {
-      _apiServiceLoadError = error;
-      console.warn('CommunityFeedScreen: safeApiService load failed', error?.message || error);
-      _apiServiceInstance = null;
-    }
-    return _apiServiceInstance;
-  };
-
-  const ApiService = {
-    get: async (...args) => {
-      const inst = getApiServiceInstance();
-      if (typeof inst?.get === 'function') return inst.get(...args);
-      throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
-    },
-    post: async (...args) => {
-      const inst = getApiServiceInstance();
-      if (typeof inst?.post === 'function') return inst.post(...args);
-      throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
-    },
-    delete: async (...args) => {
-      const inst = getApiServiceInstance();
-      if (typeof inst?.delete === 'function') return inst.delete(...args);
-      throw new Error(_apiServiceLoadError?.message || 'ApiService not available');
-    },
-    getToken: () => {
-      const inst = getApiServiceInstance();
-      return typeof inst?.getToken === 'function' ? inst.getToken() : undefined;
-    },
-  };
-
-  Object.defineProperty(ApiService, 'ready', {
-    enumerable: true,
-    get: () => {
-      const inst = getApiServiceInstance();
-      return inst?.ready || Promise.resolve();
-    },
-  });
-  // Double-tap like wrapper with heart burst animation
-  const DoubleTapLike = ({ children, onDoubleTap, onLongPress }) => {
-    const lastTap = useRef(null);
-    const scale = useRef(new Animated.Value(0.6)).current;
-    const opacity = useRef(new Animated.Value(0)).current;
-
-    useEffect(() => {
-      return () => {
-        try {
-          scale.stopAnimation?.();
-        } catch (_) {
-          // ignore
-        }
-        try {
-          opacity.stopAnimation?.();
-        } catch (_) {
-          // ignore
-        }
-      };
-    }, [opacity, scale]);
-
-    const animate = useCallback(() => {
-      scale.setValue(0.6);
-      opacity.setValue(1);
-      Animated.parallel([
-        Animated.spring(scale, { toValue: 1.4, useNativeDriver: true, bounciness: 12 }),
-        Animated.timing(opacity, { toValue: 0, duration: 600, delay: 200, useNativeDriver: true }),
-      ]).start();
-    }, [opacity, scale]);
-
-    const handlePress = useCallback(() => {
-      const now = Date.now();
-      if (lastTap.current && now - lastTap.current < 300) {
-        onDoubleTap && onDoubleTap();
-        animate();
-      }
-      lastTap.current = now;
-    }, [animate, onDoubleTap]);
-
-    return (
-      <TouchableWithoutFeedback onPress={handlePress} onLongPress={onLongPress} delayLongPress={300}>
-        <View>
-          {children}
-          <Animated.View pointerEvents="none" style={[styles.heartBurst, { opacity, transform: [{ scale }] }]}>
-            <Ionicons name="heart" size={96} color="#ff3040" />
-          </Animated.View>
-        </View>
-      </TouchableWithoutFeedback>
-    );
-  };
-
-  function CommunityFeedScreen({ navigation, currentUser }) {
-    const [posts, setPosts] = useState([]);
-    const [refreshing, setRefreshing] = useState(false);
-    const [loading, setLoading] = useState(true);
-    const [showCommunityModal, setShowCommunityModal] = useState(false);
-    const [pageCursor, setPageCursor] = useState(null); // backend cursor or page number
-    const [hasMore, setHasMore] = useState(true);
-    const [loadingMore, setLoadingMore] = useState(false);
-
-    const likeLocks = useRef(new Set()); // prevent double-like spamming per post
-    const followLocks = useRef(new Set());
-
-    const parseColors = useCallback((maybeColors) => {
-      if (!maybeColors) return [];
-      if (Array.isArray(maybeColors)) return maybeColors;
-      try {
-        const parsed = JSON.parse(maybeColors);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch {
-        return [];
-      }
-    }, []);
-
-    const fetchPage = useCallback(async (cursor = null, replace = false) => {
-      if (loading && !replace) return;
-      setLoading(true);
-      
-      // CRASH FIX: Add error handling even though safeApiCall shouldn't throw
-      try {
-        const apiPatterns = getApiPatterns();
-        const result = await apiPatterns.loadCommunityPosts(cursor);
-        
-        if (result.success) {
-        const res = result.data;
-        const data = (res?.data ?? res) || [];
-        const next = res?.nextCursor ?? null;
-
-        const normalized = data.map((p) => ({
-          ...p,
-          colors: parseColors(p.colors),
-          is_liked: Boolean(p.is_liked),
-          likes_count: Number(p.likes_count ?? 0),
-          comments_count: Number(p.comments_count ?? 0),
-        }));
-
-          setPosts((prev) => (replace ? normalized : [...prev, ...normalized]));
-          setPageCursor(next);
-          setHasMore(Boolean(next) && normalized.length > 0);
-        } else {
-          console.error('Error fetching community page:', result.error);
-          // On error, ensure we don't break pagination state
-          if (replace) {
-            setPosts([]);
-          }
-          setHasMore(false);
-        }
-      } catch (error) {
-        // CRASH FIX: Handle unexpected errors from loadCommunityPosts
-        console.error('Unexpected error fetching community posts:', error);
-        if (replace) {
-          setPosts([]);
-        }
-        setHasMore(false);
-      }
-      
+      console.warn('CommunityFeedScreen: feed failed', error?.message);
+      setFailed(true);
+    } finally {
+      fetching.current = false;
       setLoading(false);
-    }, [parseColors, loading]);
+    }
+  }, []);
 
-    const loadInitial = useCallback(async () => {
-      try {
-        setLoading(true);
-        await fetchPage(null, true);
-      } catch (e) {
-        console.error('Error loading community posts:', e);
-        Alert.alert('Error', 'Failed to load community posts');
-      } finally {
-        setLoading(false);
-      }
-    }, [fetchPage]);
+  const loadMore = useCallback(async () => {
+    if (fetching.current || nextOffset.current == null || nextOffset.current === 0) return;
+    fetching.current = true;
+    setLoadingMore(true);
+    try {
+      const page = await paletteApi.feed(nextOffset.current);
+      const incoming = page?.palettes || [];
+      setPalettes((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        return [...prev, ...incoming.filter((p) => !seen.has(p.id))];
+      });
+      nextOffset.current = page?.next_offset ?? null;
+    } catch (error) {
+      console.warn('CommunityFeedScreen: next page failed', error?.message);
+    } finally {
+      fetching.current = false;
+      setLoadingMore(false);
+    }
+  }, []);
 
-    useEffect(() => {
-      let cancelled = false;
-      try {
-        const token = ApiService.getToken();
-        if (!token) return;
-        loadInitial();
-      } catch (e) {
-        if (!cancelled) {
-          console.warn('CommunityFeedScreen: token check failed', e?.message || e);
-        }
-      }
-      return () => {
-        cancelled = true;
-      };
-    }, [loadInitial]);
+  useFocusEffect(useCallback(() => {
+    if (Date.now() - loadedAt.current > STALE_MS) loadFirstPage();
+  }, [loadFirstPage]));
 
-    const onRefresh = useCallback(async () => {
-      setRefreshing(true);
-      try {
-        await fetchPage(null, true);
-      } finally {
-        setRefreshing(false);
-      }
-    }, [fetchPage]);
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadFirstPage();
+    setRefreshing(false);
+  }, [loadFirstPage]);
 
-    const loadMore = useCallback(async () => {
-      if (!hasMore || loadingMore || loading) return;
-      try {
-        setLoadingMore(true);
-        await fetchPage(pageCursor, false);
-      } catch (e) {
-        console.warn('Load more failed:', e);
-      } finally {
-        setLoadingMore(false);
-      }
-    }, [fetchPage, hasMore, loadingMore, loading, pageCursor]);
+  const patchPalette = useCallback((id, change) => {
+    setPalettes((prev) => prev.map((p) => (p.id === id ? change(p) : p)));
+  }, []);
 
-    const updatePostsForUser = useCallback((userId, patch) => {
-      setPosts((prev) => prev.map((p) => (p.user_id === userId ? { ...p, ...patch } : p)));
-    }, []);
+  const toggleLike = useCallback((palette) => {
+    if (!currentUser) return;
+    patchPalette(palette.id, withLikeToggled);
+    sendLike(palette).catch(() => patchPalette(palette.id, withLikeToggled));
+  }, [currentUser, patchPalette]);
 
-    const handleFollowUser = useCallback(async (userId) => {
-      if (followLocks.current.has(userId)) return;
-      followLocks.current.add(userId);
+  const handleDetailChange = useCallback((event) => {
+    if (event.type === 'updated') {
+      // Un-sharing your own palette takes it out of the feed
+      if (event.palette.privacy !== 'public') setPalettes((prev) => prev.filter((p) => p.id !== event.palette.id));
+      else patchPalette(event.palette.id, (p) => ({ ...p, ...event.palette }));
+    }
+    if (event.type === 'deleted' || event.type === 'hidden') {
+      setPalettes((prev) => prev.filter((p) => p.id !== event.id));
+    }
+    if (event.type === 'blocked') {
+      setPalettes((prev) => prev.filter((p) => p.user_id !== event.userId));
+    }
+  }, [patchPalette]);
 
-      updatePostsForUser(userId, { is_following: true });
-      try {
-        await ApiService.ready; // ensure token is loaded from SecureStore first
-        await ApiService.post(`/community/users/${userId}/follow`);
-      } catch (error) {
-        console.error('Error following user:', error);
-        Alert.alert('Error', 'Failed to follow user');
-        // rollback
-        updatePostsForUser(userId, { is_following: false });
-      } finally {
-        followLocks.current.delete(userId);
-      }
-    }, [updatePostsForUser]);
+  const openOnWheel = useCallback((palette) => {
+    setSelectedId(null);
+    navigation?.navigate('ColorWheel', {
+      applyPalette: { hex: palette.base_color, scheme: palette.scheme, nonce: Date.now() },
+    });
+  }, [navigation]);
 
-    const handleUnfollowUser = useCallback(async (userId) => {
-      if (followLocks.current.has(userId)) return;
-      followLocks.current.add(userId);
+  const header = (
+    <View style={styles.header}>
+      <Text style={styles.title}>Explore</Text>
+      <Text style={styles.subtitle}>Palettes and outfit photos shared by the community.</Text>
+    </View>
+  );
 
-      updatePostsForUser(userId, { is_following: false });
-      try {
-        await ApiService.ready; // ensure token is loaded from SecureStore first
-        await ApiService.delete(`/community/users/${userId}/follow`);
-      } catch (error) {
-        console.error('Error unfollowing user:', error);
-        Alert.alert('Error', 'Failed to unfollow user');
-        // rollback
-        updatePostsForUser(userId, { is_following: true });
-      } finally {
-        followLocks.current.delete(userId);
-      }
-    }, [updatePostsForUser]);
+  return (
+    <View style={styles.root}>
+      <PaletteGrid
+        palettes={palettes}
+        loading={loading}
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        onEndReached={loadMore}
+        loadingMore={loadingMore}
+        onPressPalette={(p) => setSelectedId(p.id)}
+        onToggleLike={currentUser ? toggleLike : undefined}
+        onSave={currentUser ? setSaving : undefined}
+        header={header}
+        emptyTitle={failed ? 'Could not load the feed' : 'Nothing shared yet'}
+        emptyText={failed
+          ? 'Check your connection and pull down to try again.'
+          : 'Be the first: save a palette from the Color Wheel or a photo and switch on “Share with the community”.'}
+      />
 
-    const toggleLikeOptimistic = useCallback((postId) => {
-      setPosts((prev) =>
-        prev.map((p) =>
-          p.id === postId
-            ? {
-                ...p,
-                is_liked: !p.is_liked,
-                likes_count: (p.likes_count || 0) + (p.is_liked ? -1 : 1),
-              }
-            : p
-        )
-      );
-    }, []);
+      <PaletteDetailModal
+        palette={selected}
+        visible={!!selected}
+        onClose={() => setSelectedId(null)}
+        currentUserId={currentUser?.id}
+        onToggleLike={currentUser ? toggleLike : undefined}
+        onOpenOnWheel={openOnWheel}
+        onChange={handleDetailChange}
+      />
 
-    const handleLikePost = useCallback(async (postId) => {
-      if (likeLocks.current.has(postId)) return;
-      likeLocks.current.add(postId);
+      <SaveToBoardSheet
+        visible={!!saving}
+        palette={saving}
+        onClose={() => setSaving(null)}
+      />
+    </View>
+  );
+}
 
-      // optimistic update
-      toggleLikeOptimistic(postId);
-
-      try {
-        await ApiService.ready; // ensure token is loaded from SecureStore first
-        await ApiService.post(`/community/posts/${postId}/like`);
-      } catch (error) {
-        console.error('Error liking post:', error);
-        // rollback
-        toggleLikeOptimistic(postId);
-      } finally {
-        likeLocks.current.delete(postId);
-      }
-    }, [toggleLikeOptimistic]);
-
-    const handleShare = useCallback(async (post) => {
-      try {
-        await Share.share({
-          message: post.description ? `${post.description}
-${post.image_url || ''}` : (post.image_url || ''),
-          url: post.image_url || undefined,
-          title: `Styled by ${post.username}`,
-        });
-      } catch (e) {
-        console.warn('Share error:', e);
-      }
-    }, []);
-
-    const keyExtractor = useCallback((item, index) => {
-      const safePostId = getSafePostId();
-      return safePostId(item, index);
-    }, []);
-
-    const renderPost = useCallback(({ item: post }) => (
-      <View style={styles.postCard}>
-        {/* User Header */}
-        <View style={styles.postHeader}>
-          <View style={styles.userInfo}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {post.username?.charAt(0).toUpperCase() || 'U'}
-              </Text>
-            </View>
-            <View style={styles.userDetails}>
-              <Text style={styles.username}>Styled by {post.username}</Text>
-              <Text style={styles.suggestion}>suggested for you</Text>
-            </View>
-          </View>
-
-          {post.user_id !== currentUser?.id && (
-            <TouchableOpacity
-              style={[styles.followButton, post.is_following && styles.followingButton]}
-              onPress={() =>
-                post.is_following ? handleUnfollowUser(post.user_id) : handleFollowUser(post.user_id)
-              }
-            >
-              <Text style={[styles.followButtonText, post.is_following && styles.followingButtonText]}>
-                {post.is_following ? 'Following' : 'Follow'}
-              </Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Post Content */}
-        {post.image_url ? (
-          <DoubleTapLike onDoubleTap={() => handleLikePost(post.id)}>
-            <Image source={{ uri: post.image_url }} style={styles.postImage} />
-          </DoubleTapLike>
-        ) : null}
-
-        {/* Color Palette */}
-        {post.colors && post.colors.length > 0 && (
-          <View style={styles.colorPalette}>
-            {post.colors.map((color, index) => (
-              <View key={`${post.id}-${index}`} style={[styles.colorSwatch, { backgroundColor: color }]} />
-            ))}
-          </View>
-        )}
-
-        {/* Post Actions */}
-        <View style={styles.postActions}>
-          <TouchableOpacity style={styles.actionButton} onPress={() => handleLikePost(post.id)}>
-            <Ionicons
-              name={post.is_liked ? 'heart' : 'heart-outline'}
-              size={24}
-              color={post.is_liked ? '#ff3040' : '#666'}
-            />
-            <Text style={styles.actionText}>{post.likes_count || 0}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton}>
-            <Ionicons name="chatbubble-outline" size={24} color="#666" />
-            <Text style={styles.actionText}>{post.comments_count || 0}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.actionButton} onPress={() => handleShare(post)}>
-            <Ionicons name="share-outline" size={24} color="#666" />
-          </TouchableOpacity>
-
-          <View style={styles.spacer} />
-
-          <TouchableOpacity style={styles.actionButton}>
-            <Text style={styles.tapToReact}>👏 Tap to react</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Post Description */}
-        {post.description ? <Text style={styles.postDescription}>{post.description}</Text> : null}
-      </View>
-    ), [currentUser?.id, handleFollowUser, handleLikePost, handleShare, handleUnfollowUser]);
-
-    const ListEmpty = useCallback(() => (
-      <View style={styles.emptyState}>
-        <Ionicons name="people-outline" size={64} color="#ccc" />
-        <Text style={styles.emptyStateText}>No posts yet</Text>
-        <Text style={styles.emptyStateSubtext}>Follow some users to see their posts here</Text>
-      </View>
-    ), []);
-
-    const ListFooter = useCallback(() => {
-      if (!loadingMore) return null;
-      return (
-        <View style={{ paddingVertical: 16 }}>
-          <ActivityIndicator />
-        </View>
-      );
-    }, [loadingMore]);
-
-    return (
-      <View style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <View style={styles.profileCircle}>
-              <Text style={styles.profileInitial}>
-                {currentUser?.username?.charAt(0).toUpperCase() || 'U'}
-              </Text>
-              <View style={styles.percentageBadge}>
-                <Text style={styles.percentageText}>15%</Text>
-              </View>
-            </View>
-            <Text style={styles.greeting}>Hey, {currentUser?.username || 'User'}!</Text>
-          </View>
-
-          <View style={styles.headerRight}>
-            <TouchableOpacity style={styles.headerIcon} onPress={onRefresh}>
-              <Ionicons name="refresh-outline" size={24} color="#666" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.headerIcon}>
-              <Ionicons name="notifications-outline" size={24} color="#666" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.headerIcon} onPress={() => setShowCommunityModal(true)}>
-              <Ionicons name="person-outline" size={24} color="#666" />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Navigation Icons */}
-        <View style={styles.navIcons}>
-          <TouchableOpacity 
-            style={styles.navIcon} 
-            onPress={() => {
-              // CRASH FIX: Navigate to existing route instead of non-existent 'Upload'
-              try {
-                navigation.navigate('Boards'); // Navigate to Boards where users can save/upload
-              } catch (error) {
-                console.error('Navigation error:', error);
-              }
-            }}
-          >
-            <View style={styles.uploadIcon}>
-              <Ionicons name="cloud-upload" size={24} color="#fff" />
-            </View>
-            <Text style={styles.navText}>Upload</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.navIcon} 
-            onPress={() => {
-              // SAFE NAVIGATION: Add error handling for ColorWheel route
-              try {
-                navigation.navigate('ColorWheel');
-              } catch (error) {
-                console.error('Navigation error:', error);
-              }
-            }}
-          >
-            <View style={styles.wheelIcon}>
-              <Ionicons name="color-palette" size={24} color="#8B5CF6" />
-            </View>
-            <Text style={styles.navText}>Wheel</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.navIcon}>
-            <View style={styles.planIcon}>
-              <Ionicons name="calendar" size={24} color="#10B981" />
-            </View>
-            <Text style={styles.navText}>Plan</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.navIcon}>
-            <View style={styles.reviewIcon}>
-              <Ionicons name="bar-chart" size={24} color="#F59E0B" />
-            </View>
-            <Text style={styles.navText}>Review</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.navIcon}>
-            <View style={styles.readIcon}>
-              <Ionicons name="document-text" size={24} color="#6B7280" />
-            </View>
-            <Text style={styles.navText}>Read</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Tab Navigation */}
-        <View style={styles.tabNavigation}>
-          <TouchableOpacity style={[styles.tab, styles.activeTab]}>
-            <Text style={[styles.tabText, styles.activeTabText]}>For You</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.tab}>
-            <Text style={styles.tabText}>Outfit Selfies</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.tab}>
-            <Text style={styles.tabText}>Style Submissions: All</Text>
-            <Ionicons name="chevron-down" size={16} color="#666" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.tab}>
-            <Text style={styles.tabText}>Outfits</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Posts Feed */}
-        {loading ? (
-          <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-            <ActivityIndicator />
-          </View>
-        ) : (
-          <FlatList
-            data={posts}
-            keyExtractor={keyExtractor}
-            renderItem={renderPost}
-            contentContainerStyle={{ paddingBottom: 80 }}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-            onEndReachedThreshold={0.4}
-            onEndReached={loadMore}
-            ListFooterComponent={ListFooter}
-            ListEmptyComponent={ListEmpty}
-          />
-        )}
-
-        {/* Bottom Navigation */}
-        <View style={styles.bottomNav}>
-          <TouchableOpacity style={styles.bottomNavItem}>
-            <Ionicons name="apps" size={24} color="#666" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.bottomNavItem}>
-            <Ionicons name="bookmark" size={24} color="#666" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.bottomNavItem}>
-            <Ionicons name="diamond" size={24} color="#666" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.bottomNavItem} onPress={() => setShowCommunityModal(true)}>
-            <Ionicons name="people" size={24} color="#666" />
-            <Text style={styles.bottomNavText}>Community</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Community Modal */}
-        {(() => {
-          const CommunityModal = getCommunityModal();
-          return <CommunityModal visible={showCommunityModal} onClose={() => setShowCommunityModal(false)} currentUser={currentUser} />;
-        })()}
-      </View>
-    );
-  }
-
-  const styles = StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: '#fff',
-    },
-    header: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingTop: 50,
-      paddingBottom: 16,
-    },
-    headerLeft: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    profileCircle: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      backgroundColor: '#8B5CF6',
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginRight: 12,
-      position: 'relative',
-    },
-    profileInitial: {
-      color: '#fff',
-      fontSize: 18,
-      fontWeight: 'bold',
-    },
-    percentageBadge: {
-      position: 'absolute',
-      bottom: -2,
-      right: -2,
-      backgroundColor: '#F59E0B',
-      borderRadius: 10,
-      paddingHorizontal: 6,
-      paddingVertical: 2,
-    },
-    percentageText: {
-      color: '#fff',
-      fontSize: 10,
-      fontWeight: 'bold',
-    },
-    greeting: {
-      fontSize: 20,
-      fontWeight: 'bold',
-      color: '#1F2937',
-    },
-    headerRight: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    headerIcon: {
-      marginLeft: 16,
-    },
-    navIcons: {
-      flexDirection: 'row',
-      justifyContent: 'space-around',
-      paddingHorizontal: 16,
-      paddingVertical: 16,
-    },
-    navIcon: {
-      alignItems: 'center',
-    },
-    uploadIcon: {
-      width: 48,
-      height: 48,
-      borderRadius: 12,
-      backgroundColor: '#EF4444',
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 4,
-    },
-    wheelIcon: {
-      width: 48,
-      height: 48,
-      borderRadius: 12,
-      backgroundColor: '#F3E8FF',
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 4,
-    },
-    planIcon: {
-      width: 48,
-      height: 48,
-      borderRadius: 12,
-      backgroundColor: '#ECFDF5',
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 4,
-    },
-    reviewIcon: {
-      width: 48,
-      height: 48,
-      borderRadius: 12,
-      backgroundColor: '#FFFBEB',
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 4,
-    },
-    readIcon: {
-      width: 48,
-      height: 48,
-      borderRadius: 12,
-      backgroundColor: '#F9FAFB',
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginBottom: 4,
-    },
-    navText: {
-      fontSize: 12,
-      color: '#6B7280',
-      fontWeight: '500',
-    },
-    tabNavigation: {
-      flexDirection: 'row',
-      paddingHorizontal: 16,
-      borderBottomWidth: 1,
-      borderBottomColor: '#E5E7EB',
-    },
-    tab: {
-      paddingVertical: 12,
-      paddingHorizontal: 8,
-      marginRight: 16,
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    activeTab: {
-      borderBottomWidth: 2,
-      borderBottomColor: '#1F2937',
-    },
-    tabText: {
-      fontSize: 14,
-      color: '#6B7280',
-      marginRight: 4,
-    },
-    activeTabText: {
-      color: '#1F2937',
-      fontWeight: '600',
-    },
-    postCard: {
-      backgroundColor: '#fff',
-      marginBottom: 16,
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-    },
-    postHeader: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 12,
-    },
-    userInfo: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    avatar: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
-      backgroundColor: '#8B5CF6',
-      justifyContent: 'center',
-      alignItems: 'center',
-      marginRight: 8,
-    },
-    avatarText: {
-      color: '#fff',
-      fontSize: 14,
-      fontWeight: 'bold',
-    },
-    userDetails: {
-      flex: 1,
-    },
-    username: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: '#1F2937',
-    },
-    suggestion: {
-      fontSize: 12,
-      color: '#6B7280',
-    },
-    followButton: {
-      backgroundColor: '#BFFF00',
-      paddingHorizontal: 16,
-      paddingVertical: 6,
-      borderRadius: 20,
-    },
-    followingButton: {
-      backgroundColor: '#E5E7EB',
-    },
-    followButtonText: {
-      fontSize: 12,
-      fontWeight: '600',
-      color: '#1F2937',
-    },
-    followingButtonText: {
-      color: '#6B7280',
-    },
-    postImage: {
-      width: '100%',
-      height: 200,
-      borderRadius: 8,
-      marginBottom: 12,
-    },
-    heartBurst: {
-      position: 'absolute',
-      top: '45%',
-      left: 0,
-      right: 0,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    colorPalette: {
-      flexDirection: 'row',
-      marginBottom: 12,
-    },
-    colorSwatch: {
-      width: 30,
-      height: 30,
-      borderRadius: 15,
-      marginRight: 8,
-      borderWidth: 2,
-      borderColor: '#fff',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.1,
-      shadowRadius: 4,
-      elevation: 2,
-    },
-    postActions: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 8,
-    },
-    actionButton: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginRight: 16,
-    },
-    actionText: {
-      fontSize: 12,
-      color: '#6B7280',
-      marginLeft: 4,
-    },
-    spacer: {
-      flex: 1,
-    },
-    tapToReact: {
-      fontSize: 12,
-      color: '#6B7280',
-    },
-    postDescription: {
-      fontSize: 14,
-      color: '#1F2937',
-      lineHeight: 20,
-    },
-    emptyState: {
-      alignItems: 'center',
-      paddingVertical: 64,
-    },
-    emptyStateText: {
-      fontSize: 18,
-      fontWeight: '600',
-      color: '#9CA3AF',
-      marginTop: 16,
-    },
-    emptyStateSubtext: {
-      fontSize: 14,
-      color: '#9CA3AF',
-      textAlign: 'center',
-      marginTop: 8,
-    },
-    bottomNav: {
-      flexDirection: 'row',
-      justifyContent: 'space-around',
-      paddingVertical: 12,
-      borderTopWidth: 1,
-      borderTopColor: '#E5E7EB',
-      backgroundColor: '#fff',
-    },
-    bottomNavItem: {
-      alignItems: 'center',
-    },
-    bottomNavText: {
-      fontSize: 10,
-      color: '#6B7280',
-      marginTop: 2,
-    },
-  });
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: ui.bg },
+  header: { marginTop: 4, marginBottom: 14 },
+  title: { fontSize: 24, fontWeight: '800', color: ui.text },
+  subtitle: { marginTop: 2, fontSize: 14, color: ui.muted },
+});
 
 export default CommunityFeedScreen;

@@ -1042,3 +1042,5 @@ export default safeApiService;
 
 
 
+
+export { getApiRoot };

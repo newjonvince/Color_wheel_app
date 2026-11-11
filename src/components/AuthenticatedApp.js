@@ -62,6 +62,24 @@ const getCommunityFeedScreen = () => {
   return _CommunityFeedScreen;
 };
 
+let _StyleGuideScreen = null;
+let _StyleGuideScreenLoadAttempted = false;
+const getStyleGuideScreen = () => {
+  if (_StyleGuideScreen) return _StyleGuideScreen;
+  if (_StyleGuideScreenLoadAttempted) return _StyleGuideScreen;
+  _StyleGuideScreenLoadAttempted = true;
+  try {
+    const mod = require('../screens/StyleGuideScreen');
+    _StyleGuideScreen = mod?.default || mod;
+  } catch (error) {
+    console.warn('AuthenticatedApp: StyleGuideScreen load failed', error?.message);
+    _StyleGuideScreen = function StyleGuideScreenLoadFailure() {
+      throw new Error(`StyleGuideScreen load failed: ${error?.message || String(error)}`);
+    };
+  }
+  return _StyleGuideScreen;
+};
+
 let _UserSettingsScreen = null;
 let _UserSettingsScreenLoadAttempted = false;
 const getUserSettingsScreen = () => {
@@ -199,7 +217,7 @@ const AuthenticatedApp = ({ user = null, handleLogout }) => {
         name="Boards"
         options={{
           title: 'Boards',
-          headerTitle: 'My Boards',
+          headerTitle: 'Boards',
           tabBarIcon: renderTabIcon('Boards'),
         }}
       >
@@ -229,6 +247,19 @@ const AuthenticatedApp = ({ user = null, handleLogout }) => {
               currentUser={user}
             />
           );
+        }}
+      </Tab.Screen>
+      <Tab.Screen
+        name="Guide"
+        options={{
+          title: 'Guide',
+          headerTitle: 'Style Guide',
+          tabBarIcon: renderTabIcon('Guide'),
+        }}
+      >
+        {(props) => {
+          const StyleGuideScreen = getStyleGuideScreen();
+          return <StyleGuideScreen {...props} />;
         }}
       </Tab.Screen>
       <Tab.Screen

@@ -1,0 +1,156 @@
+// content/styleGuide.js - Copy for the Guide tab. Plain data so it can be edited without touching UI code.
+
+// How the three controls on the Color Wheel map to color theory
+export const WHEEL_BASICS = [
+  {
+    key: 'hue',
+    icon: 'color-palette-outline',
+    title: 'Hue',
+    where: 'Around the wheel',
+    body: 'Hue is the color family: red, yellow, teal, violet. Moving a handle around the wheel changes the hue. Colors next to each other feel calm together; colors across from each other create energy.',
+  },
+  {
+    key: 'saturation',
+    icon: 'contrast-outline',
+    title: 'Saturation',
+    where: 'Center to edge',
+    body: 'Saturation is intensity. The edge of the wheel is vivid; the center is muted and gray. Muted colors are easier to wear head to toe. Save the vivid ones for a single piece or an accessory.',
+  },
+  {
+    key: 'lightness',
+    icon: 'sunny-outline',
+    title: 'Lightness',
+    where: 'The outer ring',
+    body: 'Lightness runs from black to white. Slide the ring handle to turn a color into a deep shade (navy, burgundy) or a soft tint (sky, blush). Mixing light and dark versions of one hue always looks intentional.',
+  },
+];
+
+// One entry per palette type on the wheel. `base` is the example color the preview is built from.
+export const SCHEMES = [
+  {
+    key: 'complementary',
+    title: 'Complementary',
+    tagline: 'Two opposites. Maximum contrast.',
+    base: '#1E6FD9',
+    what: 'Two colors directly across the wheel, like blue and orange or purple and yellow.',
+    wear: 'Let one color lead and use the other as the accent: a cobalt dress with a burnt-orange bag, or a forest-green coat over a rust knit. Equal amounts of both can feel like a sports uniform, so aim for roughly 80/20.',
+    tip: 'Too loud? Lower the saturation or darken one side. Navy and camel is a complementary pair in disguise.',
+  },
+  {
+    key: 'analogous',
+    title: 'Analogous',
+    tagline: 'Neighbors on the wheel. Effortless harmony.',
+    base: '#2FA36B',
+    what: 'Three colors sitting side by side, such as green, teal and blue.',
+    wear: 'The easiest scheme to get right. Pick the middle color for your largest piece and let the neighbors show up in a layer, a scarf or shoes. It reads as polished without looking planned.',
+    tip: 'Vary the lightness between pieces so the outfit has depth instead of blending into one block.',
+  },
+  {
+    key: 'split-complementary',
+    title: 'Split-complementary',
+    tagline: 'Contrast with a softer edge.',
+    base: '#D9483B',
+    what: 'One base color plus the two colors on either side of its opposite.',
+    wear: 'You get the pop of complementary colors with less tension. Wear the base as your main piece and bring the two accents in small doses, like a print that contains both, or a bag and a lip color.',
+    tip: 'A good first step when you want more color but pure opposites feel like too much.',
+  },
+  {
+    key: 'triadic',
+    title: 'Triadic',
+    tagline: 'Three evenly spaced colors. Playful and bold.',
+    base: '#E0B020',
+    what: 'Three colors spaced equally around the wheel, like red, yellow and blue.',
+    wear: 'Follow 60-30-10: one color dominates, one supports, one is a small spark. Muted or darkened triads (mustard, teal, plum) are far more wearable than the fully saturated versions.',
+    tip: 'Great for prints and accessories. One patterned piece can carry all three colors for you.',
+  },
+  {
+    key: 'tetradic',
+    title: 'Tetradic',
+    tagline: 'Four colors, two opposite pairs. Rich and layered.',
+    base: '#7A4FD0',
+    what: 'Two complementary pairs forming a rectangle on the wheel.',
+    wear: 'The hardest scheme to balance, and the most rewarding. Choose one color to dominate, keep two as supporting tones and use the fourth only as a detail. Grounding it with a neutral (white, denim, black) helps a lot.',
+    tip: 'If the outfit feels chaotic, remove one color. Three out of four usually still works.',
+  },
+  {
+    key: 'monochromatic',
+    title: 'Monochromatic',
+    tagline: 'One hue, many depths. Instantly elegant.',
+    base: '#3B6EA8',
+    what: 'A single hue in different lightness and saturation levels.',
+    wear: 'Dress head to toe in one color family and you look taller and more put together. The trick is contrast in texture: knit with leather, satin with denim, matte with shine.',
+    tip: 'Use the outer ring on the wheel to find lighter and darker versions of the same hue.',
+  },
+  {
+    key: 'compound',
+    title: 'Compound',
+    tagline: 'A neighbor pair plus its opposites.',
+    base: '#C8553D',
+    what: 'A base color, its neighbor, and the colors opposite them.',
+    wear: 'Think of it as two friendly colors with a contrasting pair for accents. It suits layered looks: warm tones in the clothes, cool tones in jewelry, shoes or a bag.',
+    tip: 'Keep the opposites smaller and darker than the main pair.',
+  },
+  {
+    key: 'shades',
+    title: 'Shades',
+    tagline: 'One color, mixed toward black.',
+    base: '#B5483C',
+    what: 'A color stepping down into deeper, darker versions of itself.',
+    wear: 'Deep shades are forgiving and formal. They suit evening looks, tailoring and cold-weather layers. Pair the darkest shade on the bottom with a brighter one near your face.',
+    tip: 'Burgundy, forest, navy and chocolate are all shades. They work as neutrals with more personality than black.',
+  },
+  {
+    key: 'tints',
+    title: 'Tints',
+    tagline: 'One color, mixed toward white.',
+    base: '#D94F8A',
+    what: 'A color stepping up into lighter, softer versions of itself.',
+    wear: 'Tints are pastels: fresh, soft and perfect for spring and summer. Combine two or three tints of different hues for a gentle look, or anchor one pastel with white or light denim.',
+    tip: 'Pastels can wash you out near the face. Add a deeper accent like a belt, a watch strap or a darker lip.',
+  },
+];
+
+export const STYLE_RULES = [
+  {
+    key: '60-30-10',
+    icon: 'pie-chart-outline',
+    title: 'The 60-30-10 rule',
+    body: 'Split an outfit into 60% main color (suit, dress, coat), 30% secondary (shirt, knit, trousers) and 10% accent (bag, shoes, jewelry). It keeps any palette from feeling busy.',
+    palette: ['#2F3E55', '#2F3E55', '#2F3E55', '#C9B79C', '#C9B79C', '#D9483B'],
+  },
+  {
+    key: 'neutrals',
+    icon: 'ellipse-outline',
+    title: 'Neutrals are your anchor',
+    body: 'Black, white, gray, navy, beige, camel and denim go with everything. When a palette from the wheel feels like too much, swap one of its colors for a neutral and keep the rest.',
+    palette: ['#111827', '#6B7280', '#E5E1D8', '#C9A77C', '#27405E'],
+  },
+  {
+    key: 'undertone',
+    icon: 'thermometer-outline',
+    title: 'Warm or cool?',
+    body: 'Colors lean warm (toward yellow and red) or cool (toward blue). Most people look best in one direction. Hold gold and silver near your face: if gold flatters, start with warm palettes; if silver does, start with cool ones.',
+    palette: ['#C8553D', '#E0A030', '#8A9A3B', '#2F6FA8', '#7A4FD0'],
+  },
+  {
+    key: 'one-statement',
+    icon: 'star-outline',
+    title: 'One statement at a time',
+    body: 'Give the eye one place to land. A vivid coat wants quiet pieces underneath; a bold print wants solid colors pulled from the print itself.',
+    palette: ['#E9E4DA', '#E9E4DA', '#D9483B', '#3A3A3A', '#3A3A3A'],
+  },
+  {
+    key: 'texture',
+    icon: 'layers-outline',
+    title: 'Same color, different texture',
+    body: 'When you repeat a color, change the fabric. Wool with silk, denim with leather, ribbed knit with smooth cotton. The outfit gains depth without adding a single new color.',
+    palette: ['#8B5E3C', '#A47148', '#BC8A5F', '#D4A276', '#E7BC91'],
+  },
+  {
+    key: 'photo',
+    icon: 'camera-outline',
+    title: 'Start from something you own',
+    body: 'Photograph a piece you love, pick its color with the photo tool on the Color Wheel, and let the wheel build the palette around it. That is the fastest way to find what goes with it.',
+    palette: ['#2FA36B', '#2F7FA3', '#D9A23B', '#F3EFE6'],
+  },
+];

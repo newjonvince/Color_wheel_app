@@ -21,16 +21,20 @@ const ICON_LIBRARIES = { MaterialIcons, Ionicons };
 
 const TAB_ICONS = {
   Community: {
-    focused: { name: 'people', library: 'MaterialIcons' },
-    unfocused: { name: 'people-outline', library: 'MaterialIcons' }
+    focused: { name: 'compass', library: 'Ionicons' },
+    unfocused: { name: 'compass-outline', library: 'Ionicons' }
   },
   ColorWheel: {
     focused: { name: 'color-palette', library: 'Ionicons' },
     unfocused: { name: 'color-palette-outline', library: 'Ionicons' }
   },
   Boards: {
-    focused: { name: 'grid', library: 'Ionicons' },
-    unfocused: { name: 'grid-outline', library: 'Ionicons' }
+    focused: { name: 'albums', library: 'Ionicons' },
+    unfocused: { name: 'albums-outline', library: 'Ionicons' }
+  },
+  Guide: {
+    focused: { name: 'book', library: 'Ionicons' },
+    unfocused: { name: 'book-outline', library: 'Ionicons' }
   },
   Profile: {
     focused: { name: 'person', library: 'MaterialIcons' },

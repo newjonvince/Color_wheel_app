@@ -1,7 +1,7 @@
 // screens/ColorWheelScreen/index.js
 // Layout (Canva-style): wheel -> tools -> 1. pick a color -> 2. palette type -> palette -> actions
 import React, { useRef, useCallback, useMemo, useState, useEffect } from 'react';
-import { ScrollView, View, Text, TextInput, Pressable, Alert, ActivityIndicator, Modal } from 'react-native';
+import { ScrollView, View, Text, TextInput, Pressable, Alert, Modal } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import PropTypes from 'prop-types';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +17,7 @@ import { useOptimizedColorWheelState } from './useOptimizedColorWheelState';
 import { getSchemeDisplayName } from './constants';
 import { styles, colorWheelColors } from './styles';
 import { apiPatterns } from '../../utils/apiHelpers';
+import { SaveToBoardSheet } from '../../components/palettes/SaveToBoardSheet';
 
 let _apiServiceInstance = null;
 let _apiServiceLoadAttempted = false;
@@ -77,7 +78,7 @@ const normalizeHex = (raw) => {
   return withHash.toUpperCase();
 };
 
-const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = () => {}, onSaveColorMatch = null }) => {
+const ColorWheelScreen = ({ navigation = null, route = null, currentUser = null, onLogout = () => {} }) => {
   const wheelRef = useRef(null);
 
   let colorWheelState;
@@ -179,30 +180,30 @@ const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = ()
     description: `Generated color palette using the ${selectedScheme} scheme`,
   }), [selectedColor, selectedScheme, schemeColors, schemeLabel]);
 
-  const [saving, setSaving] = useState(false);
-  const handleSavePalette = useCallback(async () => {
+  // Saving goes through the board sheet: name it, choose boards, optionally share it
+  const [saveOpen, setSaveOpen] = useState(false);
+  const handleSavePalette = useCallback(() => {
     if (!currentUser) {
       Alert.alert('Sign in to save', 'Log in to save palettes to your boards.');
       return;
     }
-    if (saving) return;
-    setSaving(true);
-    try {
-      const result = typeof onSaveColorMatch === 'function'
-        ? await onSaveColorMatch(colorMatchData)
-        : await apiPatterns.createColorMatch(colorMatchData);
-      const ok = result == null ? true : result.success !== false;
-      if (ok) {
-        Alert.alert('Palette saved', `${colorMatchData.title} was added to your boards.`);
-      } else {
-        Alert.alert('Could not save', result.userMessage || result.error?.message || 'Please try again.');
-      }
-    } catch (error) {
-      Alert.alert('Could not save', error?.message || 'Please try again.');
-    } finally {
-      setSaving(false);
-    }
-  }, [currentUser, saving, onSaveColorMatch, colorMatchData]);
+    setSaveOpen(true);
+  }, [currentUser]);
+
+  // ----- palettes sent from other tabs ("Try on wheel" in Boards, Community and the Guide) -----
+  const applyRequest = route?.params?.applyPalette;
+  const appliedNonce = useRef(null);
+  useEffect(() => {
+    if (!applyRequest || appliedNonce.current === applyRequest.nonce) return;
+    appliedNonce.current = applyRequest.nonce;
+    if (!isValidHex6(applyRequest.hex)) return;
+    // Photo palettes have no wheel scheme: keep whichever scheme is selected
+    if (applyRequest.scheme && applyRequest.scheme !== 'custom') setSelectedScheme(applyRequest.scheme);
+    wheelRef.current?.selectHandle?.(0);
+    handleActiveHandleChange(0);
+    handleExtractorComplete([applyRequest.hex.toUpperCase()]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyRequest]);
 
   // ----- color from a photo -----
   // Pick the photo first, then present the extractor: presenting the picker from inside an
@@ -303,16 +304,13 @@ const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = ()
 
         <View style={styles.actionsRow}>
           <Pressable
-            style={[styles.primaryButton, saving && styles.buttonDisabled]}
+            style={styles.primaryButton}
             onPress={handleSavePalette}
-            disabled={saving}
             accessibilityRole="button"
-            accessibilityLabel="Save palette"
+            accessibilityLabel="Save palette to a board"
           >
-            {saving
-              ? <ActivityIndicator color="#FFFFFF" />
-              : <Ionicons name="bookmark-outline" size={18} color="#FFFFFF" />}
-            <Text style={styles.primaryButtonText}>{saving ? 'Saving…' : 'Save palette'}</Text>
+            <Ionicons name="bookmark-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.primaryButtonText}>Save to a board</Text>
           </Pressable>
         </View>
 
@@ -355,6 +353,12 @@ const ColorWheelScreen = ({ navigation = null, currentUser = null, onLogout = ()
         )}
       </Modal>
 
+      <SaveToBoardSheet
+        visible={saveOpen}
+        draft={colorMatchData}
+        onClose={() => setSaveOpen(false)}
+      />
+
       {IS_DEBUG_MODE() && <ApiIntegrationStatus />}
     </ScrollView>
   );
@@ -364,7 +368,7 @@ ColorWheelScreen.propTypes = {
   navigation: PropTypes.object,
   currentUser: PropTypes.object,
   onLogout: PropTypes.func,
-  onSaveColorMatch: PropTypes.func,
+  route: PropTypes.object,
 };
 
 const ColorWheelScreenWithErrorBoundary = (props) => (
