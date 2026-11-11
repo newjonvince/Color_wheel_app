@@ -269,7 +269,7 @@ async function initializeTables() {
         id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
         user_id VARCHAR(36) NOT NULL,
         base_color VARCHAR(7) NOT NULL,
-        scheme ENUM('analogous', 'complementary', 'split-complementary', 'triadic', 'tetradic', 'monochromatic', 'compound', 'shades', 'tints') NOT NULL,
+        scheme ENUM('analogous', 'complementary', 'split-complementary', 'triadic', 'tetradic', 'monochromatic', 'compound', 'shades', 'tints', 'custom') NOT NULL,
         colors JSON NOT NULL,
         title VARCHAR(255),
         description TEXT,
@@ -517,6 +517,58 @@ async function initializeTables() {
       await query('ALTER TABLE user_sessions MODIFY session_token VARCHAR(255) NULL');
       console.log('✅ Relaxed user_sessions.session_token to NULL');
     }
+
+    // Photo palettes have no wheel scheme: widen the enum on databases created before 'custom' existed
+    const schemeCol = await query(
+      `SELECT COLUMN_TYPE AS type FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'color_matches' AND COLUMN_NAME = 'scheme'`
+    );
+    if (schemeCol.rows.length > 0 && !String(schemeCol.rows[0].type).includes("'custom'")) {
+      await query(
+        `ALTER TABLE color_matches MODIFY scheme ENUM('analogous', 'complementary', 'split-complementary', 'triadic', 'tetradic', 'monochromatic', 'compound', 'shades', 'tints', 'custom') NOT NULL`
+      );
+      console.log("✅ Added 'custom' to color_matches.scheme");
+    }
+
+    // Source photo of a palette, kept out of color_matches so list queries stay light
+    await query(`
+      CREATE TABLE IF NOT EXISTS color_match_images (
+        color_match_id VARCHAR(36) NOT NULL PRIMARY KEY,
+        mime VARCHAR(40) NOT NULL,
+        width INT NOT NULL,
+        height INT NOT NULL,
+        data MEDIUMBLOB NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT fk_cm_images_match FOREIGN KEY (color_match_id) REFERENCES color_matches(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB
+    `);
+
+    // Moderation: reports on shared palettes, and users hiding other users
+    await query(`
+      CREATE TABLE IF NOT EXISTS content_reports (
+        id VARCHAR(36) DEFAULT (UUID()) NOT NULL PRIMARY KEY,
+        reporter_id VARCHAR(36) NOT NULL,
+        color_match_id VARCHAR(36) NOT NULL,
+        reason VARCHAR(40) NOT NULL,
+        details VARCHAR(500),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        CONSTRAINT unique_report UNIQUE (reporter_id, color_match_id),
+        CONSTRAINT fk_reports_reporter FOREIGN KEY (reporter_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_reports_match FOREIGN KEY (color_match_id) REFERENCES color_matches(id) ON DELETE CASCADE,
+        INDEX idx_reports_match (color_match_id)
+      ) ENGINE=InnoDB
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS user_blocks (
+        blocker_id VARCHAR(36) NOT NULL,
+        blocked_id VARCHAR(36) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (blocker_id, blocked_id),
+        CONSTRAINT fk_blocks_blocker FOREIGN KEY (blocker_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_blocks_blocked FOREIGN KEY (blocked_id) REFERENCES users(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB
+    `);
 
     console.log('✅ Database tables initialized successfully (all Railway tables included)');
   } catch (error) {

@@ -1,337 +1,111 @@
-/*
-IMPROVEMENTS MADE:
-1. Added robust error handling around all async calls.
-2. Added loading state management and button disabling.
-3. Unified API response handling (success, data, message).
-4. Optimistic UI updates with rollback on API failure.
-5. Prevented overlapping pagination requests.
-6. Added server-side query parameter validation.
-7. Applied authentication middleware to secure routes.
-8. Structured for easy DB integration instead of mock data.
-9. Cleaned unused imports, added inline comments, improved readability.
-*/
+// routes/community/index.js - The community feed is every palette its owner made public.
+// Likes live in routes/likes; saving to a board lives in routes/boards.
 
 const express = require('express');
 const { query } = require('../../config/database');
 const { authenticateToken, optionalAuth } = require('../../middleware/auth-enhanced');
 const { communityLimiter } = require('../../middleware/rateLimiting');
+const ColorService = require('../../services/colorService');
+const { success, created, badRequest, notFound, asyncHandler } = require('../../utils/response');
+
 const router = express.Router();
 
-// Get community posts with pagination
-router.get('/posts/community', optionalAuth, communityLimiter, async (req, res) => {
-  try {
-    const { cursor } = req.query;
-    const limit = 20;
-    
-    let queryText = `
-      SELECT
-        cp.*,
-        u.username,
-        u.profile_image_url,
-        (SELECT COUNT(*) FROM post_likes cl WHERE cl.post_id = cp.id) as like_count,
-        ${req.user ? `(SELECT COUNT(*) FROM post_likes cl WHERE cl.post_id = cp.id AND cl.user_id = ?) as user_liked,` : '0 as user_liked,'}
-        ${req.user ? `(SELECT COUNT(*) FROM user_follows cf WHERE cf.following_id = cp.user_id AND cf.follower_id = ?) as is_following` : '0 as is_following'}
-      FROM posts cp
-      JOIN users u ON cp.user_id = u.id
-      WHERE cp.privacy = 'public'
-    `;
+const PAGE_SIZE = 20;
+const MAX_PAGE_SIZE = 40;
+const REPORT_REASONS = ['inappropriate', 'spam', 'harassment', 'copyright', 'other'];
 
-    const queryParams = [];
-    if (req.user) {
-      queryParams.push(req.user.userId, req.user.userId);
-    }
+/**
+ * @route   GET /community/feed?limit=&offset=
+ * @desc    Public palettes, newest first. Signed-in users don't see people they blocked
+ *          or palettes they reported.
+ */
+router.get('/feed', optionalAuth, communityLimiter, asyncHandler(async (req, res) => {
+  const userId = req.user?.userId || null;
+  const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(req.query.limit, 10) || PAGE_SIZE));
+  const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
 
-    if (cursor) {
-      queryText += ` AND cp.created_at < ?`;
-      queryParams.push(cursor);
-    }
-
-    // LIMIT is inlined: it's a server-side constant, and mysql2's execute()
-    // can't bind LIMIT placeholders on MySQL >= 8.0.22
-    queryText += ` ORDER BY cp.created_at DESC LIMIT ${limit + 1}`;
-    
-    const result = await query(queryText, queryParams);
-    const posts = result.rows || result;
-    
-    const hasMore = posts.length > limit;
-    if (hasMore) {
-      posts.pop();
-    }
-    
-    const nextCursor = hasMore && posts.length > 0 ? posts[posts.length - 1].created_at : null;
-    
-    res.json({
-      success: true,
-      posts: posts.map(post => ({
-        ...post,
-        user_liked: Boolean(post.user_liked),
-        is_following: Boolean(post.is_following)
-      })),
-      pagination: {
-        hasMore,
-        nextCursor
-      }
-    });
-    
-  } catch (error) {
-    console.error('Community posts error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch community posts'
-    });
+  const params = [];
+  let likedSelect = '0 AS is_liked';
+  let hidden = '';
+  if (userId) {
+    likedSelect = 'EXISTS(SELECT 1 FROM color_match_likes l2 WHERE l2.color_match_id = cm.id AND l2.user_id = ?) AS is_liked';
+    params.push(userId);
+    hidden = `
+       AND cm.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = ?)
+       AND cm.id NOT IN (SELECT color_match_id FROM content_reports WHERE reporter_id = ?)`;
+    params.push(userId, userId);
   }
-});
 
-// Like/unlike a post
-router.post('/posts/:postId/like', authenticateToken, async (req, res) => {
-  try {
-    const { postId } = req.params;
-    const userId = req.user.userId;
-    
-    // Check if already liked
-    const existingLike = await query(
-      'SELECT id FROM post_likes WHERE post_id = ? AND user_id = ?',
-      [postId, userId]
-    );
+  // limit/offset are validated integers, inlined because mysql2 cannot bind LIMIT on MySQL >= 8.0.22
+  const result = await query(
+    `SELECT cm.*, u.username,
+        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height,
+        (SELECT COUNT(*) FROM color_match_likes l WHERE l.color_match_id = cm.id) AS like_count,
+        ${likedSelect}
+     FROM color_matches cm
+     JOIN users u ON u.id = cm.user_id
+     LEFT JOIN color_match_images ci ON ci.color_match_id = cm.id
+     WHERE cm.privacy = 'public'${hidden}
+     ORDER BY cm.created_at DESC, cm.id DESC
+     LIMIT ${limit + 1} OFFSET ${offset}`,
+    params
+  );
 
-    if (existingLike.rows && existingLike.rows.length > 0) {
-      return res.status(409).json({
-        success: false,
-        message: 'Post already liked'
-      });
-    }
+  const rows = result.rows;
+  const hasMore = rows.length > limit;
+  if (hasMore) rows.pop();
 
-    await query(
-      'INSERT INTO post_likes (post_id, user_id) VALUES (?, ?)',
-      [postId, userId]
-    );
-    
-    res.json({
-      success: true,
-      message: 'Post liked successfully'
-    });
-    
-  } catch (error) {
-    console.error('Like post error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to like post'
-    });
-  }
-});
+  return success(res, {
+    palettes: rows.map((row) => ColorService.formatColorMatchResponse(row)),
+    next_offset: hasMore ? offset + limit : null,
+  });
+}));
 
-// Remove like from a post
-router.delete('/posts/:postId/like', authenticateToken, async (req, res) => {
-  try {
-    const { postId } = req.params;
-    const userId = req.user.userId;
-    
-    const result = await query(
-      'DELETE FROM post_likes WHERE post_id = ? AND user_id = ?',
-      [postId, userId]
-    );
+/**
+ * @route   POST /community/reports
+ * @desc    Report a shared palette; it disappears from the reporter's feed
+ */
+router.post('/reports', authenticateToken, asyncHandler(async (req, res) => {
+  const { color_match_id: matchId, reason, details } = req.body;
+  if (typeof matchId !== 'string' || !matchId) return badRequest(res, 'color_match_id is required');
+  if (!REPORT_REASONS.includes(reason)) return badRequest(res, `reason must be one of: ${REPORT_REASONS.join(', ')}`);
 
-    if (result.rows.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Like not found'
-      });
-    }
-    
-    res.json({
-      success: true,
-      message: 'Like removed successfully'
-    });
-    
-  } catch (error) {
-    console.error('Unlike post error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to unlike post'
-    });
-  }
-});
+  const palette = await query("SELECT id FROM color_matches WHERE id = ? AND privacy = 'public'", [matchId]);
+  if (palette.rows.length === 0) return notFound(res, 'Palette not found');
 
-// Follow a user
-router.post('/users/:userId/follow', authenticateToken, async (req, res) => {
-  try {
-    const { userId: targetUserId } = req.params;
-    const followerId = req.user.userId;
-    
-    if (targetUserId === followerId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Cannot follow yourself'
-      });
-    }
-    
-    // Check if already following
-    const existingFollow = await query(
-      'SELECT id FROM user_follows WHERE follower_id = ? AND following_id = ?',
-      [followerId, targetUserId]
-    );
+  await query(
+    `INSERT INTO content_reports (reporter_id, color_match_id, reason, details)
+     VALUES (?, ?, ?, ?)
+     ON DUPLICATE KEY UPDATE reason = VALUES(reason), details = VALUES(details)`,
+    [req.user.userId, matchId, reason, typeof details === 'string' ? details.slice(0, 500) : null]
+  );
+  console.warn('Content report filed:', { matchId, reason, reporter: req.user.userId });
 
-    if (existingFollow.rows && existingFollow.rows.length > 0) {
-      return res.status(409).json({
-        success: false,
-        message: 'Already following this user'
-      });
-    }
+  return created(res, null, 'Report received');
+}));
 
-    await query(
-      'INSERT INTO user_follows (follower_id, following_id) VALUES (?, ?)',
-      [followerId, targetUserId]
-    );
-    
-    res.json({
-      success: true,
-      message: 'User followed successfully'
-    });
-    
-  } catch (error) {
-    console.error('Follow user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to follow user'
-    });
-  }
-});
+/**
+ * @route   POST /community/blocks/:userId
+ * @desc    Stop seeing another user's palettes
+ */
+router.post('/blocks/:userId', authenticateToken, asyncHandler(async (req, res) => {
+  const blockedId = req.params.userId;
+  if (blockedId === req.user.userId) return badRequest(res, 'You cannot block yourself');
 
-// Unfollow a user
-router.delete('/users/:userId/follow', authenticateToken, async (req, res) => {
-  try {
-    const { userId: targetUserId } = req.params;
-    const followerId = req.user.userId;
-    
-    const result = await query(
-      'DELETE FROM user_follows WHERE follower_id = ? AND following_id = ?',
-      [followerId, targetUserId]
-    );
+  const target = await query('SELECT id FROM users WHERE id = ?', [blockedId]);
+  if (target.rows.length === 0) return notFound(res, 'User not found');
 
-    if (result.rows.affectedRows === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'Follow relationship not found'
-      });
-    }
-    
-    res.json({
-      success: true,
-      message: 'User unfollowed successfully'
-    });
-    
-  } catch (error) {
-    console.error('Unfollow user error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to unfollow user'
-    });
-  }
-});
+  await query('INSERT IGNORE INTO user_blocks (blocker_id, blocked_id) VALUES (?, ?)', [req.user.userId, blockedId]);
+  return created(res, null, 'User blocked');
+}));
 
-// Get user profile with follow status
-router.get('/users/:userId/profile', optionalAuth, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const currentUserId = req.user?.userId;
-    
-    const userResult = await query(
-      `SELECT 
-        u.id,
-        u.username,
-        u.profile_image_url,
-        u.created_at,
-        (SELECT COUNT(*) FROM user_follows cf WHERE cf.following_id = u.id) as follower_count,
-        (SELECT COUNT(*) FROM user_follows cf WHERE cf.follower_id = u.id) as following_count,
-        (SELECT COUNT(*) FROM posts cp WHERE cp.user_id = u.id AND cp.privacy = 'public') as post_count
-        ${currentUserId ? `, (SELECT COUNT(*) FROM user_follows cf WHERE cf.follower_id = ? AND cf.following_id = u.id) as is_following` : ''}
-      FROM users u
-      WHERE u.id = ?`,
-      currentUserId ? [currentUserId, userId] : [userId]
-    );
-    
-    if (!userResult.rows || userResult.rows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: 'User not found'
-      });
-    }
-    
-    const user = userResult.rows[0];
-    user.is_following = Boolean(user.is_following);
-    
-    res.json({
-      success: true,
-      user
-    });
-    
-  } catch (error) {
-    console.error('Get user profile error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch user profile'
-    });
-  }
-});
-
-// Get user's public posts
-router.get('/users/:userId/posts', optionalAuth, async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { cursor } = req.query;
-    const limit = 20;
-    const currentUserId = req.user?.userId;
-    
-    let queryText = `
-      SELECT 
-        cp.*,
-        u.username,
-        u.profile_image_url,
-        (SELECT COUNT(*) FROM post_likes cl WHERE cl.post_id = cp.id) as like_count
-        ${currentUserId ? `, (SELECT COUNT(*) FROM post_likes cl WHERE cl.post_id = cp.id AND cl.user_id = ?) as user_liked` : ''}
-      FROM posts cp
-      JOIN users u ON cp.user_id = u.id
-      WHERE cp.user_id = ? AND cp.privacy = 'public'
-    `;
-
-    const queryParams = currentUserId ? [currentUserId, userId] : [userId];
-
-    if (cursor) {
-      queryText += ` AND cp.created_at < ?`;
-      queryParams.push(cursor);
-    }
-
-    queryText += ` ORDER BY cp.created_at DESC LIMIT ${limit + 1}`;
-    
-    const result = await query(queryText, queryParams);
-    const posts = result.rows || result;
-    
-    const hasMore = posts.length > limit;
-    if (hasMore) {
-      posts.pop();
-    }
-    
-    const nextCursor = hasMore && posts.length > 0 ? posts[posts.length - 1].created_at : null;
-    
-    res.json({
-      success: true,
-      posts: posts.map(post => ({
-        ...post,
-        user_liked: Boolean(post.user_liked)
-      })),
-      pagination: {
-        hasMore,
-        nextCursor
-      }
-    });
-    
-  } catch (error) {
-    console.error('Get user posts error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to fetch user posts'
-    });
-  }
-});
+/**
+ * @route   DELETE /community/blocks/:userId
+ * @desc    Unblock a user
+ */
+router.delete('/blocks/:userId', authenticateToken, asyncHandler(async (req, res) => {
+  await query('DELETE FROM user_blocks WHERE blocker_id = ? AND blocked_id = ?', [req.user.userId, req.params.userId]);
+  return success(res, null, 'User unblocked');
+}));
 
 module.exports = router;

@@ -13,7 +13,9 @@ const {
   asyncHandler,
   formatValidationErrors 
 } = require('../../utils/response');
-const { authenticateToken } = require('../../middleware/auth-enhanced');
+const multer = require('multer');
+const { authenticateToken, optionalAuth } = require('../../middleware/auth-enhanced');
+const { UPLOAD_LIMITS } = require('../../constants');
 const { 
   createColorMatchValidation,
   updateColorMatchValidation,
@@ -21,6 +23,12 @@ const {
 } = require('../../middleware/validation/index');
 
 const router = express.Router();
+
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: UPLOAD_LIMITS.MAX_FILE_SIZE, files: 1 },
+  fileFilter: (req, file, cb) => cb(null, UPLOAD_LIMITS.ALLOWED_MIME_TYPES.includes(file.mimetype)),
+});
 
 // Disable caching on all color endpoints
 router.use((req, res, next) => {
@@ -292,6 +300,57 @@ router.delete('/matches/:id',
       
       console.error('Delete color match error:', error);
       return internalError(res, 'Failed to delete color match');
+    }
+  })
+);
+
+/**
+ * @route   POST /colors/matches/:id/image
+ * @desc    Attach the source photo to a palette (multipart field "image")
+ * @access  Private (owner)
+ */
+router.post('/matches/:id/image',
+  authenticateToken,
+  imageUpload.single('image'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) {
+      return badRequest(res, 'An image file is required');
+    }
+    try {
+      const info = await ColorService.saveImage(req.params.id, req.user.userId, req.file.buffer);
+      return created(res, info, 'Image saved');
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      console.error('Save palette image error:', error);
+      return internalError(res, 'Failed to save image');
+    }
+  })
+);
+
+/**
+ * @route   GET /colors/matches/:id/image
+ * @desc    The palette's photo (JPEG)
+ * @access  Public for public palettes, owner only otherwise
+ */
+router.get('/matches/:id/image',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    try {
+      const image = await ColorService.getImage(req.params.id, req.user?.userId || null);
+      res.set({
+        'Content-Type': image.mime,
+        'Content-Length': image.data.length,
+        'Cache-Control': 'private, max-age=86400',
+      });
+      return res.end(image.data);
+    } catch (error) {
+      if (error.message.includes('not found')) {
+        return notFound(res, error.message);
+      }
+      console.error('Get palette image error:', error);
+      return internalError(res, 'Failed to load image');
     }
   })
 );

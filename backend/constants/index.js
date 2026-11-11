@@ -91,7 +91,8 @@ const COLOR_SCHEMES = [
   'monochromatic',
   'compound',
   'shades',
-  'tints'
+  'tints',
+  'custom'
 ];
 
 // Pagination

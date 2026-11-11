@@ -1,6 +1,7 @@
 // services/colorService.js - Color management business logic
 
 const { v4: uuidv4 } = require('uuid');
+const sharp = require('sharp');
 const { query } = require('../config/database');
 const { ERROR_MESSAGES, SUCCESS_MESSAGES, COLOR_SCHEMES, PAGINATION } = require('../constants');
 
@@ -103,9 +104,11 @@ class ColorService {
     } = options;
 
     let queryText = `
-      SELECT cm.*, u.username 
+      SELECT cm.*, u.username,
+        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height
       FROM color_matches cm 
       JOIN users u ON cm.user_id = u.id 
+      LEFT JOIN color_match_images ci ON ci.color_match_id = cm.id 
       WHERE cm.user_id = ?
     `;
     const queryParams = [userId];
@@ -163,9 +166,11 @@ class ColorService {
     } = options;
 
     let queryText = `
-      SELECT cm.*, u.username 
+      SELECT cm.*, u.username,
+        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height
       FROM color_matches cm 
       JOIN users u ON cm.user_id = u.id 
+      LEFT JOIN color_match_images ci ON ci.color_match_id = cm.id 
       WHERE cm.privacy = 'public'
     `;
     const queryParams = [];
@@ -207,9 +212,11 @@ class ColorService {
    */
   static async getColorMatchById(matchId, userId = null) {
     let queryText = `
-      SELECT cm.*, u.username 
+      SELECT cm.*, u.username,
+        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height
       FROM color_matches cm 
       JOIN users u ON cm.user_id = u.id 
+      LEFT JOIN color_match_images ci ON ci.color_match_id = cm.id 
       WHERE cm.id = ?
     `;
     const queryParams = [matchId];
@@ -278,6 +285,49 @@ class ColorService {
   }
 
   /**
+   * Attach (or replace) the photo a palette was picked from.
+   * Stored in MySQL as a compressed JPEG: the host's disk does not survive deploys.
+   */
+  static async saveImage(matchId, userId, buffer) {
+    const owned = await query('SELECT id FROM color_matches WHERE id = ? AND user_id = ?', [matchId, userId]);
+    if (owned.rows.length === 0) {
+      throw new Error(ERROR_MESSAGES.RESOURCE_NOT_FOUND);
+    }
+
+    const { data, info } = await sharp(buffer)
+      .rotate()
+      .resize({ width: 900, height: 1400, fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 72, mozjpeg: true })
+      .toBuffer({ resolveWithObject: true });
+
+    await query(
+      `INSERT INTO color_match_images (color_match_id, mime, width, height, data)
+       VALUES (?, 'image/jpeg', ?, ?, ?)
+       ON DUPLICATE KEY UPDATE mime = VALUES(mime), width = VALUES(width), height = VALUES(height), data = VALUES(data)`,
+      [matchId, info.width, info.height, data]
+    );
+
+    return { has_image: true, image_width: info.width, image_height: info.height };
+  }
+
+  /**
+   * Photo of a palette, visible to its owner or to anyone when the palette is public
+   */
+  static async getImage(matchId, userId = null) {
+    const result = await query(
+      `SELECT ci.mime, ci.data
+       FROM color_match_images ci
+       JOIN color_matches cm ON cm.id = ci.color_match_id
+       WHERE ci.color_match_id = ? AND (cm.privacy = 'public' OR cm.user_id = ?)`,
+      [matchId, userId]
+    );
+    if (result.rows.length === 0) {
+      throw new Error(ERROR_MESSAGES.RESOURCE_NOT_FOUND);
+    }
+    return result.rows[0];
+  }
+
+  /**
    * Validate hex color (API endpoint)
    */
   static validateColor(hex) {
@@ -308,8 +358,11 @@ class ColorService {
       privacy: colorMatch.privacy,
       created_at: colorMatch.created_at,
       updated_at: colorMatch.updated_at,
-      like_count: colorMatch.like_count || 0,
-      is_liked: Boolean(colorMatch.is_liked),
+      like_count: Number(colorMatch.like_count) || 0,
+      is_liked: Boolean(Number(colorMatch.is_liked)),
+      has_image: Boolean(Number(colorMatch.has_image)),
+      image_width: colorMatch.image_width || null,
+      image_height: colorMatch.image_height || null,
     };
   }
 }
