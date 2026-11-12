@@ -45,7 +45,7 @@ router.get('/feed', optionalAuth, communityLimiter, asyncHandler(async (req, res
      FROM color_matches cm
      JOIN users u ON u.id = cm.user_id
      LEFT JOIN color_match_images ci ON ci.color_match_id = cm.id
-     WHERE cm.privacy = 'public'${hidden}
+     WHERE cm.privacy = 'public' AND (ci.source IS NULL OR ci.source <> 'web')${hidden}
      ORDER BY cm.created_at DESC, cm.id DESC
      LIMIT ${limit + 1} OFFSET ${offset}`,
     params

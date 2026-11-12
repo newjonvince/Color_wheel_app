@@ -114,7 +114,7 @@ router.get('/:boardId', authenticateToken, asyncHandler(async (req, res) => {
 
   const palettes = await query(
     `SELECT cm.*, u.username,
-        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height,
+        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height, ci.source AS image_source,
         (SELECT COUNT(*) FROM color_match_likes l WHERE l.color_match_id = cm.id) AS like_count,
         EXISTS(SELECT 1 FROM color_match_likes l2 WHERE l2.color_match_id = cm.id AND l2.user_id = ?) AS is_liked
      FROM board_items bi

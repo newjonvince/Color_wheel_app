@@ -28,8 +28,10 @@ export const paletteApi = {
   deletePalette: async (paletteId) => unwrap(await ApiService.delete(`/colors/matches/${paletteId}`)),
 
   // Attach the photo a palette was picked from. fetch() sets the multipart boundary itself.
-  uploadImage: async (paletteId, uri) => {
+  // source 'web' marks a picture captured from the web: the server keeps that palette private.
+  uploadImage: async (paletteId, uri, source = 'photo') => {
     const form = new FormData();
+    form.append('source', source === 'web' ? 'web' : 'photo');
     form.append('image', { uri, name: 'palette.jpg', type: 'image/jpeg' });
     const res = await fetch(`${getApiRoot()}/colors/matches/${paletteId}/image`, {
       method: 'POST',

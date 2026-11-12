@@ -18,6 +18,7 @@ import { getSchemeDisplayName } from './constants';
 import { styles, colorWheelColors } from './styles';
 import { apiPatterns } from '../../utils/apiHelpers';
 import { SaveToBoardSheet } from '../../components/palettes/SaveToBoardSheet';
+import { WebCaptureModal } from '../../components/WebCaptureModal';
 
 let _apiServiceInstance = null;
 let _apiServiceLoadAttempted = false;
@@ -239,6 +240,13 @@ const ColorWheelScreen = ({ navigation = null, route = null, currentUser = null,
 
   const closePhoto = useCallback(() => setPhotoUri(null), []);
 
+  // A picture found on the web: capture and crop it, then pick the color like any photo
+  const [webOpen, setWebOpen] = useState(false);
+  const handleWebCaptured = useCallback((uri) => {
+    setWebOpen(false);
+    if (uri) setTimeout(() => setPhotoUri(uri), 350);
+  }, []);
+
   // The picked color becomes the wheel's base color (handle 1), and the scheme rebuilds around it
   const handlePhotoColor = useCallback((result) => {
     const hex = Array.isArray(result) ? result[0] : result?.slots?.[0];
@@ -331,7 +339,7 @@ const ColorWheelScreen = ({ navigation = null, route = null, currentUser = null,
           </Pressable>
         </View>
 
-        <Text style={styles.photoLabel}>Pick a color from a photo</Text>
+        <Text style={styles.photoLabel}>Pick a color from a picture</Text>
         <View style={styles.photoRow}>
           <Pressable
             style={styles.secondaryButton}
@@ -349,7 +357,16 @@ const ColorWheelScreen = ({ navigation = null, route = null, currentUser = null,
             accessibilityLabel="Choose a photo and pick a color from it"
           >
             <Ionicons name="images-outline" size={18} color={colorWheelColors.text} />
-            <Text style={styles.secondaryButtonText}>Photo library</Text>
+            <Text style={styles.secondaryButtonText}>Photos</Text>
+          </Pressable>
+          <Pressable
+            style={styles.secondaryButton}
+            onPress={() => setWebOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Find a picture on the web and pick a color from it"
+          >
+            <Ionicons name="globe-outline" size={18} color={colorWheelColors.text} />
+            <Text style={styles.secondaryButtonText}>Web</Text>
           </Pressable>
         </View>
       </View>
@@ -369,6 +386,8 @@ const ColorWheelScreen = ({ navigation = null, route = null, currentUser = null,
           />
         )}
       </Modal>
+
+      <WebCaptureModal visible={webOpen} onClose={() => setWebOpen(false)} onCaptured={handleWebCaptured} />
 
       <SaveToBoardSheet
         visible={saveOpen}

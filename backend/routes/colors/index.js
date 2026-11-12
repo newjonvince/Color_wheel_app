@@ -8,6 +8,7 @@ const {
   created, 
   badRequest, 
   notFound, 
+  forbidden,
   internalError,
   paginated,
   asyncHandler,
@@ -275,6 +276,10 @@ router.put('/matches/:id',
         return notFound(res, error.message);
       }
       
+      if (error.message === ColorService.WEB_CAPTURE_PRIVATE) {
+        return forbidden(res, error.message);
+      }
+
       console.error('Update color match error:', error);
       return internalError(res, 'Failed to update color match');
     }
@@ -306,7 +311,8 @@ router.delete('/matches/:id',
 
 /**
  * @route   POST /colors/matches/:id/image
- * @desc    Attach the source photo to a palette (multipart field "image")
+ * @desc    Attach the source photo to a palette (multipart field "image"; field "source" = "web"
+ *          marks a picture captured from the web, which keeps the palette private)
  * @access  Private (owner)
  */
 router.post('/matches/:id/image',
@@ -317,7 +323,7 @@ router.post('/matches/:id/image',
       return badRequest(res, 'An image file is required');
     }
     try {
-      const info = await ColorService.saveImage(req.params.id, req.user.userId, req.file.buffer);
+      const info = await ColorService.saveImage(req.params.id, req.user.userId, req.file.buffer, req.body?.source);
       return created(res, info, 'Image saved');
     } catch (error) {
       if (error.message.includes('not found')) {

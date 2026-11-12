@@ -169,7 +169,19 @@ export const PaletteDetailModal = ({
             )}
           </View>
 
-          {isOwner && (
+          {isOwner && palette.image_source === 'web' && (
+            <View style={styles.section}>
+              <View style={styles.row}>
+                <Ionicons name="lock-closed-outline" size={20} color={ui.muted} />
+                <View style={styles.privateText}>
+                  <Text style={styles.rowTitle}>Private</Text>
+                  <Text style={styles.rowHint}>Pictures from the web stay in your boards. Only you can see this palette.</Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {isOwner && palette.image_source !== 'web' && (
             <View style={styles.section}>
               <View style={styles.row}>
                 <View style={styles.rowText}>
@@ -250,6 +262,7 @@ const styles = StyleSheet.create({
   section: { marginTop: 22, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: ui.line, paddingTop: 8 },
   row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
   rowText: { flex: 1, paddingRight: 12 },
+  privateText: { flex: 1, paddingLeft: 10 },
   rowTitle: { fontSize: 15, fontWeight: '600', color: ui.text },
   rowHint: { fontSize: 12, color: ui.muted, marginTop: 2 },
   linkRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },

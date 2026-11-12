@@ -12,6 +12,7 @@ import CoolorsColorExtractor, { pickPhotoAsync } from '../components/CoolorsColo
 import { PaletteGrid } from '../components/palettes/PaletteGrid';
 import { PaletteDetailModal } from '../components/palettes/PaletteDetailModal';
 import { SaveToBoardSheet } from '../components/palettes/SaveToBoardSheet';
+import { WebCaptureModal } from '../components/WebCaptureModal';
 import { ui } from '../components/palettes/theme';
 
 const ALL = 'all'; // pseudo-board: every palette the user created
@@ -112,6 +113,8 @@ function BoardsScreen({ currentUser, navigation }) {
   const [selectedId, setSelectedId] = useState(null);
   const [prompt, setPrompt] = useState(null);     // { mode: 'create' } | { mode: 'rename', board }
   const [photoUri, setPhotoUri] = useState(null);
+  const [webOpen, setWebOpen] = useState(false);
+  const photoFromWeb = useRef(false);             // the picture in the extractor was captured from the web
   const [draft, setDraft] = useState(null);       // photo palette waiting to be saved
   const pickingRef = useRef(false);
   const openRef = useRef(open);
@@ -249,12 +252,23 @@ function BoardsScreen({ currentUser, navigation }) {
     pickingRef.current = true;
     try {
       const uri = await pickPhotoAsync(source);
-      if (uri) setTimeout(() => setPhotoUri(uri), MODAL_HANDOFF_MS);
+      if (uri) {
+        photoFromWeb.current = false;
+        setTimeout(() => setPhotoUri(uri), MODAL_HANDOFF_MS);
+      }
     } catch (error) {
       Alert.alert('Could not open photos', 'Please try again.');
     } finally {
       pickingRef.current = false;
     }
+  }, []);
+
+  // A cropped web capture goes through the same color picker as a photo
+  const handleWebCaptured = useCallback((uri) => {
+    setWebOpen(false);
+    if (!uri) return;
+    photoFromWeb.current = true;
+    setTimeout(() => setPhotoUri(uri), MODAL_HANDOFF_MS);
   }, []);
 
   const handleExtracted = useCallback((result) => {
@@ -267,6 +281,7 @@ function BoardsScreen({ currentUser, navigation }) {
       colors,
       title: '',
       imageUri: result.imageUri,
+      imageSource: photoFromWeb.current ? 'web' : 'photo',
     }), MODAL_HANDOFF_MS);
   }, []);
 
@@ -288,7 +303,11 @@ function BoardsScreen({ currentUser, navigation }) {
       </Pressable>
       <Pressable style={styles.photoButton} onPress={() => startPhotoPick('library')} accessibilityRole="button" accessibilityLabel="New palette from a photo">
         <Ionicons name="images-outline" size={18} color={ui.text} />
-        <Text style={styles.photoButtonText}>Photo library</Text>
+        <Text style={styles.photoButtonText}>Photos</Text>
+      </Pressable>
+      <Pressable style={styles.photoButton} onPress={() => setWebOpen(true)} accessibilityRole="button" accessibilityLabel="New palette from a picture on the web">
+        <Ionicons name="globe-outline" size={18} color={ui.text} />
+        <Text style={styles.photoButtonText}>Web</Text>
       </Pressable>
     </View>
   );
@@ -323,6 +342,7 @@ function BoardsScreen({ currentUser, navigation }) {
           />
         )}
       </Modal>
+      <WebCaptureModal visible={webOpen} onClose={() => setWebOpen(false)} onCaptured={handleWebCaptured} />
       <SaveToBoardSheet
         visible={!!draft}
         draft={draft}
@@ -362,8 +382,8 @@ function BoardsScreen({ currentUser, navigation }) {
           header={photoButtons}
           emptyTitle={isAll ? 'No palettes yet' : 'This board is empty'}
           emptyText={isAll
-            ? 'Build one on the Color Wheel or pick colors from a photo above.'
-            : 'Save a palette here from the Color Wheel, the Community, or a photo above.'}
+            ? 'Build one on the Color Wheel or pick colors from a picture above.'
+            : 'Save a palette here from the Color Wheel, the Community, or a picture above.'}
         />
         {modals}
       </View>
@@ -389,7 +409,7 @@ function BoardsScreen({ currentUser, navigation }) {
           </Pressable>
         </View>
 
-        <Text style={styles.sectionLabel}>New palette from a photo</Text>
+        <Text style={styles.sectionLabel}>New palette from a picture</Text>
         {photoButtons}
 
         {loading ? (
@@ -464,7 +484,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  photoButtonText: { marginLeft: 8, fontSize: 14, fontWeight: '600', color: ui.text },
+  photoButtonText: { marginLeft: 6, fontSize: 14, fontWeight: '600', color: ui.text },
 
   spinner: { marginTop: 40 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: 6 },

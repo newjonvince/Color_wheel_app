@@ -23,6 +23,8 @@ export const SaveToBoardSheet = ({ visible, onClose, palette = null, draft = nul
   const [saving, setSaving] = useState(false);
 
   const colors = (draft || palette)?.colors || [];
+  // Pictures captured from the web are someone else's: those palettes are private-only
+  const webCapture = draft?.imageSource === 'web';
 
   // Reset every time the sheet opens
   useEffect(() => {
@@ -76,11 +78,11 @@ export const SaveToBoardSheet = ({ visible, onClose, palette = null, draft = nul
           colors: draft.colors,
           title: title.trim() || draft.title || 'My palette',
           description: draft.description || '',
-          privacy: shared ? 'public' : 'private',
+          privacy: shared && !webCapture ? 'public' : 'private',
         });
         if (draft.imageUri) {
           try {
-            Object.assign(saved, await paletteApi.uploadImage(saved.id, draft.imageUri));
+            Object.assign(saved, await paletteApi.uploadImage(saved.id, draft.imageUri, webCapture ? 'web' : 'photo'));
           } catch (error) {
             // The palette itself is saved; only the photo failed
             console.warn('SaveToBoardSheet: photo upload failed', error?.message);
@@ -96,7 +98,7 @@ export const SaveToBoardSheet = ({ visible, onClose, palette = null, draft = nul
     } finally {
       setSaving(false);
     }
-  }, [canSave, palette, draft, title, shared, selected, onSaved, onClose]);
+  }, [canSave, palette, draft, title, shared, webCapture, selected, onSaved, onClose]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -121,15 +123,25 @@ export const SaveToBoardSheet = ({ visible, onClose, palette = null, draft = nul
                 maxLength={100}
                 returnKeyType="done"
               />
-              <View style={styles.shareRow}>
-                <View style={styles.shareText}>
-                  <Text style={styles.shareTitle}>Share with the community</Text>
-                  <Text style={styles.shareHint}>
-                    {draft.imageUri ? 'Others will see this palette and its photo.' : 'Others will see this palette.'}
-                  </Text>
+              {webCapture ? (
+                <View style={styles.shareRow}>
+                  <Ionicons name="lock-closed-outline" size={20} color={ui.muted} />
+                  <View style={styles.privateText}>
+                    <Text style={styles.shareTitle}>Private</Text>
+                    <Text style={styles.shareHint}>Pictures from the web stay in your boards. Only you can see them.</Text>
+                  </View>
                 </View>
-                <Switch value={shared} onValueChange={setShared} />
-              </View>
+              ) : (
+                <View style={styles.shareRow}>
+                  <View style={styles.shareText}>
+                    <Text style={styles.shareTitle}>Share with the community</Text>
+                    <Text style={styles.shareHint}>
+                      {draft.imageUri ? 'Others will see this palette and its photo.' : 'Others will see this palette.'}
+                    </Text>
+                  </View>
+                  <Switch value={shared} onValueChange={setShared} />
+                </View>
+              )}
             </>
           )}
 
@@ -230,6 +242,7 @@ const styles = StyleSheet.create({
   },
   shareRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14 },
   shareText: { flex: 1, paddingRight: 12 },
+  privateText: { flex: 1, paddingLeft: 10 },
   shareTitle: { fontSize: 15, fontWeight: '600', color: ui.text },
   shareHint: { fontSize: 12, color: ui.muted, marginTop: 2 },
   label: { marginTop: 18, fontSize: 13, fontWeight: '600', color: ui.muted, textTransform: 'uppercase', letterSpacing: 0.5 },

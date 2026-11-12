@@ -542,6 +542,10 @@ async function initializeTables() {
         CONSTRAINT fk_cm_images_match FOREIGN KEY (color_match_id) REFERENCES color_matches(id) ON DELETE CASCADE
       ) ENGINE=InnoDB
     `);
+    // 'web' = captured from a web page; those palettes can never be shared publicly
+    await ensure('color_match_images', [
+      ['source', "source VARCHAR(10) NOT NULL DEFAULT 'photo'"],
+    ]);
 
     // Moderation: reports on shared palettes, and users hiding other users
     await query(`

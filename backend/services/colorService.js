@@ -5,6 +5,8 @@ const sharp = require('sharp');
 const { query } = require('../config/database');
 const { ERROR_MESSAGES, SUCCESS_MESSAGES, COLOR_SCHEMES, PAGINATION } = require('../constants');
 
+const WEB_CAPTURE_PRIVATE = 'Palettes with a picture captured from the web cannot be shared';
+
 class ColorService {
   /**
    * Validate hex color format
@@ -105,7 +107,7 @@ class ColorService {
 
     let queryText = `
       SELECT cm.*, u.username,
-        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height
+        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height, ci.source AS image_source
       FROM color_matches cm 
       JOIN users u ON cm.user_id = u.id 
       LEFT JOIN color_match_images ci ON ci.color_match_id = cm.id 
@@ -167,7 +169,7 @@ class ColorService {
 
     let queryText = `
       SELECT cm.*, u.username,
-        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height
+        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height, ci.source AS image_source
       FROM color_matches cm 
       JOIN users u ON cm.user_id = u.id 
       LEFT JOIN color_match_images ci ON ci.color_match_id = cm.id 
@@ -213,7 +215,7 @@ class ColorService {
   static async getColorMatchById(matchId, userId = null) {
     let queryText = `
       SELECT cm.*, u.username,
-        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height
+        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height, ci.source AS image_source
       FROM color_matches cm 
       JOIN users u ON cm.user_id = u.id 
       LEFT JOIN color_match_images ci ON ci.color_match_id = cm.id 
@@ -254,6 +256,11 @@ class ColorService {
 
     const { title, description, privacy } = updates;
 
+    // Pictures captured from the web belong to someone else: those palettes stay private
+    if (privacy === 'public' && await this.isWebCapture(matchId)) {
+      throw new Error(WEB_CAPTURE_PRIVATE);
+    }
+
     await query(
       `UPDATE color_matches SET 
        title = COALESCE(?, title),
@@ -288,7 +295,8 @@ class ColorService {
    * Attach (or replace) the photo a palette was picked from.
    * Stored in MySQL as a compressed JPEG: the host's disk does not survive deploys.
    */
-  static async saveImage(matchId, userId, buffer) {
+  static async saveImage(matchId, userId, buffer, source = 'photo') {
+    const imageSource = source === 'web' ? 'web' : 'photo';
     const owned = await query('SELECT id FROM color_matches WHERE id = ? AND user_id = ?', [matchId, userId]);
     if (owned.rows.length === 0) {
       throw new Error(ERROR_MESSAGES.RESOURCE_NOT_FOUND);
@@ -301,13 +309,30 @@ class ColorService {
       .toBuffer({ resolveWithObject: true });
 
     await query(
-      `INSERT INTO color_match_images (color_match_id, mime, width, height, data)
-       VALUES (?, 'image/jpeg', ?, ?, ?)
-       ON DUPLICATE KEY UPDATE mime = VALUES(mime), width = VALUES(width), height = VALUES(height), data = VALUES(data)`,
-      [matchId, info.width, info.height, data]
+      `INSERT INTO color_match_images (color_match_id, mime, width, height, data, source)
+       VALUES (?, 'image/jpeg', ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE mime = VALUES(mime), width = VALUES(width), height = VALUES(height),
+         data = VALUES(data), source = VALUES(source)`,
+      [matchId, info.width, info.height, data, imageSource]
     );
 
-    return { has_image: true, image_width: info.width, image_height: info.height };
+    const result = { has_image: true, image_width: info.width, image_height: info.height, image_source: imageSource };
+    if (imageSource === 'web') {
+      await query("UPDATE color_matches SET privacy = 'private' WHERE id = ? AND user_id = ?", [matchId, userId]);
+      result.privacy = 'private';
+    }
+    return result;
+  }
+
+  /**
+   * True when the palette's picture was captured from the web (never shared publicly)
+   */
+  static async isWebCapture(matchId) {
+    const result = await query(
+      "SELECT 1 FROM color_match_images WHERE color_match_id = ? AND source = 'web'",
+      [matchId]
+    );
+    return result.rows.length > 0;
   }
 
   /**
@@ -363,8 +388,11 @@ class ColorService {
       has_image: Boolean(Number(colorMatch.has_image)),
       image_width: colorMatch.image_width || null,
       image_height: colorMatch.image_height || null,
+      image_source: colorMatch.image_source || null,
     };
   }
 }
+
+ColorService.WEB_CAPTURE_PRIVATE = WEB_CAPTURE_PRIVATE;
 
 module.exports = ColorService;
