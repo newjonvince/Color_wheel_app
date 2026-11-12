@@ -67,6 +67,7 @@ function Browser({ onShot, onClose }) {
   const webRef = useRef(null);
   const shotRef = useRef(null);
   const noticeTimer = useRef(null);
+  const lastRewrite = useRef(null);
   const [uri, setUri] = useState(START_URL);
   const [nav, setNav] = useState({ canGoBack: false, canGoForward: false });
   const [loading, setLoading] = useState(true);
@@ -93,8 +94,13 @@ function Browser({ onShot, onClose }) {
     }
     if (SEARCH_RE.test(url) && !/[?&]safe=active(&|#|$)/i.test(url)) {
       const [main, hash] = url.split('#');
-      setUri(`${main}&safe=active${hash ? `#${hash}` : ''}`);
-      return false;
+      // Rewrite each search once: if Google sends us back to the same URL, let it through
+      // rather than bouncing forever
+      if (lastRewrite.current !== main) {
+        lastRewrite.current = main;
+        setUri(`${main}&safe=active${hash ? `#${hash}` : ''}`);
+        return false;
+      }
     }
     return true;
   }, [flash]);
