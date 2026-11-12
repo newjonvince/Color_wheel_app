@@ -149,7 +149,7 @@ export const PaletteDetailModal = ({
           </View>
 
           <Text style={styles.meta}>
-            {schemeLabel(palette.scheme)} · by @{palette.username || 'you'}
+            {schemeLabel(palette.scheme, !!palette.has_image)} · by @{palette.username || 'you'}
             {palette.like_count > 0 ? ` · ${palette.like_count} like${palette.like_count > 1 ? 's' : ''}` : ''}
           </Text>
           {!!palette.description && <Text style={styles.description}>{palette.description}</Text>}

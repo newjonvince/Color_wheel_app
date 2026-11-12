@@ -1,5 +1,5 @@
 // screens/ColorWheelScreen/components/ColorControls.js
-// Compact tool pills under the wheel: link toggle, follow-active toggle, reset, random.
+// Compact tool pills under the wheel: lock toggle (locked = scheme, unlocked = custom palette), follow-active toggle, reset, random.
 import React from 'react';
 import { View, Text, Pressable } from 'react-native';
 import PropTypes from 'prop-types';
@@ -30,12 +30,12 @@ export const ColorControls = React.memo(({
 }) => (
   <View style={styles.toolsRow}>
     <Pill
-      icon="link-outline"
-      label="Linked"
+      icon={linked ? 'lock-closed' : 'lock-open-outline'}
+      label={linked ? 'Locked' : 'Unlocked'}
       on={linked}
       onPress={onToggleLinked}
       role="switch"
-      hint="When on, the scheme handles move together"
+      hint="Locked keeps the colors in the chosen palette type. Unlock to move each color on its own and build a custom palette"
     />
     <Pill
       icon="eye-outline"

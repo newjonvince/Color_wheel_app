@@ -25,8 +25,8 @@ const TAB_ICONS = {
     unfocused: { name: 'compass-outline', library: 'Ionicons' }
   },
   ColorWheel: {
-    focused: { name: 'color-palette', library: 'Ionicons' },
-    unfocused: { name: 'color-palette-outline', library: 'Ionicons' }
+    focused: { name: 'color-filter', library: 'Ionicons' },
+    unfocused: { name: 'color-filter-outline', library: 'Ionicons' }
   },
   Boards: {
     focused: { name: 'albums', library: 'Ionicons' },

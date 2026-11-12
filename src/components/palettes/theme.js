@@ -21,7 +21,8 @@ export const inkFor = (hex) => {
   return (0.299 * r + 0.587 * g + 0.114 * b) > 160 ? '#111827' : '#FFFFFF';
 };
 
-export const schemeLabel = (scheme) => {
-  if (!scheme || scheme === 'custom') return 'From a photo';
+// 'custom' covers both photo palettes and palettes built by hand on the unlocked wheel
+export const schemeLabel = (scheme, hasImage = false) => {
+  if (!scheme || scheme === 'custom') return hasImage ? 'From a photo' : 'Custom';
   return scheme.charAt(0).toUpperCase() + scheme.slice(1);
 };

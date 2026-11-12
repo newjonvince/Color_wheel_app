@@ -148,7 +148,11 @@ const ColorWheelScreen = ({ navigation = null, route = null, currentUser = null,
   const handleSwatchPress = useCallback((color, index) => {
     if (!isValidHex6(color)) return;
     handleHexChange(color);
-    if (Number.isInteger(index) && index >= 0) handleActiveHandleChange(index);
+    if (Number.isInteger(index) && index >= 0) {
+      // Make the wheel edit this color too, so the hex field, sliders and ring act on it
+      wheelRef.current?.selectHandle?.(index);
+      handleActiveHandleChange(index);
+    }
   }, [handleHexChange, handleActiveHandleChange]);
 
   // ----- hex field ("1. Pick a color") -----
@@ -172,13 +176,20 @@ const ColorWheelScreen = ({ navigation = null, route = null, currentUser = null,
 
   // ----- save -----
   const schemeLabel = getSchemeDisplayName(selectedScheme);
-  const colorMatchData = useMemo(() => ({
+  // Unlocked, the colors no longer follow the palette type, so it is saved as a custom palette
+  const colorMatchData = useMemo(() => (linked ? {
     base_color: selectedColor,
     scheme: selectedScheme,
     colors: schemeColors,
     title: `${schemeLabel} palette`,
     description: `Generated color palette using the ${selectedScheme} scheme`,
-  }), [selectedColor, selectedScheme, schemeColors, schemeLabel]);
+  } : {
+    base_color: schemeColors[0] || selectedColor,
+    scheme: 'custom',
+    colors: schemeColors,
+    title: 'Custom palette',
+    description: 'Custom color palette',
+  }), [linked, selectedColor, selectedScheme, schemeColors, schemeLabel]);
 
   // Saving goes through the board sheet: name it, choose boards, optionally share it
   const [saveOpen, setSaveOpen] = useState(false);
@@ -266,6 +277,12 @@ const ColorWheelScreen = ({ navigation = null, route = null, currentUser = null,
           onReset={resetScheme}
           onRandomize={randomize}
         />
+
+        {!linked && (
+          <Text style={{ marginTop: 10, fontSize: 13, lineHeight: 18, textAlign: 'center', color: colorWheelColors.text, opacity: 0.65 }}>
+            Custom palette: drag each handle on its own, or tap a color below to edit it. Lock to snap back to the palette type.
+          </Text>
+        )}
 
         <Text style={styles.stepLabel}>1. Pick a color</Text>
         <View style={styles.colorRow}>
