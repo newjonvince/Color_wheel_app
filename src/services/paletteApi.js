@@ -9,6 +9,13 @@ const authHeader = () => {
   return token ? { Authorization: `Bearer ${token}` } : undefined;
 };
 
+// ASCII-only text to bytes (the multipart headers below contain nothing else)
+const utf8 = (text) => {
+  const out = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i += 1) out[i] = text.charCodeAt(i) & 0xff;
+  return out;
+};
+
 export const paletteApi = {
   // ----- boards -----
   listBoards: async () => unwrap(await ApiService.get('/boards')) || [],
@@ -27,16 +34,37 @@ export const paletteApi = {
   updatePalette: async (paletteId, changes) => unwrap(await ApiService.put(`/colors/matches/${paletteId}`, changes)),
   deletePalette: async (paletteId) => unwrap(await ApiService.delete(`/colors/matches/${paletteId}`)),
 
-  // Attach the photo a palette was picked from. fetch() sets the multipart boundary itself.
+  // Attach the photo a palette was picked from.
   // source 'web' marks a picture captured from the web: the server keeps that palette private.
+  //
+  // The multipart body is built by hand from the file's bytes. Expo's fetch (the global fetch in
+  // this SDK) rejects React Native's { uri, name, type } FormData parts with
+  // "Unsupported FormDataPart implementation", so every upload failed before reaching the server.
   uploadImage: async (paletteId, uri, source = 'photo') => {
-    const form = new FormData();
-    form.append('source', source === 'web' ? 'web' : 'photo');
-    form.append('image', { uri, name: 'palette.jpg', type: 'image/jpeg' });
+    const { File } = require('expo-file-system');
+    const bytes = await new File(uri).bytes();
+    if (!bytes || bytes.length === 0) throw new Error('The picture file is empty');
+
+    const boundary = `----PaletteUpload${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+    const head = utf8(
+      `--${boundary}\r\nContent-Disposition: form-data; name="source"\r\n\r\n${source === 'web' ? 'web' : 'photo'}\r\n` +
+      `--${boundary}\r\nContent-Disposition: form-data; name="image"; filename="palette.jpg"\r\n` +
+      'Content-Type: image/jpeg\r\n\r\n'
+    );
+    const tail = utf8(`\r\n--${boundary}--\r\n`);
+    const body = new Uint8Array(head.length + bytes.length + tail.length);
+    body.set(head, 0);
+    body.set(bytes, head.length);
+    body.set(tail, head.length + bytes.length);
+
     const res = await fetch(`${getApiRoot()}/colors/matches/${paletteId}/image`, {
       method: 'POST',
-      headers: { Accept: 'application/json', ...(authHeader() || {}) },
-      body: form,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        ...(authHeader() || {}),
+      },
+      body,
     });
     if (!res.ok) throw new Error(`Photo upload failed (${res.status})`);
     return unwrap(await res.json());
