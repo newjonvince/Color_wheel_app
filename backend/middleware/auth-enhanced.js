@@ -12,7 +12,10 @@ const TOKEN_REFRESH_CONFIG = {
   // New token expiration for refreshed tokens
   REFRESH_EXPIRES_IN: process.env.TOKEN_REFRESH_EXPIRES_IN || '7d',
   // Enable/disable automatic refresh
-  AUTO_REFRESH_ENABLED: process.env.TOKEN_AUTO_REFRESH !== 'false'
+  // Off unless explicitly enabled: rotating the session here replaces its jti, but no route sends
+  // the new token back, so the client's token stopped matching and every later request got a 401.
+  // Clients renew through POST /auth/refresh instead.
+  AUTO_REFRESH_ENABLED: process.env.TOKEN_AUTO_REFRESH === 'true'
 };
 
 // normalize DB results (pg/mysql driver agnostic)

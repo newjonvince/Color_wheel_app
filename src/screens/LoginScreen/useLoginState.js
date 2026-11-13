@@ -208,7 +208,7 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
   }, []);
 
   // SAFER: Save session with transaction safety
-  const saveSession = useCallback(async ({ user, token }) => {
+  const saveSession = useCallback(async ({ user, token, refreshToken = null }) => {
     try {
       // Write-then-swap pattern to avoid partial state
       const tempUserKey = '__temp_userData';
@@ -239,6 +239,12 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         finalOps.push(safeStorage.setItem(STORAGE_KEYS.authToken, token));
       }
       await Promise.all(finalOps);
+
+      // Hand the tokens to the API client now. It only reads storage at app start, so without
+      // this every signed-in request failed with a 401 until the app was restarted.
+      if (token) {
+        await ApiService.setToken(token, refreshToken);
+      }
 
       // Clean up temp keys
       await Promise.all([
@@ -317,10 +323,10 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         TIMEOUTS.login
       );
 
-      const { user, token } = parseLoginResponse(response);
+      const { user, token, refreshToken } = parseLoginResponse(response);
       
       if (user && token) {
-        await saveSession({ user, token });
+        await saveSession({ user, token, refreshToken });
         
         // Haptic feedback for login success
         try {
@@ -383,14 +389,14 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
           TIMEOUTS.demoLogin
         );
         
-        const { user, token } = parseLoginResponse(response);
+        const { user, token, refreshToken } = parseLoginResponse(response);
         
         if (!user || !token) {
           throw new Error('Invalid demo response');
         }
         
         // CRITICAL: saveSession must complete fully or rollback
-        await saveSession({ user, token });
+        await saveSession({ user, token, refreshToken });
         
         // Haptic feedback for demo login success
         try {

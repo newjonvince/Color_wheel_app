@@ -255,9 +255,14 @@ export const parseLoginResponse = (response) => {
     throw new Error('Invalid JWT token structure');
   }
 
-  return { 
-    user: normalizedUser, 
-    token: token.trim() 
+  const refreshToken = typeof data.refreshToken === 'string' && data.refreshToken.split('.').length === 3
+    ? data.refreshToken.trim()
+    : null;
+
+  return {
+    user: normalizedUser,
+    token: token.trim(),
+    refreshToken,
   };
 };
 

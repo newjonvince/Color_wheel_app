@@ -356,7 +356,15 @@ export const AuthProvider = ({ children }) => {
       
       // Clear stored user
       await setStoredUser(null);
-      
+
+      // Drop the API client's tokens too, so the next account never sends the old one
+      try {
+        const api = require('../services/safeApiService');
+        await (api?.default || api)?.setToken?.(null);
+      } catch (tokenError) {
+        getLogger().warn('Could not clear API token on logout:', tokenError?.message);
+      }
+
       // CRASH FIX: Check mounted before dispatching after async
       if (isMountedRef.current) {
         initializationRef.current = true;

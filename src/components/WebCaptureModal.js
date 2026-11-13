@@ -15,7 +15,7 @@ import { View, Text, Pressable, Modal, StyleSheet, ActivityIndicator, Alert } fr
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { makeImageFromView, ImageFormat } from '@shopify/react-native-skia';
+import { snapshotToFile } from '../utils/viewSnapshot';
 import ImageCropper from './ImageCropper';
 import { ui } from './palettes/theme';
 
@@ -31,22 +31,6 @@ const START_URL = 'https://www.google.com/imghp?hl=en&safe=active';
 const HOST_RE = /^https?:\/\/([^/?#:]+)/i;
 const ALLOWED_HOST = /(^|\.)(google\.[a-z]{2,3}(\.[a-z]{2})?|gstatic\.com|googleusercontent\.com)$/i;
 const SEARCH_RE = /^https?:\/\/[^/]+\/search\?/i;
-
-// Write the snapshot of a view to a JPEG in the cache directory
-async function snapshotToFile(viewRef) {
-  const { File, Paths } = require('expo-file-system');
-  const image = await makeImageFromView(viewRef);
-  if (!image) throw new Error('Empty snapshot');
-  try {
-    const bytes = image.encodeToBytes(ImageFormat.JPEG, 92);
-    if (!bytes || bytes.length === 0) throw new Error('Could not encode the snapshot');
-    const file = new File(Paths.cache, `web-capture-${Date.now()}.jpg`);
-    await file.write(bytes);
-    return { uri: file.uri, width: image.width(), height: image.height() };
-  } finally {
-    try { image.dispose?.(); } catch (_) {}
-  }
-}
 
 const NavButton = ({ icon, label, onPress, disabled }) => (
   <Pressable
@@ -109,7 +93,7 @@ function Browser({ onShot, onClose }) {
     if (capturing) return;
     setCapturing(true);
     try {
-      onShot(await snapshotToFile(shotRef));
+      onShot(await snapshotToFile(shotRef, 'web-capture'));
     } catch (error) {
       console.warn('WebCaptureModal: capture failed', error?.message);
       Alert.alert('Could not capture', 'Please try again.');

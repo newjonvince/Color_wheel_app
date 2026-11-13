@@ -1,10 +1,11 @@
 // components/palettes/PaletteDetailModal.js - One palette, large: photo, every color with its hex,
 // and what you can do with it (like, save to a board, try on the wheel, share/delete, report/block).
-import React, { useState, useCallback } from 'react';
-import { View, Text, Image, Pressable, Modal, ScrollView, Switch, Alert, StyleSheet, useWindowDimensions } from 'react-native';
+import React, { useState, useCallback, useRef } from 'react';
+import { View, Text, Image, Pressable, Modal, ScrollView, Switch, Alert, Share, StyleSheet, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { paletteApi } from '../../services/paletteApi';
 import { SaveToBoardSheet } from './SaveToBoardSheet';
+import { snapshotToFile } from '../../utils/viewSnapshot';
 import { ui, inkFor, schemeLabel } from './theme';
 
 const REPORT_REASONS = [
@@ -13,6 +14,52 @@ const REPORT_REASONS = [
   { key: 'harassment', label: 'Harassment' },
   { key: 'copyright', label: 'Uses my photo without permission' },
 ];
+
+const COLLAGE_WIDTH = 360;       // points; the saved image is this times the screen scale
+const COLLAGE_MAX_PHOTO = 540;   // tallest the picture gets inside the collage
+
+// The picture with its palette underneath, laid out to be saved as one image. It is rendered
+// off-screen only while a collage is being made.
+const Collage = React.forwardRef(({ palette, colors, onReady }, ref) => {
+  const hasPhoto = palette.has_image && palette.image_width > 0;
+  const photoHeight = hasPhoto
+    ? Math.min(COLLAGE_MAX_PHOTO, Math.round(COLLAGE_WIDTH * (palette.image_height / palette.image_width)))
+    : 0;
+  return (
+    <View
+      ref={ref}
+      collapsable={false}
+      style={styles.collage}
+      // Without a picture there is nothing to wait for
+      onLayout={hasPhoto ? undefined : onReady}
+    >
+      {hasPhoto && (
+        <Image
+          source={paletteApi.imageSource(palette)}
+          style={{ width: COLLAGE_WIDTH, height: photoHeight }}
+          resizeMode="cover"
+          fadeDuration={0}
+          onLoad={onReady}
+          onError={() => onReady(new Error('The picture could not be loaded'))}
+        />
+      )}
+      <View style={[styles.collageSwatches, !hasPhoto && styles.collageSwatchesTall]}>
+        {colors.map((hex, i) => (
+          <View key={`${i}-${hex}`} style={[styles.collageSwatch, { backgroundColor: hex }]}>
+            <Text style={[styles.collageHex, { color: inkFor(hex) }]} numberOfLines={1} adjustsFontSizeToFit>
+              {String(hex).toUpperCase()}
+            </Text>
+          </View>
+        ))}
+      </View>
+      <View style={styles.collageFooter}>
+        <Text style={styles.collageTitle} numberOfLines={1}>{palette.title || 'My palette'}</Text>
+        <Text style={styles.collageBrand}>Fashion Color Wheel</Text>
+      </View>
+    </View>
+  );
+});
+Collage.displayName = 'Collage';
 
 const Action = ({ icon, label, onPress, color = ui.text }) => (
   <Pressable style={styles.action} onPress={onPress} accessibilityRole="button" accessibilityLabel={label}>
@@ -39,6 +86,34 @@ export const PaletteDetailModal = ({
   const { width } = useWindowDimensions();
   const [saveOpen, setSaveOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [collaging, setCollaging] = useState(false);
+  const collageRef = useRef(null);
+  const collageStarted = useRef(false);
+
+  // Called once the off-screen collage has its picture: snapshot it and open the share sheet,
+  // where "Save Image" puts it in the camera roll
+  const shareCollage = useCallback(async (problem) => {
+    if (collageStarted.current) return;
+    collageStarted.current = true;
+    try {
+      if (problem instanceof Error) throw problem;
+      // One more frame so the picture is actually on screen before the snapshot
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const file = await snapshotToFile(collageRef, 'palette-collage');
+      await Share.share({ url: file.uri });
+    } catch (error) {
+      console.warn('PaletteDetailModal: collage failed', error?.message);
+      Alert.alert('Could not make the image', error?.message || 'Please try again.');
+    } finally {
+      setCollaging(false);
+    }
+  }, []);
+
+  const startCollage = useCallback(() => {
+    if (collaging) return;
+    collageStarted.current = false;
+    setCollaging(true);
+  }, [collaging]);
 
   const isOwner = !!palette && !!currentUserId && palette.user_id === currentUserId;
 
@@ -164,8 +239,9 @@ export const PaletteDetailModal = ({
               />
             )}
             <Action icon="bookmark-outline" label="Save" onPress={() => setSaveOpen(true)} />
+            <Action icon={collaging ? 'hourglass-outline' : 'share-outline'} label="Image" onPress={startCollage} />
             {onOpenOnWheel && (
-              <Action icon="color-palette-outline" label="Try on wheel" onPress={() => onOpenOnWheel(palette)} />
+              <Action icon="color-palette-outline" label="On wheel" onPress={() => onOpenOnWheel(palette)} />
             )}
           </View>
 
@@ -220,6 +296,12 @@ export const PaletteDetailModal = ({
           </View>
         </ScrollView>
 
+        {collaging && (
+          <View style={styles.collageHost} pointerEvents="none">
+            <Collage ref={collageRef} palette={palette} colors={colors} onReady={shareCollage} />
+          </View>
+        )}
+
         {/* Rendered inside this modal so it can present on top of it */}
         <SaveToBoardSheet
           visible={saveOpen}
@@ -267,6 +349,17 @@ const styles = StyleSheet.create({
   rowHint: { fontSize: 12, color: ui.muted, marginTop: 2 },
   linkRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
   linkText: { marginLeft: 10, fontSize: 15, color: ui.text },
+
+  // Parked off-screen: it only exists to be snapshotted
+  collageHost: { position: 'absolute', left: -(COLLAGE_WIDTH + 2000), top: 0, width: COLLAGE_WIDTH },
+  collage: { width: COLLAGE_WIDTH, backgroundColor: '#FFFFFF' },
+  collageSwatches: { flexDirection: 'row', height: 96 },
+  collageSwatchesTall: { height: 240 },
+  collageSwatch: { flex: 1, justifyContent: 'flex-end', alignItems: 'center', paddingBottom: 8, paddingHorizontal: 2 },
+  collageHex: { fontSize: 11, fontWeight: '700' },
+  collageFooter: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12 },
+  collageTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: '#1F2328', paddingRight: 10 },
+  collageBrand: { fontSize: 11, fontWeight: '600', color: '#9CA3AF', letterSpacing: 0.3 },
 });
 
 export default PaletteDetailModal;

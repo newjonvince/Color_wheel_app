@@ -452,9 +452,11 @@ class SafeApiService {
           throw new Error(`Token refresh failed: ${response.status}`);
         }
 
-        const data = await response.json();
-        
-        if (!data.accessToken) {
+        // The backend wraps results as { success, data: { accessToken, refreshToken } }
+        const body = await response.json();
+        const data = body?.data && typeof body.data === 'object' ? body.data : body;
+
+        if (!data?.accessToken) {
           throw new Error('No access token in refresh response');
         }
 
@@ -582,6 +584,12 @@ class SafeApiService {
           throw axiosError; // Let the existing error handling below deal with it
         }
         
+        // The server answered with an error status: keep the original error so the handling
+        // below can see the status (a 401 must reach the token refresh)
+        if (axiosError.response) {
+          throw axiosError;
+        }
+
         // For other axios errors, add context
         console.error('Axios request execution failed:', axiosError.message);
         throw new Error(`Request execution failed: ${axiosError.message}`);
@@ -642,8 +650,16 @@ class SafeApiService {
           if (!endpoint.includes('/auth/refresh')) {
             await this.setToken(null);
           }
-          throw new Error('Authentication required');
+          throw new Error('Your session has ended. Please log out and log in again.');
         }
+      }
+
+      // Any other error status: show the server's own message instead of "status code 4xx"
+      const serverMessage = error.response?.data?.message;
+      if (typeof serverMessage === 'string' && serverMessage.length > 0) {
+        const friendly = new Error(serverMessage);
+        friendly.status = error.response.status;
+        throw friendly;
       }
       
       // Handle network errors
