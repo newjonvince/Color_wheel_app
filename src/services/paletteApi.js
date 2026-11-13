@@ -78,6 +78,10 @@ export const paletteApi = {
 
   // ----- community -----
   feed: async (offset = 0) => unwrap(await ApiService.get(`/community/feed?offset=${offset}`)),
+  // Shared palettes closest to these hex colors, closest first
+  similar: async (colors) => unwrap(await ApiService.get(
+    `/community/similar?colors=${colors.map((c) => String(c).replace('#', '')).join(',')}`
+  )),
   like: async (paletteId) => unwrap(await ApiService.post(`/likes/color-matches/${paletteId}`)),
   unlike: async (paletteId) => unwrap(await ApiService.delete(`/likes/color-matches/${paletteId}`)),
   report: async (paletteId, reason) =>

@@ -1,8 +1,12 @@
 // screens/CommunityFeedScreen.js - A Pinterest-style feed of palettes people chose to share.
 // Tap a pin to see it large; heart it; save it into one of your boards.
-import React, { useState, useCallback, useRef, useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+//
+// "Explore inspiration" on the Color Wheel opens this tab with route.params.similarTo =
+// { colors: ['#RRGGBB', ...], nonce }: the feed then shows shared palettes closest to those colors.
+import React, { useState, useCallback, useRef, useMemo, useEffect } from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import { paletteApi, withLikeToggled, sendLike } from '../services/paletteApi';
 import { PaletteGrid } from '../components/palettes/PaletteGrid';
 import { PaletteDetailModal } from '../components/palettes/PaletteDetailModal';
@@ -11,7 +15,7 @@ import { ui } from '../components/palettes/theme';
 
 const STALE_MS = 60 * 1000; // refetch on focus only if the feed is older than this
 
-function CommunityFeedScreen({ currentUser, navigation }) {
+function CommunityFeedScreen({ currentUser, navigation, route }) {
   const [palettes, setPalettes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -19,37 +23,43 @@ function CommunityFeedScreen({ currentUser, navigation }) {
   const [failed, setFailed] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [saving, setSaving] = useState(null); // palette being saved from the grid
+  const [match, setMatch] = useState(null);   // colors being matched, or null for the whole feed
 
+  const matchRef = useRef(null);      // same as `match`, readable from inside loads
   const nextOffset = useRef(0);       // null once the last page has loaded
-  const fetching = useRef(false);
+  const fetching = useRef(false);     // a next-page request is in flight
+  const loadSeq = useRef(0);          // bumped by every first-page load; older answers are dropped
   const loadedAt = useRef(0);
 
   const selected = useMemo(() => palettes.find((p) => p.id === selectedId) || null, [palettes, selectedId]);
 
   const loadFirstPage = useCallback(async () => {
-    if (fetching.current) return;
-    fetching.current = true;
+    const seq = ++loadSeq.current;
+    const colors = matchRef.current;
     try {
-      const page = await paletteApi.feed(0);
+      const page = colors ? await paletteApi.similar(colors) : await paletteApi.feed(0);
+      if (seq !== loadSeq.current) return;
       setPalettes(page?.palettes || []);
       nextOffset.current = page?.next_offset ?? null;
       loadedAt.current = Date.now();
       setFailed(false);
     } catch (error) {
+      if (seq !== loadSeq.current) return;
       console.warn('CommunityFeedScreen: feed failed', error?.message);
       setFailed(true);
     } finally {
-      fetching.current = false;
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, []);
 
   const loadMore = useCallback(async () => {
     if (fetching.current || nextOffset.current == null || nextOffset.current === 0) return;
+    const seq = loadSeq.current;
     fetching.current = true;
     setLoadingMore(true);
     try {
       const page = await paletteApi.feed(nextOffset.current);
+      if (seq !== loadSeq.current) return; // the list was replaced while this page was loading
       const incoming = page?.palettes || [];
       setPalettes((prev) => {
         const seen = new Set(prev.map((p) => p.id));
@@ -63,6 +73,24 @@ function CommunityFeedScreen({ currentUser, navigation }) {
       setLoadingMore(false);
     }
   }, []);
+
+  // Switch between the whole feed (null) and palettes close to a set of colors
+  const showMatch = useCallback((colors) => {
+    matchRef.current = colors;
+    setMatch(colors);
+    setPalettes([]);
+    setLoading(true);
+    loadFirstPage();
+  }, [loadFirstPage]);
+
+  const similarTo = route?.params?.similarTo;
+  const handledNonce = useRef(null);
+  useEffect(() => {
+    if (!similarTo || handledNonce.current === similarTo.nonce) return;
+    handledNonce.current = similarTo.nonce;
+    const colors = Array.isArray(similarTo.colors) ? similarTo.colors.filter(Boolean).slice(0, 8) : [];
+    if (colors.length > 0) showMatch(colors);
+  }, [similarTo, showMatch]);
 
   useFocusEffect(useCallback(() => {
     if (Date.now() - loadedAt.current > STALE_MS) loadFirstPage();
@@ -105,7 +133,29 @@ function CommunityFeedScreen({ currentUser, navigation }) {
     });
   }, [navigation]);
 
-  const header = (
+  const header = match ? (
+    <View style={styles.header}>
+      <Text style={styles.title}>Inspiration</Text>
+      <Text style={styles.subtitle}>Shared palettes closest to your colors, best match first.</Text>
+      <View style={styles.matchRow}>
+        <View style={styles.matchSwatches} accessibilityLabel={`Your colors: ${match.join(', ')}`}>
+          {match.map((hex, i) => (
+            <View key={`${i}-${hex}`} style={[styles.matchSwatch, { backgroundColor: hex }]} />
+          ))}
+        </View>
+        <Pressable
+          style={styles.showAll}
+          onPress={() => showMatch(null)}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Show all shared palettes"
+        >
+          <Ionicons name="close" size={16} color={ui.text} />
+          <Text style={styles.showAllText}>Show all</Text>
+        </Pressable>
+      </View>
+    </View>
+  ) : (
     <View style={styles.header}>
       <Text style={styles.title}>Explore</Text>
       <Text style={styles.subtitle}>Palettes and outfit photos shared by the community.</Text>
@@ -155,6 +205,30 @@ const styles = StyleSheet.create({
   header: { marginTop: 4, marginBottom: 14 },
   title: { fontSize: 24, fontWeight: '800', color: ui.text },
   subtitle: { marginTop: 2, fontSize: 14, color: ui.muted },
+
+  matchRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
+  matchSwatches: {
+    flex: 1,
+    flexDirection: 'row',
+    height: 36,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: ui.line,
+  },
+  matchSwatch: { flex: 1 },
+  showAll: {
+    marginLeft: 10,
+    height: 36,
+    paddingHorizontal: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: ui.line,
+    backgroundColor: ui.card,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  showAllText: { marginLeft: 4, fontSize: 13, fontWeight: '600', color: ui.text },
 });
 
 export default CommunityFeedScreen;

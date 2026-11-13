@@ -202,6 +202,13 @@ const ColorWheelScreen = ({ navigation = null, route = null, currentUser = null,
     setSaveOpen(true);
   }, [currentUser]);
 
+  // Open the Community tab on shared palettes closest to the colors on the wheel
+  const exploreInspiration = useCallback(() => {
+    const colors = schemeColors.filter(isValidHex6);
+    if (colors.length === 0) return;
+    navigation?.navigate('Community', { similarTo: { colors, nonce: Date.now() } });
+  }, [navigation, schemeColors]);
+
   // ----- palettes sent from other tabs ("Try on wheel" in Boards, Community and the Guide) -----
   const applyRequest = route?.params?.applyPalette;
   const appliedNonce = useRef(null);
@@ -336,6 +343,17 @@ const ColorWheelScreen = ({ navigation = null, route = null, currentUser = null,
           >
             <Ionicons name="bookmark-outline" size={18} color="#FFFFFF" />
             <Text style={styles.primaryButtonText}>Save to a board</Text>
+          </Pressable>
+        </View>
+        <View style={[styles.actionsRow, { marginTop: 12 }]}>
+          <Pressable
+            style={styles.secondaryButton}
+            onPress={exploreInspiration}
+            accessibilityRole="button"
+            accessibilityLabel="Explore shared palettes similar to these colors"
+          >
+            <Ionicons name="sparkles-outline" size={18} color={colorWheelColors.text} />
+            <Text style={styles.secondaryButtonText}>Explore inspiration</Text>
           </Pressable>
         </View>
 

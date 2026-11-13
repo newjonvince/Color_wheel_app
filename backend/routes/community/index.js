@@ -61,6 +61,91 @@ router.get('/feed', optionalAuth, communityLimiter, asyncHandler(async (req, res
   });
 }));
 
+// ----- "Explore inspiration": shared palettes closest to a set of colors -----
+
+const SIMILAR_POOL = 600;     // newest public palettes considered
+const SIMILAR_RESULTS = 40;
+const HEX6 = /^#?[0-9a-f]{6}$/i;
+
+// sRGB hex -> CIE Lab, where straight-line distance tracks how different two colors look
+const hexToLab = (hex) => {
+  const n = parseInt(String(hex).replace('#', ''), 16);
+  const lin = (v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const r = lin((n >> 16) & 255);
+  const g = lin((n >> 8) & 255);
+  const b = lin(n & 255);
+  const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
+  const x = f((0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047);
+  const y = f(0.2126 * r + 0.7152 * g + 0.0722 * b);
+  const z = f((0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883);
+  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+};
+
+const labDistance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+// Average distance from each color in `from` to its nearest color in `to`
+const coverage = (from, to) =>
+  from.reduce((sum, a) => sum + Math.min(...to.map((b) => labDistance(a, b))), 0) / from.length;
+
+// Lower is closer. Mostly "does this palette contain my colors"; a palette that also carries
+// unrelated colors ranks a little lower than one that is just my colors.
+const paletteDistance = (wanted, candidate) => coverage(wanted, candidate) + 0.35 * coverage(candidate, wanted);
+
+/**
+ * @route   GET /community/similar?colors=FF6B6B,4ECDC4
+ * @desc    Public palettes ranked by how close their colors are to the given ones (closest first)
+ */
+router.get('/similar', optionalAuth, communityLimiter, asyncHandler(async (req, res) => {
+  const hexes = String(req.query.colors || '').split(',').map((c) => c.trim()).filter((c) => HEX6.test(c)).slice(0, 8);
+  if (hexes.length === 0) return badRequest(res, 'colors must be a comma-separated list of hex colors');
+  const wanted = hexes.map(hexToLab);
+
+  const userId = req.user?.userId || null;
+  const params = [];
+  let likedSelect = '0 AS is_liked';
+  let hidden = '';
+  if (userId) {
+    likedSelect = 'EXISTS(SELECT 1 FROM color_match_likes l2 WHERE l2.color_match_id = cm.id AND l2.user_id = ?) AS is_liked';
+    params.push(userId);
+    hidden = `
+       AND cm.user_id NOT IN (SELECT blocked_id FROM user_blocks WHERE blocker_id = ?)
+       AND cm.id NOT IN (SELECT color_match_id FROM content_reports WHERE reporter_id = ?)`;
+    params.push(userId, userId);
+  }
+
+  const result = await query(
+    `SELECT cm.*, u.username,
+        (ci.color_match_id IS NOT NULL) AS has_image, ci.width AS image_width, ci.height AS image_height,
+        (SELECT COUNT(*) FROM color_match_likes l WHERE l.color_match_id = cm.id) AS like_count,
+        ${likedSelect}
+     FROM color_matches cm
+     JOIN users u ON u.id = cm.user_id
+     LEFT JOIN color_match_images ci ON ci.color_match_id = cm.id
+     WHERE cm.privacy = 'public' AND (ci.source IS NULL OR ci.source <> 'web')${hidden}
+     ORDER BY cm.created_at DESC, cm.id DESC
+     LIMIT ${SIMILAR_POOL}`,
+    params
+  );
+
+  const ranked = [];
+  for (const row of result.rows) {
+    const palette = ColorService.formatColorMatchResponse(row);
+    const colors = (Array.isArray(palette.colors) ? palette.colors : []).filter((c) => HEX6.test(c));
+    if (colors.length === 0 && HEX6.test(palette.base_color)) colors.push(palette.base_color);
+    if (colors.length === 0) continue;
+    ranked.push({ palette, distance: paletteDistance(wanted, colors.map(hexToLab)) });
+  }
+  ranked.sort((a, b) => a.distance - b.distance);
+
+  return success(res, {
+    palettes: ranked.slice(0, SIMILAR_RESULTS).map((r) => r.palette),
+    next_offset: null,
+  });
+}));
+
 /**
  * @route   POST /community/reports
  * @desc    Report a shared palette; it disappears from the reporter's feed
