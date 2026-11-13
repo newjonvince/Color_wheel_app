@@ -33,7 +33,13 @@ const LoginScreen = ({ onLoginSuccess = () => {} }) => {
     focusNextField,
     handleLogin,
     handleDemoLogin,
+    mode,
+    username,
+    toggleMode,
+    updateUsername,
+    handleSignUp,
   } = state;
+  const signingUp = mode === 'signup';
 
   const keyboardBehavior = Platform.OS === 'ios' ? 'padding' : 'height';
 
@@ -72,14 +78,18 @@ const LoginScreen = ({ onLoginSuccess = () => {} }) => {
               onPasswordFocus={handlePasswordFocus}
               onBlur={handleBlur}
               onFocusNext={focusNextField}
-              onSubmit={handleLogin}
+              onSubmit={signingUp ? handleSignUp : handleLogin}
+              signingUp={signingUp}
+              username={username}
+              onUsernameChange={updateUsername}
             />
 
             <LoginButtons
               loading={loading}
-              onLogin={handleLogin}
+              signingUp={signingUp}
+              onLogin={signingUp ? handleSignUp : handleLogin}
               onDemo={handleDemoLogin}
-              onSignUp={() => {}}
+              onSignUp={toggleMode}
             />
           </View>
         </ScrollView>

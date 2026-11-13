@@ -1,33 +1,31 @@
 // LoginButtons.js
-import React, { useMemo } from 'react';
+// In sign-up mode the main button creates the account and the last button switches back to log in.
+import React from 'react';
 import { TouchableOpacity, Text, View, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { optimizedStyles as styles, optimizedColors } from '../styles';
 
-export default function LoginButtons({ loading = false, onLogin, onDemo, onSignUp }) {
-  const noopHandlers = useMemo(
-    () => ({
-      login: () => {},
-      demo: () => {},
-      signup: () => {},
-    }),
-    []
-  );
+const noop = () => {};
 
-  const loginHandler = onLogin || noopHandlers.login;
-  const demoHandler = onDemo || noopHandlers.demo;
-  const signupHandler = onSignUp || noopHandlers.signup;
+export default function LoginButtons({ loading = false, signingUp = false, onLogin, onDemo, onSignUp }) {
+  const loginHandler = onLogin || noop;
+  const demoHandler = onDemo || noop;
+  const signupHandler = onSignUp || noop;
+
+  const mainLabel = signingUp ? 'Create account' : 'Log in';
+  const busyLabel = signingUp ? 'Creating account...' : 'Logging in...';
+  const switchLabel = signingUp ? 'I already have an account' : 'Sign up';
 
   return (
     <>
-      <TouchableOpacity 
-        onPress={loginHandler} 
-        disabled={loading} 
-        activeOpacity={0.9} 
+      <TouchableOpacity
+        onPress={loginHandler}
+        disabled={loading}
+        activeOpacity={0.9}
         style={styles.gradientWrapper}
         accessibilityRole="button"
-        accessibilityLabel={loading ? "Logging in, please wait" : "Log in"}
-        accessibilityState={{ disabled: loading, busy: loading }} // Add busy state
+        accessibilityLabel={loading ? `${busyLabel} please wait` : mainLabel}
+        accessibilityState={{ disabled: loading, busy: loading }}
       >
         <LinearGradient
           colors={[optimizedColors.buttonStart, optimizedColors.buttonEnd]}
@@ -37,43 +35,42 @@ export default function LoginButtons({ loading = false, onLogin, onDemo, onSignU
         >
           {loading ? (
             <View style={styles.activityIndicatorContainer}>
-              <ActivityIndicator 
-                color={optimizedColors.textPrimary}
-                accessibilityLabel="Loading" // Label the spinner
-              />
-              <Text style={styles.activityIndicatorText}>Logging in...</Text> {/* Visual text too */}
+              <ActivityIndicator color={optimizedColors.textPrimary} accessibilityLabel="Loading" />
+              <Text style={styles.activityIndicatorText}>{busyLabel}</Text>
             </View>
           ) : (
-            <Text style={styles.primaryButtonText}>Log in</Text>
+            <Text style={styles.primaryButtonText}>{mainLabel}</Text>
           )}
         </LinearGradient>
       </TouchableOpacity>
 
-      <TouchableOpacity 
-        style={[styles.secondaryButton, loading && styles.disabledButton]} 
-        onPress={loading ? undefined : demoHandler} 
-        disabled={loading}
-        activeOpacity={loading ? 1 : 0.8}
-        accessibilityRole="button"
-        accessibilityLabel={loading ? "Demo account disabled during login" : "Try Demo Account"}
-        accessibilityState={{ disabled: loading }}
-      >
-        <Text style={[styles.secondaryButtonText, loading && styles.disabledButtonText]}>
-          Try Demo Account
-        </Text>
-      </TouchableOpacity>
+      {!signingUp && (
+        <TouchableOpacity
+          style={[styles.secondaryButton, loading && styles.disabledButton]}
+          onPress={loading ? undefined : demoHandler}
+          disabled={loading}
+          activeOpacity={loading ? 1 : 0.8}
+          accessibilityRole="button"
+          accessibilityLabel={loading ? 'Demo account disabled during login' : 'Try Demo Account'}
+          accessibilityState={{ disabled: loading }}
+        >
+          <Text style={[styles.secondaryButtonText, loading && styles.disabledButtonText]}>
+            Try Demo Account
+          </Text>
+        </TouchableOpacity>
+      )}
 
-      <TouchableOpacity 
-        style={[styles.secondaryButton, loading && styles.disabledButton]} 
-        onPress={loading ? undefined : signupHandler} 
+      <TouchableOpacity
+        style={[styles.secondaryButton, loading && styles.disabledButton]}
+        onPress={loading ? undefined : signupHandler}
         disabled={loading}
         activeOpacity={loading ? 1 : 0.8}
         accessibilityRole="button"
-        accessibilityLabel="Sign up"
+        accessibilityLabel={switchLabel}
         accessibilityState={{ disabled: loading }}
       >
         <Text style={[styles.secondaryButtonText, loading && styles.disabledButtonText]}>
-          Sign up
+          {switchLabel}
         </Text>
       </TouchableOpacity>
     </>

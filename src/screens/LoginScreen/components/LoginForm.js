@@ -44,9 +44,43 @@ const LoginForm = React.memo(({
   onBlur,
   onFocusNext,
   onSubmit,
+  signingUp = false,
+  username = '',
+  onUsernameChange,
 }) => {
   return (
     <>
+      {/* Username: only when creating an account */}
+      {signingUp && (
+        <View style={styles.inputWrap}>
+          <InputContainer style={styles.inputOverlay}>
+            <TextInput
+              placeholder="Username"
+              placeholderTextColor={optimizedColors.placeholder}
+              style={[styles.input, errors.username ? styles.inputError : null]}
+              value={username}
+              onChangeText={onUsernameChange}
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="username"
+              autoComplete="username-new"
+              maxLength={50}
+              returnKeyType="next"
+              onSubmitEditing={() => emailRef?.current?.focus?.()}
+              accessibilityLabel="Username input"
+              accessibilityHint="Choose the name other people will see"
+              testID="username-input"
+              blurOnSubmit={false}
+            />
+          </InputContainer>
+          {errors.username ? (
+            <Text style={styles.errorText} accessibilityRole="alert" accessibilityLiveRegion="polite">
+              {errors.username}
+            </Text>
+          ) : null}
+        </View>
+      )}
+
       {/* Email */}
       <View style={styles.inputWrap}>
         <InputContainer style={styles.inputOverlay}>
@@ -110,7 +144,7 @@ const LoginForm = React.memo(({
               secureTextEntry={!showPassword}
               autoCapitalize="none"
               autoCorrect={false}
-              textContentType="password"
+              textContentType={signingUp ? 'newPassword' : 'password'}
               returnKeyType="go"
               onSubmitEditing={onSubmit}
               accessibilityLabel="Password input"

@@ -313,6 +313,68 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     }
   }, [email, password, onLoginSuccess, saveSession, checkRateLimit]);
 
+  // ----- sign up -----
+  const [mode, setMode] = useState('login'); // 'login' | 'signup'
+  const [username, setUsername] = useState('');
+
+  const toggleMode = useCallback(() => {
+    setMode((prev) => (prev === 'login' ? 'signup' : 'login'));
+    setErrors({});
+    setGlobalError('');
+  }, []);
+
+  const updateUsername = useCallback((value) => {
+    setUsername(value.replace(/\s/g, ''));
+    setErrors((prev) => ({ ...prev, username: '' }));
+    setGlobalError('');
+  }, []);
+
+  const handleSignUp = useCallback(async () => {
+    if (isProcessingRef.current) return;
+
+    // Same rules as the server (username) plus a longer minimum password for new accounts
+    const formValidation = validateForm(email, password);
+    const fieldErrors = { ...formValidation.errors };
+    const name = username.trim();
+    if (name.length < 3 || name.length > 50) fieldErrors.username = 'Username must be 3 to 50 characters';
+    else if (!/^[a-zA-Z0-9_-]+$/.test(name)) fieldErrors.username = 'Use only letters, numbers, _ and -';
+    if (!fieldErrors.password && password.length < 8) fieldErrors.password = 'Password should be at least 8 characters';
+    if (Object.keys(fieldErrors).length > 0) {
+      setErrors(fieldErrors);
+      return;
+    }
+
+    isProcessingRef.current = true;
+    setLoading(true);
+    setGlobalError('');
+    try {
+      const response = await withTimeout(
+        ApiService.register({
+          email: sanitizeEmail(email),
+          username: name,
+          password: sanitizePassword(password),
+        }),
+        TIMEOUTS.login
+      );
+      const { user, token, refreshToken } = parseLoginResponse(response);
+      await saveSession({ user, token, refreshToken });
+      onLoginSuccess?.(user);
+    } catch (error) {
+      logger.warn('Sign up failed:', error?.message);
+      if (!isMountedRef.current) return;
+      const status = error?.status || error?.response?.status;
+      const text = String(error?.message || '');
+      if (status === 409) setGlobalError('That email or username is already taken.');
+      else if (status === 429) setGlobalError('Too many attempts. Please wait a few minutes and try again.');
+      else if (status === 400) setGlobalError('Please check your email, username and password.');
+      else if (/network|timed out|timeout/i.test(text)) setGlobalError('Unable to connect. Check your internet and try again.');
+      else setGlobalError('Could not create the account. Please try again.');
+    } finally {
+      isProcessingRef.current = false;
+      if (isMountedRef.current) setLoading(false);
+    }
+  }, [email, password, username, onLoginSuccess, saveSession]);
+
   // Demo login with atomic transaction semantics
   const handleDemoLogin = useCallback(async () => {
     if (isProcessingRef.current) return;
@@ -463,6 +525,13 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
     focusNextField,
     handleLogin,
     handleDemoLogin,
+
+    // Sign up
+    mode,
+    username,
+    toggleMode,
+    updateUsername,
+    handleSignUp,
   };
 };
 
