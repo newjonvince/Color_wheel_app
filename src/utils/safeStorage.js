@@ -674,9 +674,14 @@ class OptimizedSafeStorage {
     // Opportunistically purge stale cache before writes
     this.clearExpiredCache();
 
+    if (typeof key !== 'string' || !key) {
+      console.warn('safeStorage.setItem: ignored invalid key', key);
+      return false;
+    }
+
     // Ensure initialization
     if (!this.isInitialized) await this.init();
-    
+
     // Normalize and validate the value
     const serialized = this.normalizeValueForStorage(value);
     this.validateDataSize(serialized);
@@ -763,6 +768,13 @@ class OptimizedSafeStorage {
 
     if (batch) {
       return this._addToBatch('remove', key, null, options);
+    }
+
+    // A missing key is a caller bug, not a storage failure: passing it on made SecureStore reject
+    // and the whole keychain get marked unavailable
+    if (typeof key !== 'string' || !key) {
+      console.warn('safeStorage.removeItem: ignored invalid key', key);
+      return false;
     }
 
     try {
@@ -883,38 +895,25 @@ class OptimizedSafeStorage {
       await this.init();
     }
     
-    // CRASH FIX: Check if SecureStore is available before trying
-    if (this.secureStoreUnavailable || !this.isSecureStoreAvailable) {
-      logger.error('SecureStore not available for token storage');
+    // Always try the keychain itself. secureStoreUnavailable is set by any earlier failed
+    // keychain call (a slow read, a bad key), so it does not mean the keychain is really gone.
+    // No alert on failure: the caller keeps the token in memory, so the session still works and
+    // the user only has to log in again after closing the app.
+    if (!this.secureStore) {
       this.tokenStorageType = null;
-      
-      Alert.alert(
-        'Security Error',
-        'Cannot securely store authentication. Please enable device security (passcode/biometrics).',
-        [{ text: 'OK' }]
-      );
-      
       throw new Error('Secure storage not available');
     }
 
     try {
       await this.secureStore.setItemAsync(STORAGE_KEYS.AUTH_TOKEN, token, CONFIG.SECURE_STORE_OPTIONS);
       this.tokenStorageType = 'secure';
+      this.isSecureStoreAvailable = true;
+      this.secureStoreUnavailable = false;
       logger.info('Token saved to SecureStore');
     } catch (error) {
       logger.error('Failed to save token to SecureStore:', error);
-      
       // NEVER fallback to AsyncStorage for tokens
       this.tokenStorageType = null;
-      // CRASH FIX: Mark SecureStore as unavailable to prevent repeated failures
-      this.secureStoreUnavailable = true;
-      
-      Alert.alert(
-        'Security Error',
-        'Cannot securely store authentication. Please enable device security (passcode/biometrics).',
-        [{ text: 'OK' }]
-      );
-      
       throw new Error('Secure storage not available');
     }
   }

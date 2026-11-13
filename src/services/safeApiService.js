@@ -404,7 +404,13 @@ class SafeApiService {
       this.refreshToken = refreshToken;
       
       if (token) {
-        await getSafeStorage().setToken(token);
+        // The token is already live in memory above; failing to persist it only means logging
+        // in again after the app is closed, and must not stop the refresh token being stored
+        try {
+          await getSafeStorage().setToken(token);
+        } catch (storeError) {
+          console.warn('Could not persist the auth token:', storeError?.message);
+        }
         if (refreshToken) {
           await getSafeStorage().setItem('fashion_color_wheel_refresh_token', refreshToken);
         }

@@ -1,7 +1,6 @@
 // Simple login state hook
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 // CRASH FIX: Lazy-load expo-haptics to prevent native bridge access at module load time
-import { safeStorage } from '../../utils/safeStorage';
 
 // Lazy expo-haptics getter to avoid module-load-time native bridge access
 let _haptics = null;
@@ -23,7 +22,6 @@ import { safeAsyncStorage } from '../../utils/safeAsyncStorage';
 import ApiService from '../../services/safeApiService';
 import { debounce } from '../../utils/throttledCallbacks';
 import { validateForm, validateEmail, parseLoginResponse, getErrorMessage, withTimeout, createDemoUser, TIMEOUTS, sanitizeEmail, sanitizePassword } from './constants';
-import { STORAGE_KEYS } from '../../constants/storageKeys';
 
 // Lazy logger proxy to avoid circular import crashes
 let _loggerInstance = null;
@@ -209,64 +207,17 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
 
   // SAFER: Save session with transaction safety
   const saveSession = useCallback(async ({ user, token, refreshToken = null }) => {
+    // The user record is persisted by AuthContext once onLoginSuccess runs; all that is needed
+    // here is to hand the tokens to the API client, which keeps them in memory and in the
+    // keychain. (This used to also write to STORAGE_KEYS.userData/authToken/isLoggedIn, which do
+    // not exist: removing an undefined key made the keychain look broken and raised a
+    // "Security Error" alert.)
     try {
-      // Write-then-swap pattern to avoid partial state
-      const tempUserKey = '__temp_userData';
-      const tempTokenKey = '__temp_authToken';
-      const tempLoggedInKey = '__temp_isLoggedIn';
-
-      const writeOps = [
-        safeStorage.setItem(tempUserKey, JSON.stringify(user)),
-        safeStorage.setItem(tempLoggedInKey, 'true'),
-      ];
-      if (token) {
-        writeOps.push(safeStorage.setItem(tempTokenKey, token));
-      }
-      await Promise.all(writeOps);
-
-      // Swap to real keys atomically
-      await Promise.all([
-        safeStorage.removeItem(STORAGE_KEYS.userData),
-        safeStorage.removeItem(STORAGE_KEYS.authToken),
-        safeStorage.removeItem(STORAGE_KEYS.isLoggedIn),
-      ]);
-
-      const finalOps = [
-        safeStorage.setItem(STORAGE_KEYS.userData, JSON.stringify(user)),
-        safeStorage.setItem(STORAGE_KEYS.isLoggedIn, 'true'),
-      ];
-      if (token) {
-        finalOps.push(safeStorage.setItem(STORAGE_KEYS.authToken, token));
-      }
-      await Promise.all(finalOps);
-
-      // Hand the tokens to the API client now. It only reads storage at app start, so without
-      // this every signed-in request failed with a 401 until the app was restarted.
       if (token) {
         await ApiService.setToken(token, refreshToken);
       }
-
-      // Clean up temp keys
-      await Promise.all([
-        safeStorage.removeItem(tempUserKey),
-        safeStorage.removeItem(tempTokenKey),
-        safeStorage.removeItem(tempLoggedInKey),
-      ]);
-      
     } catch (error) {
       logger.error('Session save failed:', error);
-      
-      // Clean up partial state on failure
-      try {
-        await Promise.all([
-          safeStorage.removeItem(STORAGE_KEYS.userData),
-          safeStorage.removeItem(STORAGE_KEYS.authToken),
-          safeStorage.removeItem(STORAGE_KEYS.isLoggedIn),
-        ]);
-      } catch (cleanupError) {
-        logger.error('Session cleanup failed:', cleanupError);
-      }
-      
       throw new Error('Failed to save login session');
     }
   }, []);
@@ -432,36 +383,9 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
       logger.info('Using local demo fallback');
       
       try {
+        // Offline demo: no account on the server, so no token. AuthContext stores the user.
         const demoUser = createDemoUser();
-        
-        // Atomic session write - all or nothing
-        const sessionData = {
-          userData: JSON.stringify(demoUser),
-          isLoggedIn: 'true',
-        };
-        
-        // Try writing to temp keys first
-        await safeStorage.setItem('__temp_userData', sessionData.userData);
-        await safeStorage.setItem('__temp_isLoggedIn', sessionData.isLoggedIn);
-        
-        // Then atomically move to real keys
-        await Promise.all([
-          safeStorage.removeItem(STORAGE_KEYS.userData),
-          safeStorage.removeItem(STORAGE_KEYS.authToken),
-          safeStorage.removeItem(STORAGE_KEYS.isLoggedIn),
-        ]);
-        
-        await Promise.all([
-          safeStorage.setItem(STORAGE_KEYS.userData, sessionData.userData),
-          safeStorage.setItem(STORAGE_KEYS.isLoggedIn, sessionData.isLoggedIn),
-        ]);
-        
-        // Clean up temp keys
-        await Promise.all([
-          safeStorage.removeItem('__temp_userData'),
-          safeStorage.removeItem('__temp_isLoggedIn'),
-        ]);
-        
+
         // Haptic feedback for local demo success
         try {
           await getHaptics().notificationAsync(getHaptics().NotificationFeedbackType.Success);
@@ -476,15 +400,6 @@ export const useOptimizedLoginState = (onLoginSuccess) => {
         
       } catch (localError) {
         logger.error('Local demo fallback failed:', localError);
-        
-        // Rollback - clear all session data
-        await Promise.all([
-          safeStorage.removeItem(STORAGE_KEYS.userData),
-          safeStorage.removeItem(STORAGE_KEYS.authToken),
-          safeStorage.removeItem(STORAGE_KEYS.isLoggedIn),
-          safeStorage.removeItem('__temp_userData'),
-          safeStorage.removeItem('__temp_isLoggedIn'),
-        ]);
         
         if (isMountedRef.current) {
           setGlobalError('Demo login failed. Please try again.');
